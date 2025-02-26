@@ -9,5 +9,10 @@ mode = tokenizer.Tokenizer.SplitMode.B
 for line in sys.stdin:
     line = line.strip()
     list = tokenizer_obj.tokenize(line, mode)
-    print( [m.reading_form() for m in list] )
+    for m in list:
+        print(f"{m.reading_form()} ", end="")
+
+print("\n")
+
+    
 

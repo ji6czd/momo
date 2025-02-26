@@ -1,6 +1,8 @@
 from sudachipy import tokenizer
 from sudachipy import dictionary
+import braillel_rules_pb2
 import sys
+
 tokenizer_obj = dictionary.Dictionary().create()
 mode = tokenizer.Tokenizer.SplitMode.B
 

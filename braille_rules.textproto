@@ -6,6 +6,10 @@ rule {
     name: "助詞"
     before_space: false
   }
+  next_pos {
+    name: "動詞"
+    before_space: true
+  }
 }
 rule {
   current_pos {
@@ -20,7 +24,29 @@ rule {
   current_pos {
     name: "動詞"
   }
-    next_pos {
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "助動詞"
+  }
+  next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "助詞"
+  }
+  next_pos {
     name: "助詞"
     before_space: false
   }

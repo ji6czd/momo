@@ -1,0 +1,19 @@
+syntax = "proto2";
+
+package braillel_rules;
+
+message PartOfSpeech {
+  required string name = 1;
+  required bool before_space = 2;
+  required bool after_space = 3;
+  required bool allow_line_break = 4;
+}
+
+message Rule {
+  required PartOfSpeech current_pos = 1;
+  repeated PartOfSpeech next_pos = 2;
+}
+
+message BrailleRules {
+  repeated Rule rule = 1;
+}

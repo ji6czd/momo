@@ -1,0 +1,27 @@
+rule {
+  current_pos {
+    name: "名詞"
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "代名詞"
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "動詞"
+  }
+    next_pos {
+    name: "助詞"
+    before_space: false
+  }
+}

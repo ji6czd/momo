@@ -4,6 +4,7 @@ package braillel_rules;
 
 message PartOfSpeech {
   required string name = 1;
+  optional string word = 5;
   required bool before_space = 2;
   required bool after_space = 3;
   required bool allow_line_break = 4;

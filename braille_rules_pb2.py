@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x62raille_rules.proto\x12\x0e\x62raillel_rules\"a\n\x0cPartOfSpeech\x12\x0c\n\x04name\x18\x01 \x02(\t\x12\x14\n\x0c\x62\x65\x66ore_space\x18\x02 \x02(\x08\x12\x13\n\x0b\x61\x66ter_space\x18\x03 \x02(\x08\x12\x18\n\x10\x61llow_line_break\x18\x04 \x02(\x08\"i\n\x04Rule\x12\x31\n\x0b\x63urrent_pos\x18\x01 \x02(\x0b\x32\x1c.braillel_rules.PartOfSpeech\x12.\n\x08next_pos\x18\x02 \x03(\x0b\x32\x1c.braillel_rules.PartOfSpeech\"2\n\x0c\x42railleRules\x12\"\n\x04rule\x18\x01 \x03(\x0b\x32\x14.braillel_rules.Rule')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x62raille_rules.proto\x12\x0e\x62raillel_rules\"o\n\x0cPartOfSpeech\x12\x0c\n\x04name\x18\x01 \x02(\t\x12\x0c\n\x04word\x18\x05 \x01(\t\x12\x14\n\x0c\x62\x65\x66ore_space\x18\x02 \x02(\x08\x12\x13\n\x0b\x61\x66ter_space\x18\x03 \x02(\x08\x12\x18\n\x10\x61llow_line_break\x18\x04 \x02(\x08\"i\n\x04Rule\x12\x31\n\x0b\x63urrent_pos\x18\x01 \x02(\x0b\x32\x1c.braillel_rules.PartOfSpeech\x12.\n\x08next_pos\x18\x02 \x03(\x0b\x32\x1c.braillel_rules.PartOfSpeech\"2\n\x0c\x42railleRules\x12\"\n\x04rule\x18\x01 \x03(\x0b\x32\x14.braillel_rules.Rule')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,9 +32,9 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'braille_rules_pb2', _global
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_PARTOFSPEECH']._serialized_start=39
-  _globals['_PARTOFSPEECH']._serialized_end=136
-  _globals['_RULE']._serialized_start=138
-  _globals['_RULE']._serialized_end=243
-  _globals['_BRAILLERULES']._serialized_start=245
-  _globals['_BRAILLERULES']._serialized_end=295
+  _globals['_PARTOFSPEECH']._serialized_end=150
+  _globals['_RULE']._serialized_start=152
+  _globals['_RULE']._serialized_end=257
+  _globals['_BRAILLERULES']._serialized_start=259
+  _globals['_BRAILLERULES']._serialized_end=309
 # @@protoc_insertion_point(module_scope)

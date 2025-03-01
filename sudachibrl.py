@@ -32,7 +32,10 @@ def ProcessBrailleRules(tokenizedList):
                 kanaString += "エ"
             else:
                 kanaString += m.reading_form()
+        elif m.part_of_speech()[1] == "数詞" or m.part_of_speech()[0] == "補助記号":
+            kanaString += m.surface()
         else:
+            # それ以外の品詞は、そのまま読みを追加する
             kanaString += m.reading_form()
         # この品詞のルールを、ルールリストに基づいて処理する
         if m_index < len(tokenizedList) - 1:

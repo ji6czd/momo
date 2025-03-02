@@ -11,8 +11,16 @@ rule {
     before_space: true
   }
   next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+  next_pos {
     name: "補助記号"
     before_space: false
+  }
+  next_pos {
+    name: "名詞"
+    before_space: true
   }
 }
 rule {
@@ -41,6 +49,10 @@ rule {
     before_space: false
   }
   next_pos {
+    name: "形状詞"
+    before_space: false
+  }
+  next_pos {
     name: "補助記号"
     before_space: false
   }
@@ -50,7 +62,15 @@ rule {
     name: "助動詞"
   }
   next_pos {
+    name: "助詞"
+    before_space: false
+  }
+  next_pos {
     name: "助動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "終助詞"
     before_space: false
   }
   next_pos {
@@ -73,7 +93,7 @@ rule {
 }
 rule {
   current_pos {
-    name: "補助記号"
+    name: "句点"
     before_space: false
     after_space: false
   }
@@ -95,6 +115,119 @@ rule {
   }
   next_pos {
     name: "助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "補助記号"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "読点"
+    before_space: false
+    after_space: false
+  }
+  next_pos {
+    name: "名詞"
+    before_space: false
+  }
+  next_pos {
+    name: "代名詞"
+    before_space: false
+  }
+  next_pos {
+    name: "動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "補助記号"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "接尾辞"
+    before_space: false
+    after_space: false
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "数詞"
+  }
+  next_pos {
+    name: "名詞"
+    before_space: true
+  }
+  next_pos {
+    name: "助数詞可能"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "助数詞可能"
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助数詞可能"
+  }
+  next_pos {
+    name: "補助記号"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "形状詞"
+  }
+  next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "括弧開"
+  }
+  next_pos {
+    name: "名詞"
+    before_space: false
+  }
+  next_pos {
+    name: "代名詞"
+    before_space: false
+  }
+  next_pos {
+    name: "動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "補助記号"
     before_space: false
   }
 }

@@ -1,55 +1,102 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 from sudachipy import tokenizer
 from sudachipy import dictionary
 import braille_rules
 import pybraille
-import sys
 
 mode = tokenizer.Tokenizer.SplitMode.B
 tokenizer_obj = dictionary.Dictionary().create(mode)
 braille_rules.LoadBrailleRules()
 
-def searchBrailleRule(current_morpheme, next_morpheme):
-    space_flag = True
-    for rule in braille_rules.rules.rule:
-        if current_morpheme.part_of_speech()[0] == rule.current_pos.name:
-            for n_rule in rule.next_pos:
-                if next_morpheme.part_of_speech()[0] == n_rule.name:
-                    space_flag = n_rule.before_space
-                    break
+def score_part_of_speech(morpheme, pos):
+    for index, m_pos in enumerate(morpheme.part_of_speech()):
+        if index <= len(morpheme.part_of_speech()) and m_pos == pos:
+            # print(f"Found: {m_pos} : {pos}")
+            return index
+    # print(f"{m_pos}: Part of speech is not found.")
+    return None
+
+def search_braille_rules(morpheme):
+    max_score = -1
+    rule_index = -1
+    for index, rule in enumerate(braille_rules.rules.rule):
+        score = score_part_of_speech(morpheme, rule.current_pos.name)
+        if score is not None and score > max_score:
+            max_score = score
+            rule_index = index
+    if rule_index < 0:
+        # print(f"{morpheme.reading_form()} is not found in the braille rules.")
+        return None
+    else:
+        # print(f"{rule_index} {morpheme.reading_form()}")
+        return rule_index
+
+def search_next_rule(morpheme, rule):
+    max_score = -1
+    next_index = -1
+    for index, n_rule in enumerate(rule.next_pos):
+        score = score_part_of_speech(morpheme, n_rule.name)
+        if score is not None and score > max_score:
+            max_score = score
+            next_index = index
+    if next_index < 0:
+        return None
+    return next_index
+
+def is_space_required(current_morpheme, next_morpheme):
+    space_flag = True # 与えられた2つの品詞間にスペースが必要かどうか
+    rule_index = search_braille_rules(current_morpheme)
+    if rule_index is not None:
+        rule = braille_rules.rules.rule[rule_index]
+        rule_index = search_next_rule(next_morpheme, rule)
+        if rule_index is not None:
+            space_flag = rule.next_pos[rule_index].before_space
+        else:
+            space_flag = True
+    else:
+        space_flag = True
+    # print(space_flag)
     return space_flag
 
-def ProcessBrailleRules(tokenizedList):
+def is_kana_conversion_required(morphe):
+     if (morphe.part_of_speech()[0] == "補助記号"
+          or morphe.part_of_speech()[0] == "空白"
+          or morphe.part_of_speech()[1] == "数詞"):
+         return False
+     return True
+
+def convert_prolonged_sound_mark(morpheme):
+    # 動詞以外の長音記号を変換する
+    if morpheme.part_of_speech()[0] != "動詞":
+        return morpheme.reading_form().replace("ウ", "ー")
+    return morpheme.reading_form()
+
+def convert_to_kana(src_string):
     kanaString = ""
-    for m_index, m in enumerate(tokenizedList):
-        # 助詞を点字のルールに変換する
+    tokenized_list = tokenizer_obj.tokenize(src_string, mode)
+    for m_index, m in enumerate(tokenized_list):
         if m.part_of_speech()[0] == "助詞":
+            # 助詞は、点字のルールで置換する
             if m.reading_form() == "ハ":
                 kanaString += "ワ"
             elif m.reading_form() == "ヘ":
                 kanaString += "エ"
             else:
                 kanaString += m.reading_form()
-        elif m.part_of_speech()[1] == "数詞" or m.part_of_speech()[0] == "補助記号":
+        elif is_kana_conversion_required(m) == False:
+            # その品詞は、そのまま表記を追加する
             kanaString += m.surface()
         else:
-            # それ以外の品詞は、そのまま読みを追加する
-            kanaString += m.reading_form()
+            # それ以外の品詞は、長音処理を行って読みを追加する
+            kanaString += convert_prolonged_sound_mark(m)
         # この品詞のルールを、ルールリストに基づいて処理する
-        if m_index < len(tokenizedList) - 1:
-            if searchBrailleRule(m, tokenizedList[m_index + 1]):
+        if m_index < len(tokenized_list) - 1:
+            if is_space_required(m, tokenized_list[m_index + 1]):
                 kanaString += " "
     return kanaString
 
 if __name__ == '__main__':
-    print("Input Japanese sentence and hit enter key!")
-    for line in sys.stdin:
-        line = line.strip()
-        list = tokenizer_obj.tokenize(line, mode)
-        kana_string = ProcessBrailleRules(list)
-        print(line)
-        print(kana_string)
-        print(pybraille.to_jp_braille(kana_string))
-    print('end')
+    src = "日本語を点訳しています。モモさんは90点くらいでしょうか。"
+    print(src)
+    print(convert_to_kana(src))

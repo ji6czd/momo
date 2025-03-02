@@ -60,11 +60,13 @@ def is_space_required(current_morpheme, next_morpheme):
     return space_flag
 
 def is_kana_conversion_required(morphe):
-     if (morphe.part_of_speech()[0] == "補助記号"
-          or morphe.part_of_speech()[0] == "空白"
-          or morphe.part_of_speech()[1] == "数詞"):
-         return False
-     return True
+    if (morphe.part_of_speech()[0] == "補助記号"
+        or morphe.part_of_speech()[0] == "空白"
+        or morphe.part_of_speech()[1] == "数詞"
+        or morphe.reading_form() == morphe.surface()
+    ):
+        return False
+    return True
 
 def convert_prolonged_sound_mark(morpheme):
     # 動詞以外の長音記号を変換する
@@ -97,6 +99,6 @@ def convert_to_kana(src_string):
     return kanaString
 
 if __name__ == '__main__':
-    src = "日本語を点訳しています。モモさんは90点くらいでしょうか。"
+    src = "ソフトウェア"
     print(src)
     print(convert_to_kana(src))

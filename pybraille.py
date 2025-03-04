@@ -29,12 +29,6 @@ jp_braille_table = {
     'ダ': '⠐⠕', 'ヂ': '⠐⠗', 'ヅ': '⠐⠝', 'デ': '⠐⠟', 'ド': '⠐⠞',
     'バ': '⠐⠥', 'ビ': '⠐⠧', 'ブ': '⠐⠭', 'ベ': '⠐⠯', 'ボ': '⠐⠮',
     'パ': '⠠⠥', 'ピ': '⠠⠧', 'プ': '⠠⠭', 'ペ': '⠠⠯', 'ポ': '⠠⠮',
-    '。': '⠲⠀⠀', '、': '⠰⠀', '・': '⠐⠀', '！': '⠖⠀⠀', '？': '⠢⠀⠀',
-    '「': '⠤', '」': '⠤', 'ー': '⠒',
-    '０': '⠚', '１': '⠁', '２': '⠃', '３': '⠉', '４': '⠙', '５': '⠑', '６': '⠋', '７': '⠛', '８': '⠓', '９': '⠊',
-}
-
-jp_special_character_braille_table = {
     'イェ': '⠈⠋','ウァ': '⠐⠖','ウィ': '⠢⠃','ウェ': '⠢⠋','ウォ': '⠢⠊',
     'キェ': '⠈⠫','キャ': '⠈⠡','キュ': '⠈⠩','キョ': '⠈⠪','クァ': '⠢⠡','クィ': '⠢⠣','クェ': '⠢⠫','クォ': '⠢⠪',
     'シェ': '⠈⠻','シャ': '⠈⠱','シュ': '⠈⠹','ショ': '⠈⠺','スィ': '⠈⠳',
@@ -48,7 +42,12 @@ jp_special_character_braille_table = {
     'ジェ': '⠘⠻','ジャ': '⠘⠱','ジュ': '⠘⠹','ジョ': '⠘⠺',
     'ヂェ': '⠘⠟','ヂャ': '⠘⠕','ヂュ': '⠘⠝','ヂョ': '⠘⠞','ディ': '⠘⠗','デュ': '⠸⠝','ドゥ': '⠲⠝',
     'ビャ': '⠘⠥','ビュ': '⠘⠭','ビョ': '⠘⠮','ピャ': '⠨⠥','ピュ': '⠨⠭','ピョ': '⠨⠮',
+    '。': '⠲⠀⠀', '、': '⠰⠀', '・': '⠐⠀', '！': '⠖⠀⠀', '？': '⠢⠀⠀',
+    '「': '⠤', '」': '⠤', 'ー': '⠒',
+    '０': '⠚', '１': '⠁', '２': '⠃', '３': '⠉', '４': '⠙', '５': '⠑', '６': '⠋', '７': '⠛', '８': '⠓', '９': '⠊',
 }
+
+small_kana = 'ァィゥェォャュョ'
 
 def to_braille(text):
     return ''.join([en_braille_table.get(c, ' ') for c in text.lower()])
@@ -56,9 +55,13 @@ def to_braille(text):
 def to_jp_braille(text):
     normalized_text = unicodedata.normalize('NFKC', text)
     braille_str = ""
-    inDigitFlag = False
-    inCapitalWordFlag = False
-    for c in normalized_text:
+    inDigitFlag = False # 数字中にTrue
+    inCapitalWordFlag = False # 英文字列中 True
+    skip = False # 特殊音で次の文字をスキップ
+    for index, c in enumerate(normalized_text):
+        if skip:
+            skip = False
+            continue
         if c.isdigit():
             if not inDigitFlag:
                 braille_str += numerical_sign
@@ -67,6 +70,12 @@ def to_jp_braille(text):
             continue
         else:
             inDigitFlag = False
+        # １文字ずつ点字に変換
+        if (index+1 < len(normalized_text)
+            and small_kana.find(normalized_text[index+1]) != -1):
+            # 特殊文字処理
+            c = normalized_text[index] + normalized_text[index + 1]
+            skip = True # 2文字処理したので次はスキップ
         braille_str += jp_braille_table.get(c, '⠀')
     return braille_str
 
@@ -75,4 +84,4 @@ if __name__ == '__main__':
     print(to_jp_braille("コンニチワ、セカイ！"))
     print(to_jp_braille("12345"))
     print(to_jp_braille("３ネン ２クミ"))
-    print(f"Table size = {len(jp_braille_table)} {sys.getsizeof(jp_braille_table)}")
+    print(to_jp_braille("ワタシワ ベンキョーガ キライナノデチュ。ヴァイオリンノ レンシューワ モット キライニャニェニョーー。"))

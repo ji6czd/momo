@@ -70,9 +70,14 @@ def is_kana_conversion_required(morphe):
 
 def convert_prolonged_sound_mark(morpheme):
     # 動詞以外の長音記号を変換する
+    ret = list(morpheme.reading_form())
     if morpheme.part_of_speech()[0] != "動詞":
-        return morpheme.reading_form().replace("ウ", "ー")
-    return morpheme.reading_form()
+        for index in range(len(ret)):
+            if index == 0:
+                continue
+            if ret[index] == "ウ":
+                ret[index] = 'ー'
+    return "".join(ret)
 
 def convert_to_kana(src_string):
     kanaString = ""

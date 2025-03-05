@@ -35,6 +35,10 @@ rule {
     name: "補助記号"
     before_space: false
   }
+  next_pos {
+    name: "括弧開"
+    before_space: true
+  }
 }
 rule {
   current_pos {
@@ -89,6 +93,10 @@ rule {
   next_pos {
     name: "補助記号"
     before_space: false
+  }
+  next_pos {
+    name: "括弧開"
+    before_space: true
   }
 }
 rule {
@@ -176,6 +184,10 @@ rule {
     name: "助数詞可能"
     before_space: false
   }
+  next_pos {
+    name: "数詞"
+    before_space: false
+  }
 }
 rule {
   current_pos {
@@ -217,6 +229,35 @@ rule {
   next_pos {
     name: "動詞"
     before_space: false
+  }
+  next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "補助記号"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "括弧閉"
+  }
+  next_pos {
+    name: "名詞"
+    before_space: true
+  }
+  next_pos {
+    name: "代名詞"
+    before_space: true
+  }
+  next_pos {
+    name: "動詞"
+    before_space: true
   }
   next_pos {
     name: "助動詞"

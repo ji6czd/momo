@@ -3,7 +3,7 @@ from google.protobuf import text_format
 import sys
 rules = braille_rules_pb2.BrailleRules()
 
-def CreateBrailleRules():
+def create_braille_rules():
     rules = braille_rules_pb2.BrailleRules()
     # '名詞'
     rule = rules.rule.add()
@@ -13,11 +13,11 @@ def CreateBrailleRules():
     n_pos.before_space = False
     return rules
 
-def WriteBrailleRules():
+def write_braille_rules():
     with open('backup.textproto', 'w') as f:
         f.write(text_format.MessageToString(rules))
 
-def LoadBrailleRules():
+def load_b_railleRules():
     try:
         with open('braille_rules.textproto', 'r') as f:
             text_format.Parse(f.read(), rules)
@@ -27,5 +27,5 @@ def LoadBrailleRules():
         print(f"Error: An I/O error occurred: {e}", file=sys.stderr)
 
 if __name__ == '__main__':
-    LoadBrailleRules()
+    load_b_railleRules()
     WriteBrailleRules()

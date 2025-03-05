@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
+from typing import Optional
 
 from sudachipy import tokenizer
 from sudachipy import dictionary
+from sudachipy import config
+from sudachipy import MorphemeList, Morpheme
 import braille_rules
 import pybraille
 
 mode = tokenizer.Tokenizer.SplitMode.B
 tokenizer_obj = dictionary.Dictionary().create(mode)
-braille_rules.LoadBrailleRules()
+braille_rules.load_b_railleRules()
 
-def score_part_of_speech(morpheme, pos):
+def score_part_of_speech(morpheme: Morpheme, pos) -> Optional[int]:
     for index, m_pos in enumerate(morpheme.part_of_speech()):
         if index <= len(morpheme.part_of_speech()) and m_pos == pos:
             # print(f"Found: {m_pos} : {pos}")
@@ -17,7 +20,7 @@ def score_part_of_speech(morpheme, pos):
     # print(f"{m_pos}: Part of speech is not found.")
     return None
 
-def search_braille_rules(morpheme):
+def search_braille_rules(morpheme: Morpheme) -> Optional[int]:
     max_score = -1
     rule_index = -1
     for index, rule in enumerate(braille_rules.rules.rule):
@@ -32,7 +35,7 @@ def search_braille_rules(morpheme):
         # print(f"{rule_index} {morpheme.reading_form()}")
         return rule_index
 
-def search_next_rule(morpheme, rule):
+def search_next_rule(morpheme: Morpheme, rule) -> Optional[int]:
     max_score = -1
     next_index = -1
     for index, n_rule in enumerate(rule.next_pos):
@@ -44,8 +47,8 @@ def search_next_rule(morpheme, rule):
         return None
     return next_index
 
-def is_space_required(current_morpheme, next_morpheme):
-    space_flag = True # 与えられた2つの品詞間にスペースが必要かどうか
+def is_space_required(current_morpheme: Morpheme, next_morpheme: Morpheme) -> bool:
+    space_flag: bool = True # 与えられた2つの品詞間にスペースが必要かどうか
     rule_index = search_braille_rules(current_morpheme)
     if rule_index is not None:
         rule = braille_rules.rules.rule[rule_index]
@@ -59,7 +62,7 @@ def is_space_required(current_morpheme, next_morpheme):
     # print(space_flag)
     return space_flag
 
-def is_kana_conversion_required(morphe):
+def is_kana_conversion_required(morphe: Morpheme):
     if (morphe.part_of_speech()[0] == "補助記号"
         or morphe.part_of_speech()[0] == "空白"
         or morphe.part_of_speech()[1] == "数詞"
@@ -79,9 +82,9 @@ def convert_prolonged_sound_mark(morpheme):
                 ret[index] = 'ー'
     return "".join(ret)
 
-def convert_to_kana(src_string):
-    kanaString = ""
-    tokenized_list = tokenizer_obj.tokenize(src_string, mode)
+def convert_to_kana(src_string: str):
+    kanaString: str = ""
+    tokenized_list = tokenizer_obj.tokenize(src_string)
     for m_index, m in enumerate(tokenized_list):
         if m.part_of_speech()[0] == "助詞":
             # 助詞は、点字のルールで置換する

@@ -14,10 +14,9 @@ braille_rules.load_b_railleRules()
 
 def score_part_of_speech(morpheme: Morpheme, pos) -> Optional[int]:
     for index, m_pos in enumerate(morpheme.part_of_speech()):
-        if index <= len(morpheme.part_of_speech()) and m_pos == pos:
-            # print(f"Found: {m_pos} : {pos}")
+        if (index <= len(morpheme.part_of_speech())
+        and (m_pos == pos or pos == '*')):
             return index
-    # print(f"{m_pos}: Part of speech is not found.")
     return None
 
 def search_braille_rules(morpheme: Morpheme) -> Optional[int]:
@@ -29,10 +28,8 @@ def search_braille_rules(morpheme: Morpheme) -> Optional[int]:
             max_score = score
             rule_index = index
     if rule_index < 0:
-        # print(f"{morpheme.reading_form()} is not found in the braille rules.")
         return None
     else:
-        # print(f"{rule_index} {morpheme.reading_form()}")
         return rule_index
 
 def search_next_rule(morpheme: Morpheme, rule) -> Optional[int]:
@@ -56,9 +53,9 @@ def is_space_required(current_morpheme: Morpheme, next_morpheme: Morpheme) -> bo
         if rule_index is not None:
             space_flag = rule.next_pos[rule_index].before_space
         else:
-            space_flag = True
+            space_flag = False
     else:
-        space_flag = True
+        space_flag = False
     # print(space_flag)
     return space_flag
 

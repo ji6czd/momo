@@ -8,9 +8,13 @@ from sudachipy import MorphemeList, Morpheme
 import braille_rules
 import pybraille
 
-mode = tokenizer.Tokenizer.SplitMode.B
+mode = tokenizer.Tokenizer.SplitMode.C
 tokenizer_obj = dictionary.Dictionary().create(mode)
 braille_rules.load_b_railleRules()
+
+def is_english_alphanumeric(word: str) -> bool:
+    # isalnum()で英数字かどうかを判定しつつ、isascii()でASCII文字のみかをチェック
+    return word.isalnum() and all(ch.isascii() for ch in word)
 
 def score_part_of_speech(morpheme: Morpheme, pos) -> Optional[int]:
     for index, m_pos in enumerate(morpheme.part_of_speech()):
@@ -56,20 +60,22 @@ def is_space_required(current_morpheme: Morpheme, next_morpheme: Morpheme) -> bo
             space_flag = False
     else:
         space_flag = False
-    # print(space_flag)
     return space_flag
 
-def is_kana_conversion_required(morphe: Morpheme):
+def is_kana_conversion_required(morphe: Morpheme) -> bool:
     if (morphe.part_of_speech()[0] == "補助記号"
         or morphe.part_of_speech()[0] == "空白"
         or morphe.part_of_speech()[1] == "数詞"
         or morphe.reading_form() == morphe.surface()
+        or is_english_alphanumeric(morphe.surface()) == True
     ):
         return False
     return True
 
-def convert_prolonged_sound_mark(morpheme):
+def convert_prolonged_sound_mark(morpheme: Morpheme) -> str:
     # 動詞以外の長音記号を変換する
+    # カタカナ語は変換しない
+    # 先頭が「ウ」の場合は変換しない
     ret = list(morpheme.reading_form())
     if morpheme.part_of_speech()[0] != "動詞":
         for index in range(len(ret)):

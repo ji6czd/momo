@@ -63,6 +63,10 @@ rule {
     before_space: true
   }
   next_pos {
+    name: "副詞"
+    before_space: true
+  }
+  next_pos {
     name: "*"
     before_space: false
   }
@@ -129,6 +133,23 @@ rule {
   }
   next_pos {
     name: "動詞"
+    before_space: true
+  }
+}
+rule {
+  current_pos {
+    name: "接尾辞"
+  }
+  next_pos {
+    name: "名詞"
+    before_space: true
+  }
+  next_pos {
+    name: "動詞"
+    before_space: true
+  }
+  next_pos {
+    name: "形容詞"
     before_space: true
   }
 }

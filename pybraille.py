@@ -7,6 +7,7 @@ import sys
 
 en_braille_table = {
     '0': '⠚', '1': '⠁', '2': '⠃', '3': '⠉', '4': '⠙', '5': '⠑', '6': '⠋', '7': '⠛', '8': '⠓', '9': '⠊',
+    '!': '⠖', '?': '⠢', '.': '⠲', ',': '⠄', ':': '⠒', ';': '⠆', '-': '⠤', '(': '⠦', ')': '⠴', '/': '⠌',
     ' ': '⠀', 'a': '⠁', 'b': '⠃', 'c': '⠉', 'd': '⠙', 'e': '⠑', 'f': '⠋', 'g': '⠛', 'h': '⠓', 'i': '⠊', 'j': '⠚',
     'k': '⠅', 'l': '⠇', 'm': '⠍', 'n': '⠝', 'o': '⠕', 'p': '⠏', 'q': '⠟', 'r': '⠗', 's': '⠎', 't': '⠞',
     'u': '⠥', 'v': '⠧', 'w': '⠺', 'x': '⠭', 'y': '⠽', 'z': '⠵',}
@@ -14,6 +15,7 @@ en_braille_table = {
 numerical_sign = '⠼'
 capital_sign = '⠠'
 foreign_word_sign = '⠰'
+space_sign = '⠀'
 
 jp_braille_table = {
     ' ': '⠀', 'ア': '⠁', 'イ': '⠃', 'ウ': '⠉', 'エ': '⠋', 'オ': '⠊',
@@ -51,10 +53,10 @@ jp_braille_table = {
 
 small_kana = 'ァィゥェォャュョ'
 
-def to_braille(text):
+def to_braille(text: str) -> str:
     return ''.join([en_braille_table.get(c, ' ') for c in text.lower()])
 
-def to_jp_braille(text):
+def to_jp_braille(text: str) -> str:
     normalized_text = unicodedata.normalize('NFKC', text)
     braille_str = ""
     inDigitFlag = False # 数字中にTrue
@@ -68,47 +70,54 @@ def to_jp_braille(text):
             # 特殊音などで直前のループで処理済みの文字をスキップ
             skip = False
             continue
-        if c.isdigit():
-            if not inDigitFlag:
-                braille_str += numerical_sign
-                inDigitFlag = True
-            braille_str += en_braille_table.get(c, '⠀')
-            continue
-        else:
-            inDigitFlag = False
-        # １文字ずつ点字に変換
-        if ord(c) < 0x7f and c.isalpha():
-            # 英数字処理、まずは外字符
-            if inForeignWordFlag == False:
-                braille_str += foreign_word_sign
-                inForeignWordFlag = True
-
-            # 英字でなければinForeignWordFlagの効力がなくなる
-            if (inForeignWordFlag == True
-                and c.isalpha()) == False:
-                inForeignWordFlag = False
-            if c.isupper():
-                if inCapitalWordFlag == False:
-                    braille_str += capital_sign
-                    inCapitalWordFlag = True
-                    if (index < len(normalized_text)-1
-                        and normalized_text[index+1].isupper()):
-                        inDoubleCapitalFlag = True
-                        braille_str += capital_sign
-                c = c.lower()
-            else:
-                if inDoubleCapitalFlag == True:
-                    inDoubleCapitalFlag = False
+        # １文字ずつ処理
+        if ord(c) < 0x7f:
+            # ASCII文字
+            if c.isalpha():
+                inDigitFlag = False
+                if inForeignWordFlag == False:
                     braille_str += foreign_word_sign
-                inCapitalWordFlag = False
-            braille_str += en_braille_table.get(c, '⠀')
-            continue
-        elif (index+1 < len(normalized_text)
+                    inForeignWordFlag = True
+                if c.isupper():
+                    if inCapitalWordFlag == False:
+                        braille_str += capital_sign
+                    inCapitalWordFlag = True
+                    if (index+1 < len(normalized_text)
+                        and normalized_text[index+1].isupper()
+                        and inDoubleCapitalFlag == False):
+                        braille_str += capital_sign
+                        inDoubleCapitalFlag = True
+                elif inCapitalWordFlag:
+                    inCapitalWordFlag = False
+                    inDoubleCapitalFlag == False
+            elif c.isnumeric():
+                inForeignWordFlag = False
+                if inDigitFlag == False:
+                    braille_str += numerical_sign
+                inDigitFlag = True
+            elif (c == '.'
+            or c == ','):
+                # 数字の小数点、カンマである可能性
+                # 数字フラグはリセットしない
+                inForeignWordFlag == False
+            else:
+                # その他の文字でも外国語フラグをリセット
+                inForeignWordFlag = False
+                inDigitFlag = False
+            braille_str += en_braille_table.get(c.lower(), ' ')
+        else:
+            # 日本語文字
+            if inForeignWordFlag:
+                braille_str += space_sign
+            inForeignWordFlag = False
+            inCapitalWordFlag = False
+            inDigitFlag = False
+            if (index+1 < len(normalized_text)
             and small_kana.find(normalized_text[index+1]) != -1):
-            # 特殊文字処理
-            c = normalized_text[index] + normalized_text[index + 1]
-            skip = True # 2文字処理したので次はスキップ
-        braille_str += jp_braille_table.get(c, '⠀')
+                # 特殊文字処理
+                c = normalized_text[index] + normalized_text[index + 1]
+                skip = True # 2文字処理したので次はスキップ
+            braille_str += jp_braille_table.get(c, '⠀')
     return braille_str
 
 if __name__ == '__main__':
@@ -118,3 +127,5 @@ if __name__ == '__main__':
     print(to_jp_braille("３ネン ２クミ"))
     print(to_jp_braille("ワタシワ ベンキョーガ キライナノデチュ。ヴァイオリンノ レンシューワ モット キライニャニェニョーー。"))
     print(to_jp_braille("NHK ラジオ ダイ１ノ シューハスーワ ５９４kHz デス。"))
+    print(to_jp_braille("33min45sec"))
+    print(to_jp_braille("エンシューリツワ、3.141592 グライデショー。"))

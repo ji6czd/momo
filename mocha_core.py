@@ -85,6 +85,23 @@ def convert_prolonged_sound_mark(morpheme: Morpheme) -> str:
                 ret[index] = 'ー'
     return "".join(ret)
 
+def correct_counter_suffix_reading(morphemeNum: Morpheme, morphemeCounter: Morpheme) -> str:
+    # 助数詞の読みを修正する
+    reading = morphemeCounter.reading_form()
+    if score_part_of_speech(morphemeCounter, "助数詞") is not None:
+        reading = morphemeCounter.reading_form()
+        # "ハヒフヘホ"で始まる助数詞を直前の数字に従って修正する
+        if reading[0] in "ハヒフヘホ":
+            if morphemeCounter.surface() in "匹":
+                # 直前の数字が「1,6,8」の場合は、読みをパ行に変更する
+                # 直前の数字が「3」の場合は、読みをバ行に変更する
+                number = morphemeNum.surface()
+                if number[len(number)-1] in "168":
+                    reading = chr(ord(reading[0])+2) + reading[1:]
+                elif number[len(number)-1] == "3":
+                    reading = chr(ord(reading[0])+1) + reading[1:]
+    return reading
+
 def convert_to_kana(src_string: str):
     kanaString: str = ""
     tokenized_list = tokenizer_obj.tokenize(src_string)
@@ -100,6 +117,9 @@ def convert_to_kana(src_string: str):
         elif is_kana_conversion_required(m) == False:
             # その品詞は、そのまま表記を追加する
             kanaString += m.surface()
+        elif score_part_of_speech(m, "助数詞") is not None:
+            # 助数詞の読みを修正する
+            kanaString += correct_counter_suffix_reading(tokenized_list[m_index - 1], m)
         else:
             # それ以外の品詞は、長音処理を行って読みを追加する
             kanaString += convert_prolonged_sound_mark(m)

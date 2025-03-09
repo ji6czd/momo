@@ -10,7 +10,7 @@ import pybraille
 
 mode = tokenizer.Tokenizer.SplitMode.C
 tokenizer_obj = dictionary.Dictionary().create(mode)
-braille_rules.load_b_railleRules()
+braille_rules.load_braille_rules()
 
 def is_english_alphanumeric(word: str) -> bool:
     # isalnum()で英数字かどうかを判定しつつ、isascii()でASCII文字のみかをチェック

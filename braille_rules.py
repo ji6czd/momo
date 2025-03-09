@@ -17,9 +17,9 @@ def write_braille_rules():
     with open('backup.textproto', 'w') as f:
         f.write(text_format.MessageToString(rules))
 
-def load_b_railleRules():
+def load_braille_rules():
     try:
-        with open('braille_rules.textproto', 'r') as f:
+        with open('braille_rules.textproto', 'r', encoding='utf-8') as f:
             text_format.Parse(f.read(), rules)
     except FileNotFoundError:
         print("Error: The file 'braille_rules.textproto' was not found.", file=sys.stderr)
@@ -27,5 +27,5 @@ def load_b_railleRules():
         print(f"Error: An I/O error occurred: {e}", file=sys.stderr)
 
 if __name__ == '__main__':
-    load_b_railleRules()
+    load_braille_rules()
     WriteBrailleRules()

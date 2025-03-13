@@ -4,16 +4,16 @@
 
 ## 準備
 
-```
-$ pip install sudachipy
-$ pip install sudachidict_core
-$ pip install protobuf
+``` bash
+pip install sudachipy
+pip install sudachidict_core
+pip install protobuf
 ```
 
 ## 変換してみる
 
-```
-$ ./momo
+``` bash
+./momo
 ```
 
 標準入力からデータを読み込みます。現在変換できそうな文字種については、sample_dataディレクトリを確認してください。

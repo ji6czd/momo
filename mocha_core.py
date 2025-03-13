@@ -8,7 +8,7 @@ from sudachipy import MorphemeList, Morpheme
 import braille_rules
 import pybraille
 
-mode = tokenizer.Tokenizer.SplitMode.C
+mode = tokenizer.Tokenizer.SplitMode.B
 tokenizer_obj = dictionary.Dictionary().create(mode)
 braille_rules.load_braille_rules()
 

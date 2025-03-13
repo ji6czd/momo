@@ -19,6 +19,10 @@ rule {
     name: "括弧開"
     before_space: true
   }
+  next_pos {
+    name: "括弧閉"
+    before_space: false
+  }
 }
 rule {
   current_pos {
@@ -63,7 +67,15 @@ rule {
     before_space: true
   }
   next_pos {
+    name: "連体詞"
+    before_space: true
+  }
+  next_pos {
     name: "副詞"
+    before_space: true
+  }
+  next_pos {
+    name: "括弧開"
     before_space: true
   }
   next_pos {
@@ -104,6 +116,15 @@ rule {
   next_pos {
     name: "助数詞可能"
     before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "連体詞"
+  }
+  next_pos {
+    name: "*"
+    before_space: true
   }
 }
 rule {

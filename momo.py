@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from mocha_core import convert_to_kana
+from momo_core import convert_to_kana
 import pybraille
 import sys
 

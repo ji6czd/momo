@@ -59,6 +59,10 @@ rule {
     before_space: true
   }
   next_pos {
+    name: "代名詞"
+    before_space: true
+  }
+  next_pos {
     name: "動詞"
     before_space: true
   }

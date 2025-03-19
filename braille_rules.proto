@@ -8,7 +8,7 @@ message PartOfSpeech {
   optional bool after_space = 3;
   optional bool allow_line_break = 4;
   optional string reading_word_match = 5;
-  optional int reading_word_length = 6;
+  optional int32 reading_word_length = 6;
 }
 
 message Rule {

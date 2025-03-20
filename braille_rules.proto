@@ -1,18 +1,18 @@
-syntax = "proto2";
+syntax = "proto3";
 
 package braillel_rules;
 
 message PartOfSpeech {
-  required string name = 1;
-  required bool before_space = 2;
-  optional bool after_space = 3;
-  optional bool allow_line_break = 4;
-  optional string reading_word_match = 5;
-  optional int32 reading_word_length = 6;
+  string name = 1;
+  bool before_space = 2;
+  bool after_space = 3;
+  bool allow_line_break = 4;
+  string reading_word_match = 5;
+  int32 reading_word_length = 6;
 }
 
 message Rule {
-  required PartOfSpeech current_pos = 1;
+  PartOfSpeech current_pos = 1;
   repeated PartOfSpeech next_pos = 2;
 }
 

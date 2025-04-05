@@ -1,26 +1,41 @@
+# 日本語の品詞に基づくルール
+# ルールの先頭から順番に評価され、スコアがつけられる。スコアが最も高いルールが採用される。
+# ルールを追加する際はルールの先頭に簡単な例文を添えること
 rule {
   current_pos {
     name: "名詞"
   }
   next_pos {
-    name: "動詞"
-    before_space: true
-  }
-  next_pos {
     name: "助動詞"
-    before_space: true
+    before_space: false
   }
   next_pos {
-    name: "名詞"
-    before_space: true
-  }
-  next_pos {
-    name: "副詞"
-    before_space: true
+    name: "助詞"
+    before_space: false
   }
   next_pos {
     name: "接続詞"
-    before_space: true
+    before_space: false
+  }
+  next_pos {
+    name: "接続助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "接尾辞"
+    before_space: false
+  }
+  next_pos {
+    name: "読点"
+    before_space: false
+  }
+  next_pos {
+    name: "中点"
+    before_space: false
+  }
+  next_pos {
+    name: "句点"
+    before_space: false
   }
   next_pos {
     name: "括弧閉"
@@ -28,7 +43,7 @@ rule {
   }
   next_pos {
     name: "*"
-    before_space: false
+    before_space: true
   }
 }
 rule {
@@ -36,24 +51,36 @@ rule {
     name: "代名詞"
   }
   next_pos {
-    name: "動詞"
-    before_space: true
-  }
-  next_pos {
     name: "助動詞"
-    before_space: true
+    before_space: false
   }
   next_pos {
-    name: "名詞"
-    before_space: true
-  }
-  next_pos {
-    name: "副詞"
-    before_space: true
+    name: "助詞"
+    before_space: false
   }
   next_pos {
     name: "接続詞"
-    before_space: true
+    before_space: false
+  }
+  next_pos {
+    name: "接続助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "接尾辞"
+    before_space: false
+  }
+  next_pos {
+    name: "読点"
+    before_space: false
+  }
+  next_pos {
+    name: "中点"
+    before_space: false
+  }
+  next_pos {
+    name: "句点"
+    before_space: false
   }
   next_pos {
     name: "括弧閉"
@@ -61,20 +88,41 @@ rule {
   }
   next_pos {
     name: "*"
-    before_space: false
+    before_space: true
   }
 }
 rule {
   current_pos {
     name: "動詞"
   }
+  # 駆け抜ける、言いそびれる
   next_pos {
-    name: "名詞"
-    before_space: true
+    name: "動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助動詞語幹"
+    before_space: false
+  }
+  next_pos {
+    name: "句点"
+    before_space: false
+  }
+  next_pos {
+    name: "読点"
+    before_space: false
   }
   next_pos {
     name: "*"
-    before_space: false
+    before_space: true
   }
 }
 rule {
@@ -87,6 +135,10 @@ rule {
   }
   next_pos {
     name: "助動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助動詞語幹"
     before_space: false
   }
   next_pos {
@@ -136,6 +188,23 @@ rule {
   }
   next_pos {
     name: "括弧閉"
+    before_space: false
+  }
+  next_pos {
+    name: "*"
+    before_space: true
+  }
+}
+rule {
+  current_pos {
+    name: "係助詞"
+  }
+  next_pos {
+    name: "句点"
+    before_space: false
+  }
+  next_pos {
+    name: "読点"
     before_space: false
   }
   next_pos {
@@ -148,11 +217,23 @@ rule {
     name: "形容詞"
   }
   next_pos {
-    name: "名詞"
-    before_space: true
+    name: "助詞"
+    before_space: false
   }
   next_pos {
-    name: "動詞"
+    name: "接尾辞"
+    before_space: false
+  }
+  next_pos {
+    name: "読点"
+    before_space: false
+  }
+    next_pos {
+    name: "句点"
+    before_space: false
+  }
+  next_pos {
+    name: "*"
     before_space: true
   }
 }
@@ -160,12 +241,23 @@ rule {
   current_pos {
     name: "副詞"
   }
+  # おそらくは
   next_pos {
-    name: "名詞"
-    before_space: true
+    name: "助詞"
+    before_space: false
+  }
+  # おそらく、
+  next_pos {
+    name: "読点"
+    before_space: false
+  }
+  # おそらく。
+  next_pos {
+    name: "句点"
+    before_space: false
   }
   next_pos {
-    name: "動詞"
+    name: "*"
     before_space: true
   }
 }
@@ -183,6 +275,10 @@ rule {
     name: "連体詞"
   }
   next_pos {
+    name: "形状詞"
+    before_space: false
+  }
+  next_pos {
     name: "*"
     before_space: true
   }
@@ -225,7 +321,7 @@ rule {
     before_space: false
   }
   next_pos {
-    name: "括弧閉じ"
+    name: "括弧閉"
     before_space: false
   }
   next_pos {
@@ -239,27 +335,6 @@ rule {
   }
   next_pos {
     name: "名詞"
-    before_space: false
-  }
-}
-rule {
-  current_pos {
-    name: "括弧閉"
-  }
-  next_pos {
-    name: "名詞"
-    before_space: true
-  }
-  next_pos {
-    name: "代名詞"
-    before_space: true
-  }
-  next_pos {
-    name: "動詞"
-    before_space: true
-  }
-  next_pos {
-    name: "*"
     before_space: false
   }
 }
@@ -288,6 +363,11 @@ rule {
     name: "名詞"
     before_space: true
   }
+  # あんなちっぽけな動物
+  next_pos {
+    name: "形状詞"
+    before_space: true
+  }
 }
 rule {
   current_pos {
@@ -309,6 +389,42 @@ rule {
   next_pos {
     name: "*"
     before_space: true
+  }
+}
+# 影響が大きいようなので、一度無効化してみよう。
+# 品詞での分類ではなく、なにとつながっているかに着目した分類。うまくいけば、この方法で分類できるかもしれない。
+# rule {
+#   current_pos {
+#     name: "連用形-一般"
+#   }
+#   next_pos {
+#     name: "接続助詞"
+#     before_space: false
+#   }
+#   next_pos {
+#     name: "*"
+#     before_space: true
+#   }
+# }
+rule {
+  current_pos {
+    name: "括弧閉"
+  }
+  next_pos {
+    name: "名詞"
+    before_space: true
+  }
+  next_pos {
+    name: "代名詞"
+    before_space: true
+  }
+  next_pos {
+    name: "動詞"
+    before_space: true
+  }
+  next_pos {
+    name: "*"
+    before_space: false
   }
 }
 rule {

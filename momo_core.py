@@ -122,6 +122,16 @@ def correct_counter_suffix_reading(morphemeNum: Morpheme, morphemeCounter: Morph
         reading = ''
     return reading
 
+def segment_braille_rule(src_string: str):
+    segmented_string: str = ""
+    tokenized_list = tokenizer_obj.tokenize(src_string)
+    for m_index, m in enumerate(tokenized_list):
+        if m_index < len(tokenized_list) - 1:
+            segmented_string += m.surface()
+            if is_space_required(m, tokenized_list[m_index + 1]):
+                segmented_string += " "
+    return segmented_string
+
 def convert_to_kana(src_string: str):
     kanaString: str = ""
     tokenized_list = tokenizer_obj.tokenize(src_string)
@@ -153,6 +163,7 @@ def convert_to_kana(src_string: str):
     return kanaString
 
 if __name__ == '__main__':
-    src = "ソフトウェア"
+    src = "原文を分割する機能も追加してみました。"
     print(src)
+    print(segment_braille_rule(src))
     print(convert_to_kana(src))

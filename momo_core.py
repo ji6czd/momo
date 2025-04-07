@@ -5,8 +5,8 @@ from sudachipy import tokenizer
 from sudachipy import dictionary
 from sudachipy import config
 from sudachipy import MorphemeList, Morpheme
-import braille_rules
-import pybraille
+from . import braille_rules
+from . import pybraille
 
 mode = tokenizer.Tokenizer.SplitMode.B
 tokenizer_obj = dictionary.Dictionary().create(mode)
@@ -166,4 +166,6 @@ if __name__ == '__main__':
     src = "原文を分割する機能も追加してみました。"
     print(src)
     print(segment_braille_rule(src))
-    print(convert_to_kana(src))
+    kana_str = convert_to_kana(src)
+    print(kana_str)
+    print(pybraille.to_jp_braille(kana_str))

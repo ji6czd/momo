@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
 
-from momo_core import convert_to_kana
-from momo_core import segment_braille_rule
-import pybraille
-import sys
+def momo(source: str) -> str:
+    """
+    Convert a Japanese sentence to Braille.
+    :param source: Japanese sentence
+    :return: Braille representation of the sentence
+    """
+    from momo_core import convert_to_kana
+    from momo_core import segment_braille_rule
+    import pybraille
+
+    kana_string: str = convert_to_kana(source)
+    return pybraille.to_jp_braille(kana_string)
 
 if __name__ == '__main__':
+    from momo_core import convert_to_kana
+    from momo_core import segment_braille_rule
+    import pybraille
+    import sys
     print("Input Japanese sentence and hit enter key!")
     line: str = ''
     for line in sys.stdin:

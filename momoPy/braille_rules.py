@@ -1,4 +1,4 @@
-from momo import braille_rules_pb2
+from . import braille_rules_pb2
 from google.protobuf import text_format
 from pathlib import Path
 import sys

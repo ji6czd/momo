@@ -162,6 +162,11 @@ def convert_to_kana(src_string: str):
                 kanaString += " "
     return kanaString
 
+def convert_to_braille(src: str):
+    # 文字列を点字に変換する
+    kana_str = convert_to_kana(src)
+    return pybraille.to_jp_braille(kana_str)
+
 if __name__ == '__main__':
     src = "原文を分割する機能も追加してみました。"
     print(src)

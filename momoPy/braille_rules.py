@@ -1,6 +1,6 @@
 from . import braille_rules_pb2
 from google.protobuf import text_format
-from pathlib import Path
+from importlib import resources
 import sys
 rules = braille_rules_pb2.BrailleRules()
 
@@ -22,11 +22,8 @@ def load_braille_rules():
     """
     Load braille rules from a textproto file.
     """
-    script_dir = Path(__file__).resolve().parent
-    rule_file = script_dir / 'braille_rules.textproto'
     try:
-
-        with open(rule_file, 'r', encoding='utf-8') as f:
+        with resources.open_text('momoPy', 'braille_rules.textproto', encoding='utf-8') as f:
             text_format.Parse(f.read(), rules)
     except FileNotFoundError:
         print("Error: The file 'braille_rules.textproto' was not found.", file=sys.stderr)

@@ -126,10 +126,9 @@ def segment_braille_rule(src_string: str):
     segmented_string: str = ""
     tokenized_list = tokenizer_obj.tokenize(src_string)
     for m_index, m in enumerate(tokenized_list):
-        if m_index < len(tokenized_list) - 1:
-            segmented_string += m.surface()
-            if is_space_required(m, tokenized_list[m_index + 1]):
-                segmented_string += " "
+        segmented_string += m.surface()
+        if is_space_required(m, tokenized_list[m_index + 1]):
+            segmented_string += " "
     return segmented_string
 
 def convert_to_kana(src_string: str):

@@ -6,17 +6,18 @@ import sys
 from sudachipy import tokenizer
 from sudachipy import dictionary
 from sudachipy import Morpheme
-from . import braille_rules_pb2
-
+from .braille_rules_pb2 import BrailleRules
+from .braille_rules_pb2 import Rule
+from .braille_rules_pb2 import PartOfSpeech
 from . import pybraille
 
 mode = tokenizer.Tokenizer.SplitMode.B
 tokenizer_obj = dictionary.Dictionary().create(mode)
-rules = braille_rules_pb2.BrailleRules()
+rules = BrailleRules()
 
 
 def create_braille_rules():
-    rules = braille_rules_pb2.BrailleRules()
+    rules = BrailleRules()
     # '名詞'
     rule = rules.rule.add()
     rule.current_pos.name = "名詞"
@@ -53,9 +54,12 @@ def is_english_alphanumeric(word: str) -> bool:
     return word.isalnum() and all(ch.isascii() for ch in word)
 
 
-def score_part_of_speech(morpheme: Morpheme, pos) -> Optional[int]:
+def score_part_of_speech(morpheme: Morpheme, pos: PartOfSpeech) -> Optional[int]:
     for index, m_pos in enumerate(morpheme.part_of_speech()):
-        if index <= len(morpheme.part_of_speech()) and (m_pos == pos or pos == "*"):
+        print(type(m_pos))
+        if index <= len(morpheme.part_of_speech()) and (
+            m_pos == pos.name or pos.name == "*"
+        ):
             return index
     return None
 
@@ -64,7 +68,7 @@ def search_braille_rules(morpheme: Morpheme) -> Optional[int]:
     max_score = -1
     rule_index = -1
     for index, rule in enumerate(rules.rule):
-        score = score_part_of_speech(morpheme, rule.current_pos.name)
+        score = score_part_of_speech(morpheme, rule.current_pos)
         if score is not None and score > max_score:
             max_score = score
             rule_index = index
@@ -78,13 +82,21 @@ def search_next_rule(morpheme: Morpheme, rule) -> Optional[int]:
     max_score = -1
     next_index = -1
     for index, n_rule in enumerate(rule.next_pos):
-        score = score_part_of_speech(morpheme, n_rule.name)
+        score = score_part_of_speech(morpheme, n_rule)
         if score is not None and score > max_score:
             max_score = score
             next_index = index
     if next_index < 0:
         return None
     return next_index
+
+
+def has_part_of_speech(morpheme: Morpheme, pos: str) -> bool:
+    # 指定された品詞名を持つか確認する
+    for m_pos in enumerate(morpheme.part_of_speech()):
+        if m_pos[1] == pos:
+            return True
+    return False
 
 
 def is_space_required(current_morpheme: Morpheme, next_morpheme: Morpheme) -> bool:
@@ -118,14 +130,14 @@ def convert_prolonged_sound_mark(morpheme: Morpheme) -> str:
     # 動詞以外の長音記号を変換する
     # カタカナ語は変換しない
     # 先頭が「ウ」の場合は変換しない
-    ret = list(morpheme.reading_form())
-    if morpheme.part_of_speech()[0] != "動詞":
-        for index in range(len(ret)):
+    reading_str_as_list = list(morpheme.reading_form())
+    if not has_part_of_speech(morpheme, "動詞"):
+        for index in range(len(reading_str_as_list)):
             if index == 0:
                 continue
-            if ret[index] == "ウ":
-                ret[index] = "ー"
-    return "".join(ret)
+            if reading_str_as_list[index] == "ウ":
+                reading_str_as_list[index] = "ー"
+    return "".join(reading_str_as_list)
 
 
 def correct_counter_suffix_reading(
@@ -133,9 +145,8 @@ def correct_counter_suffix_reading(
 ) -> str:
     # 助数詞の読みを修正する
     reading = morphemeCounter.reading_form()
-    if (
-        score_part_of_speech(morphemeCounter, "助数詞可能") is not None
-        or score_part_of_speech(morphemeCounter, "助数詞") is not None
+    if has_part_of_speech(morphemeCounter, "助数詞可能") or has_part_of_speech(
+        morphemeCounter, "助数詞"
     ):
         reading = morphemeCounter.reading_form()
         number = morphemeNum.surface()

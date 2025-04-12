@@ -54,7 +54,12 @@ def is_english_alphanumeric(word: str) -> bool:
 
 
 def sound_len(s: str) -> int:
-    return len(s)
+    count: int = 0
+    for c in s:
+        if c not in "ァィゥェォャュョ":
+            count += 1
+    print(count)
+    return count
 
 
 def score_part_of_speech(morpheme: Morpheme, pos: PartOfSpeech) -> Optional[int]:

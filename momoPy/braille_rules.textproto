@@ -1,9 +1,65 @@
 # 日本語の品詞に基づくルール
 # ルールの先頭から順番に評価され、スコアがつけられる。スコアが最も高いルールが採用される。
 # ルールを追加する際はルールの先頭に簡単な例文を添えること
+# 2文字以下の名詞 : 北アメリカ
 rule {
   current_pos {
     name: "名詞"
+    reading_word_length_less: 2
+  }
+  next_pos {
+    name: "名詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助動詞"
+    before_space: false
+  }
+  next_pos {
+    name: "助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "接続詞"
+    before_space: false
+  }
+  next_pos {
+    name: "接続助詞"
+    before_space: false
+  }
+  next_pos {
+    name: "接尾辞"
+    before_space: false
+  }
+  next_pos {
+    name: "読点"
+    before_space: false
+  }
+  next_pos {
+    name: "中点"
+    before_space: false
+  }
+  next_pos {
+    name: "句点"
+    before_space: false
+  }
+  next_pos {
+    name: "括弧閉"
+    before_space: false
+  }
+  next_pos {
+    name: "*"
+    before_space: true
+  }
+}
+rule {
+  current_pos {
+    name: "名詞"
+  }
+  next_pos {
+    name: "名詞"
+    reading_word_length_less: 2
+    before_space: false
   }
   next_pos {
     name: "助動詞"

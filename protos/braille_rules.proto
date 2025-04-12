@@ -8,7 +8,9 @@ message PartOfSpeech {
   bool after_space = 3;
   bool allow_line_break = 4;
   string reading_word_match = 5;
-  int32 reading_word_length = 6;
+  string reading_word_match_not = 8;
+  int32 reading_word_length_less = 6;
+  int32 reading_word_length_greater = 7;
 }
 
 message Rule {

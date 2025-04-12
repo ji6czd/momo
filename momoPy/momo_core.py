@@ -7,7 +7,6 @@ from sudachipy import tokenizer
 from sudachipy import dictionary
 from sudachipy import Morpheme
 from .braille_rules_pb2 import BrailleRules
-from .braille_rules_pb2 import Rule
 from .braille_rules_pb2 import PartOfSpeech
 from . import pybraille
 
@@ -54,11 +53,23 @@ def is_english_alphanumeric(word: str) -> bool:
     return word.isalnum() and all(ch.isascii() for ch in word)
 
 
+def sound_len(s: str) -> int:
+    return len(s)
+
+
 def score_part_of_speech(morpheme: Morpheme, pos: PartOfSpeech) -> Optional[int]:
     for index, m_pos in enumerate(morpheme.part_of_speech()):
-        print(type(m_pos))
-        if index <= len(morpheme.part_of_speech()) and (
-            m_pos == pos.name or pos.name == "*"
+        if (
+            index <= len(morpheme.part_of_speech())
+            and (m_pos == pos.name or pos.name == "*")
+            and (
+                pos.reading_word_length_less == 0
+                or sound_len(morpheme.reading_form()) <= pos.reading_word_length_less
+            )
+            and (
+                pos.reading_word_length_greater == 0
+                or sound_len(morpheme.reading_form()) >= pos.reading_word_length_greater
+            )
         ):
             return index
     return None
@@ -93,8 +104,8 @@ def search_next_rule(morpheme: Morpheme, rule) -> Optional[int]:
 
 def has_part_of_speech(morpheme: Morpheme, pos: str) -> bool:
     # 指定された品詞名を持つか確認する
-    for m_pos in enumerate(morpheme.part_of_speech()):
-        if m_pos[1] == pos:
+    for i, m_pos in enumerate(morpheme.part_of_speech()):
+        if m_pos == pos:
             return True
     return False
 
@@ -116,9 +127,9 @@ def is_space_required(current_morpheme: Morpheme, next_morpheme: Morpheme) -> bo
 
 def is_kana_conversion_required(morphe: Morpheme) -> bool:
     if (
-        morphe.part_of_speech()[0] == "補助記号"
-        or morphe.part_of_speech()[0] == "空白"
-        or morphe.part_of_speech()[1] == "数詞"
+        has_part_of_speech(morphe, "補助記号")
+        or has_part_of_speech(morphe, "空白")
+        or has_part_of_speech(morphe, "数詞")
         or morphe.reading_form() == morphe.surface()
         or is_english_alphanumeric(morphe.surface())
     ):

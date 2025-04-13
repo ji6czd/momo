@@ -7,8 +7,8 @@ message PartOfSpeech {
   bool before_space = 2;
   bool after_space = 3;
   bool allow_line_break = 4;
-  repeated string reading_word_match = 5;
-  repeated string reading_word_match_not = 6;
+  repeated string word_match = 5;
+  repeated string word_not_match = 6;
   int32 reading_word_length_less = 7;
   int32 reading_word_length_greater = 8;
 }

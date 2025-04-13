@@ -7,9 +7,11 @@ rule {
   # 例： 点字
   current_pos {
     name: "名詞"
+    name: "代名詞"
     name: "固有名詞"
     name: "副詞"
     name: "形容詞"
+    name: "連体詞"
   }
   # 一般的な自立語が続く
   # 例: 点字図書館
@@ -19,6 +21,9 @@ rule {
     name: "固有名詞"
     name: "人名"
     name: "動詞"
+    name: "形容詞"
+    name: "形状詞"
+    name: "接頭辞"
     before_space: true
   }
 }
@@ -42,9 +47,10 @@ rule {
   # 変換して、→「て」は助詞
   next_pos {
     name: "補助記号"
-    reading_word_match: "。"
-    reading_word_match: "、"
-    reading_word_match: "・"
+    word_match: "！"
+    word_match: "。"
+    word_match: "、"
+    word_match: "・"
     before_space: false
   }
   # その他の品詞が続く
@@ -68,6 +74,9 @@ rule {
     name: "代名詞"
     name: "固有名詞"
     name: "人名"
+    name: "形容詞"
+    name: "形状詞"
+    name: "接頭辞"
     before_space: true
   }
 }

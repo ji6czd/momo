@@ -15,17 +15,6 @@ tokenizer_obj = dictionary.Dictionary().create(mode)
 rules = BrailleRules()
 
 
-def create_braille_rules():
-    rules = BrailleRules()
-    # '名詞'
-    rule = rules.rule.add()
-    rule.current_pos.name = "名詞"
-    n_pos = rule.next_pos.add()
-    n_pos.name = "助詞"
-    n_pos.before_space = False
-    return rules
-
-
 def write_braille_rules():
     with open("backup.textproto", "w") as f:
         f.write(text_format.MessageToString(rules))
@@ -58,15 +47,26 @@ def sound_len(s: str) -> int:
     for c in s:
         if c not in "ァィゥェォャュョ":
             count += 1
-    print(count)
     return count
+
+
+def has_item_in_list(list, item: str):
+    # 指定されたリストに、指定されたアイテムが含まれているか確認する
+    # リストが空ならばTrueをかえす。
+    if not list:
+        return True
+    for i in list:
+        if i == item or i == "*":
+            return True
+    return False
 
 
 def score_part_of_speech(morpheme: Morpheme, pos: PartOfSpeech) -> Optional[int]:
     for index, m_pos in enumerate(morpheme.part_of_speech()):
         if (
             index <= len(morpheme.part_of_speech())
-            and (m_pos == pos.name or pos.name == "*")
+            and has_item_in_list(pos.name, m_pos)
+            and has_item_in_list(pos.reading_word_match, morpheme.reading_form())
             and (
                 pos.reading_word_length_less == 0
                 or sound_len(morpheme.reading_form()) <= pos.reading_word_length_less
@@ -134,7 +134,7 @@ def is_kana_conversion_required(morphe: Morpheme) -> bool:
     if (
         has_part_of_speech(morphe, "補助記号")
         or has_part_of_speech(morphe, "空白")
-        or has_part_of_speech(morphe, "数詞")
+        # or has_part_of_speech(morphe, "数詞")
         or morphe.reading_form() == morphe.surface()
         or is_english_alphanumeric(morphe.surface())
     ):

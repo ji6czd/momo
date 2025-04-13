@@ -21,6 +21,5 @@ def main():
         print(to_jp_braille(kana_string))
     print("end")
 
-
 if __name__ == "__main__":
     main()

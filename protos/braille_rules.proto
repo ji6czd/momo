@@ -3,14 +3,14 @@ syntax = "proto3";
 package braillel_rules;
 
 message PartOfSpeech {
-  string name = 1;
+  repeated string name = 1;
   bool before_space = 2;
   bool after_space = 3;
   bool allow_line_break = 4;
-  string reading_word_match = 5;
-  string reading_word_match_not = 8;
-  int32 reading_word_length_less = 6;
-  int32 reading_word_length_greater = 7;
+  repeated string reading_word_match = 5;
+  repeated string reading_word_match_not = 6;
+  int32 reading_word_length_less = 7;
+  int32 reading_word_length_greater = 8;
 }
 
 message Rule {

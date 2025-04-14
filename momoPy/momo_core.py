@@ -3,7 +3,7 @@ from typing import Optional
 from google.protobuf import text_format
 from importlib import resources
 
-# from loguru import logger
+from loguru import logger
 import sys
 from sudachipy import tokenizer
 from sudachipy import dictionary
@@ -15,8 +15,8 @@ from . import pybraille
 mode = tokenizer.Tokenizer.SplitMode.B
 tokenizer_obj = dictionary.Dictionary().create(mode)
 rules = BrailleRules()
-# logger.debug("Starting MOMO!")
-# logger.remove()
+logger.debug("Starting MOMO!")
+logger.remove()
 
 
 def write_braille_rules():
@@ -32,7 +32,7 @@ def load_braille_rules():
         with resources.open_text(
             "momoPy", "braille_rules.textproto", encoding="utf-8"
         ) as f:
-            # logger.debug("Loading braille rules from file.")
+            logger.debug("Loading braille rules from file.")
             text_format.Parse(f.read(), rules)
     except FileNotFoundError:
         print(
@@ -67,18 +67,21 @@ def has_item_in_list(list, item: str):
 
 
 def score_part_of_speech(morpheme: Morpheme, pos: PartOfSpeech) -> Optional[int]:
-    for index, m_pos in enumerate(morpheme.part_of_speech()):
+    src_pos = morpheme.part_of_speech()
+    src_surface = morpheme.surface()
+    src_reading_form = morpheme.reading_form()
+    for index, m_pos in enumerate(src_pos):
         if (
-            index <= len(morpheme.part_of_speech())
+            index <= len(src_pos)
             and has_item_in_list(pos.name, m_pos)
-            and has_item_in_list(pos.word_match, morpheme.surface())
+            and has_item_in_list(pos.word_match, src_surface)
             and (
                 pos.reading_word_length_less == 0
-                or sound_len(morpheme.reading_form()) <= pos.reading_word_length_less
+                or sound_len(src_reading_form) <= pos.reading_word_length_less
             )
             and (
                 pos.reading_word_length_greater == 0
-                or sound_len(morpheme.reading_form()) >= pos.reading_word_length_greater
+                or sound_len(src_reading_form) >= pos.reading_word_length_greater
             )
         ):
             return index
@@ -97,9 +100,9 @@ def search_braille_rules(morpheme: Morpheme) -> Optional[int]:
     if rule_index < 0:
         return None
     else:
-        # logger.debug(
-        #     f"current_rule: {rule_index}, {morpheme.surface()} {rules.rule[rule_index].current_pos.name}"
-        # )
+        logger.debug(
+            f"current_rule: {rule_index}, {morpheme.surface()} {rules.rule[rule_index].current_pos.name}"
+        )
         return rule_index
 
 
@@ -112,18 +115,19 @@ def search_next_rule(morpheme: Morpheme, rule) -> Optional[int]:
             max_score = score
             next_index = index
     if next_index < 0:
-        # logger.debug(f"next_rule: None, {morpheme.surface()},")
+        logger.debug(f"next_rule: None, {morpheme.surface()},")
         return None
-    # logger.debug(
-    #     f"next_rule: {next_index}, {morpheme.surface()}, {rule.next_pos[next_index].name}"
-    # )
+    logger.debug(
+        f"next_rule: {next_index}, {morpheme.surface()}, {rule.next_pos[next_index].name}"
+    )
     return next_index
 
 
-def has_part_of_speech(morpheme: Morpheme, pos: str) -> bool:
+def has_part_of_speech(morpheme: Morpheme, target_pos: str) -> bool:
     # 指定された品詞名を持つか確認する
-    for i, m_pos in enumerate(morpheme.part_of_speech()):
-        if m_pos == pos:
+    src_pos = morpheme.part_of_speech()
+    for i, m_pos in enumerate(src_pos):
+        if m_pos == target_pos:
             return True
     return False
 

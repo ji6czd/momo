@@ -11,7 +11,7 @@ rule {
     name: "固有名詞"
     name: "副詞"
     name: "形容詞"
-    name: "連体詞"
+    name: "接続詞"
   }
   # 一般的な自立語が続く
   # 例: 点字図書館
@@ -22,6 +22,8 @@ rule {
     name: "人名"
     name: "動詞"
     name: "形容詞"
+    name: "副詞"
+    name: "接続詞"
     name: "形状詞"
     name: "接頭辞"
     before_space: true
@@ -33,14 +35,15 @@ rule {
 rule {
   current_pos {
     name: "助詞"
-    name: "助動詞"
     name: "接尾辞"
   }
   # 助詞が・助動詞続く
   # 例: 私のが、見ました → 「まし」・「た」はどちらも助動詞
+  # 例: 花のように → 「よう」は助動詞の語幹になりうる
   next_pos {
     name: "助詞"
     name: "助動詞"
+    name: "助動詞語幹"
     before_space: false
   }
   # 句読点など
@@ -51,6 +54,13 @@ rule {
     word_match: "。"
     word_match: "、"
     word_match: "・"
+    word_match: "？"
+    word_match: "："
+    word_match: "；"
+    before_space: false
+  }
+  next_pos {
+    name: "括弧閉"
     before_space: false
   }
   # その他の品詞が続く
@@ -66,6 +76,7 @@ rule {
 rule {
   current_pos {
     name: "動詞"
+    name: "助動詞"
   }
   # 自立語
   # 例: 走る人
@@ -74,10 +85,60 @@ rule {
     name: "代名詞"
     name: "固有名詞"
     name: "人名"
+    name: "動詞"
     name: "形容詞"
     name: "形状詞"
     name: "接頭辞"
     before_space: true
+  }
+  # 申すそうだ
+    next_pos {
+    name: "助動詞語幹"
+    before_space: false
+  }
+  # 歌わされる
+  next_pos {
+    name: "未然形-サ"
+    before_space: false
+  }
+  # 句読点など
+  next_pos {
+    name: "補助記号"
+    word_match: "！"
+    word_match: "。"
+    word_match: "、"
+    word_match: "・"
+    word_match: "？"
+    word_match: "："
+    word_match: "；"
+    before_space: false
+  }
+  next_pos {
+    name: "括弧閉"
+    before_space: false
+  }
+}
+rule {
+  current_pos {
+    name: "連体詞"
+  }
+  next_pos {
+    name: "名詞"
+    name: "代名詞"
+    name: "固有名詞"
+    name: "人名"
+    name: "動詞"
+    name: "形容詞"
+    name: "副詞"
+    name: "形状詞"
+    name: "接続詞"
+    name: "接頭辞"
+    name: "連体詞"
+    before_space: true
+  }
+  next_pos {
+    name: "助動詞語幹"
+    before_space: false
   }
 }
 # 数字とそれに関連するルール
@@ -109,6 +170,20 @@ rule {
     before_space: true
   }
 }
+# 語の繋がりによる分類
+# 影響が大きいので、一度無効化
+# rule {
+#   current_pos {
+#     name: "連用形-一般"
+#   }
+#   # 連用形-一般の後に動詞が続く
+#   # 例: 走り出す
+#   next_pos {
+#     name: "動詞"
+#     name: "助動詞"
+#     before_space: false
+#   }
+# }
 # フォールバックルール
 # その他の品詞はとりあえず続けてみる
 rule {

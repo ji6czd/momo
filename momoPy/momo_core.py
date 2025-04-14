@@ -2,6 +2,7 @@
 from typing import Optional
 from google.protobuf import text_format
 from importlib import resources
+from loguru import logger
 import sys
 from sudachipy import tokenizer
 from sudachipy import dictionary
@@ -13,6 +14,7 @@ from . import pybraille
 mode = tokenizer.Tokenizer.SplitMode.B
 tokenizer_obj = dictionary.Dictionary().create(mode)
 rules = BrailleRules()
+logger.debug("Starting MOMO!")
 
 
 def write_braille_rules():
@@ -28,6 +30,7 @@ def load_braille_rules():
         with resources.open_text(
             "momoPy", "braille_rules.textproto", encoding="utf-8"
         ) as f:
+            logger.debug("Loading braille rules from file.")
             text_format.Parse(f.read(), rules)
     except FileNotFoundError:
         print(
@@ -85,12 +88,16 @@ def search_braille_rules(morpheme: Morpheme) -> Optional[int]:
     rule_index = -1
     for index, rule in enumerate(rules.rule):
         score = score_part_of_speech(morpheme, rule.current_pos)
+
         if score is not None and score > max_score:
             max_score = score
             rule_index = index
     if rule_index < 0:
         return None
     else:
+        logger.debug(
+            f"current_rule: {rule_index}, {morpheme.surface()} {rules.rule[rule_index].current_pos.name}"
+        )
         return rule_index
 
 
@@ -103,7 +110,11 @@ def search_next_rule(morpheme: Morpheme, rule) -> Optional[int]:
             max_score = score
             next_index = index
     if next_index < 0:
+        logger.debug(f"next_rule: None, {morpheme.surface()},")
         return None
+    logger.debug(
+        f"next_rule: {next_index}, {morpheme.surface()}, {rule.next_pos[next_index].name}"
+    )
     return next_index
 
 

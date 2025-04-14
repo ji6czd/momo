@@ -15,7 +15,7 @@ mode = tokenizer.Tokenizer.SplitMode.B
 tokenizer_obj = dictionary.Dictionary().create(mode)
 rules = BrailleRules()
 logger.debug("Starting MOMO!")
-
+logger.remove()
 
 def write_braille_rules():
     with open("backup.textproto", "w") as f:

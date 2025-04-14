@@ -66,7 +66,7 @@ def score_part_of_speech(morpheme: Morpheme, pos: PartOfSpeech) -> Optional[int]
         if (
             index <= len(morpheme.part_of_speech())
             and has_item_in_list(pos.name, m_pos)
-            and has_item_in_list(pos.reading_word_match, morpheme.surface())
+            and has_item_in_list(pos.word_match, morpheme.surface())
             and (
                 pos.reading_word_length_less == 0
                 or sound_len(morpheme.reading_form()) <= pos.reading_word_length_less

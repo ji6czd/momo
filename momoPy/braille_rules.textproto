@@ -26,6 +26,43 @@ rule {
     name: "接続詞"
     name: "形状詞"
     name: "接頭辞"
+    name: "括弧開"
+    before_space: true
+  }
+  # 上記空けるものでも、他の品詞に分類できる可能性があることがある者たち
+  # 通常版 → 「版」は助数詞として使えるし、結び付きが強い
+  # その人らしさ→「らしい」は形容詞的でもあるが、「接尾辞」として使える
+  next_pos {
+    name: "助数詞可能"
+    name: "接尾辞"
+    before_space: false
+  }
+}
+# 人名: 一部特殊な扱いをする必要があるため、ルールを分ける
+rule {
+  current_pos {
+    name: "人名"
+  }
+  # 人名の後に一般的な品詞が続く
+  # 例: 山田太郎さん
+  next_pos {
+    name: "名詞"
+    name: "代名詞"
+    name: "固有名詞"
+    name: "人名"
+    name: "動詞"
+    name: "形容詞"
+    name: "副詞"
+    name: "接続詞"
+    name: "形状詞"
+    name: "接頭辞"
+    name: "括弧開"
+    before_space: true
+  }
+  # 「さん」・「様」・「君」などの敬称は空ける
+  # 例: 山田さん
+  next_pos {
+    name: "接尾辞"
     before_space: true
   }
 }
@@ -37,7 +74,7 @@ rule {
     name: "助詞"
     name: "接尾辞"
   }
-  # 助詞が・助動詞続く
+  # 助詞が・助動詞が続く
   # 例: 私のが、見ました → 「まし」・「た」はどちらも助動詞
   # 例: 花のように → 「よう」は助動詞の語幹になりうる
   next_pos {
@@ -49,18 +86,20 @@ rule {
   # 句読点など
   # 変換して、→「て」は助詞
   next_pos {
-    name: "補助記号"
-    word_match: "！"
-    word_match: "。"
-    word_match: "、"
-    word_match: "・"
-    word_match: "？"
-    word_match: "："
-    word_match: "；"
+    name: "句点"
+    name: "読点"
     before_space: false
   }
   next_pos {
     name: "括弧閉"
+    before_space: false
+  }
+  # その他の記号
+  next_pos {
+    name: "補助記号"
+    word_match: "・"
+    word_match: "："
+    word_match: "；"
     before_space: false
   }
   # その他の品詞が続く
@@ -89,6 +128,7 @@ rule {
     name: "形容詞"
     name: "形状詞"
     name: "接頭辞"
+    name: "括弧開"
     before_space: true
   }
   # 申すそうだ
@@ -134,6 +174,7 @@ rule {
     name: "接続詞"
     name: "接頭辞"
     name: "連体詞"
+    name: "括弧開"
     before_space: true
   }
   next_pos {
@@ -167,6 +208,7 @@ rule {
     name: "形容詞"
     name: "動詞"
     name: "副詞"
+    name: "括弧開"
     before_space: true
   }
 }

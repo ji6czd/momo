@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "loguru>=0.7.3",
     "protobuf>=6.33.1",
+    "sklearn-crfsuite>=0.5.0",
     "sudachidict-core>=20251022",
     "sudachipy>=0.6.10",
 ]

@@ -255,6 +255,47 @@ def convert_to_kana(src_string: str):
                 kanaString += " "
     return kanaString
 
+def segment_to_kana(src_string: str):
+    kanaString: str = ""
+    tokenized_list = tokenizer_obj.tokenize(src_string)
+    for m_index, m in enumerate(tokenized_list):
+        if m.part_of_speech()[0] == "助詞":
+            # 助詞は、点字のルールで置換する
+            if m.reading_form() == "ハ":
+                kanaString += "ワ"
+                kanaString += '/'
+            elif m.reading_form() == "ヘ":
+                kanaString += "エ"
+                kanaString += '/'
+            else:
+                kanaString += m.reading_form()
+                kanaString += '/'
+        elif not is_kana_conversion_required(m):
+            # その品詞は、そのまま表記を追加する
+            # m.surfaceがカタカナだけだったら、すべての文字を'/'で区切る
+            if all('ァ' <= c <= 'ン' or c == 'ー' for c in m.surface()):
+                for c in m.surface():
+                    kanaString += c
+                    kanaString += '/'
+            else:
+                kanaString += m.surface()
+                kanaString += '/'
+        else:
+            # それ以外の品詞は、助数詞処理・長音処理を行って読みを追加する
+            counter = correct_counter_suffix_reading(tokenized_list[m_index - 1], m)
+            if counter != "":
+                # 助数詞がある場合は、読みを追加する
+                kanaString += counter
+                kanaString += '/'
+            else:
+                # その他
+                kanaString += convert_prolonged_sound_mark(m)
+                kanaString += '/'
+        # この品詞のルールを、ルールリストに基づいて処理する
+        if m_index < len(tokenized_list) - 1:
+            if is_space_required(m, tokenized_list[m_index + 1]):
+                kanaString += " /"
+    return kanaString
 
 def convert_to_braille(src: str):
     # 文字列を点字に変換する

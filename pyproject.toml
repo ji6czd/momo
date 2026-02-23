@@ -19,4 +19,5 @@ dependencies = [
 requires = ["uv_build>=0.9.9,<0.10.0"]
 build-backend = "uv_build"
 [project.scripts]
-momo = "momobrl.__init__:main"
+momo = "momobrl.momo:main"
+neomomo = "momobrl.neomomo:main"

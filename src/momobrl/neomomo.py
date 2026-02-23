@@ -5,9 +5,9 @@ import argparse
 import unicodedata
 import re
 import sklearn_crfsuite
-from typing import Union, List, Dict
+from typing import Union, List, Dict, Tuple
 
-# --- [1. 共通定義] ---
+# --- [1. 共通定義・型定義] ---
 FeatureDict = Dict[str, Union[str, float, bool]]
 
 def get_char_type(c: str) -> str:
@@ -19,112 +19,39 @@ def get_char_type(c: str) -> str:
     if "CJK UNIFIED IDEOGRAPH" in name: return 'KANJI'
     return 'OTHER'
 
+def get_units(text: str) -> List[Tuple[str, int]]:
+    """
+    テキストを音節ユニットに分解し、それぞれの原文開始位置を返す。
+    [今日] のようなブラケット、拗音、単字を識別。
+    """
+    regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|(\s+)|(.)'
+    units = []
+    for m in re.finditer(regex, text):
+        bracket, combined, space, char = m.groups()
+        val = bracket or combined or space or char
+        if val:
+            units.append((val, m.start()))
+    return units
+
 def is_suspicious(raw: str, read: str) -> bool:
-    """
-    データ作成のミスを検知するガード。
-    """
     if (raw == "" and read == " ") or read == "_": return False
     clean_read = read.replace("+S", "")
-
-    # 1. カタカナ -> カタカナの一致チェック（ハ・ヘ含む完全一致を要求）
     if all('KATAKANA' in unicodedata.name(c, "") for c in raw):
-        if raw != clean_read:
-            return True
-        return False
-
-    # 2. ひらがな -> カタカナの一致チェック
-    # 「は/ワ」「へ/エ」のみ例外として認め、他は厳格にチェック
+        return raw != clean_read
     PARTICLE_EXCEPTIONS = {"は": ["ハ", "ワ"], "へ": ["ヘ", "エ"]}
     if raw in PARTICLE_EXCEPTIONS:
-        if clean_read not in PARTICLE_EXCEPTIONS[raw]:
-            return True
-        return False
-
+        return clean_read not in PARTICLE_EXCEPTIONS[raw]
     if all('HIRAGANA' in unicodedata.name(c, "") for c in raw):
-        # ひらがなをカタカナに変換して比較
-        expected_katakana = "".join([chr(ord(c) + 0x60) for c in raw])
-        if expected_katakana != clean_read:
-            return True
-        return False
-
-    # 3. 漢字や記号の基本的な型チェック
-    rt = get_char_type(raw[0]) if raw else 'NONE'
-    yt = get_char_type(clean_read[0]) if clean_read else 'NONE'
-    if rt == 'OTHER' and yt in ['KANJI', 'HIRAGANA', 'KATAKANA']: return True
-    if rt == 'KANJI' and yt == 'OTHER': return True
-    
+        expected = "".join([chr(ord(c) + 0x60) for c in raw])
+        return expected != clean_read
     return False
 
-# --- [2. データ作成 (createdata) ロジック] ---
+# --- [2. 特徴量抽出] ---
 
-def process_line_to_tsv(line: str, line_num: int) -> List[str]:
-    line = line.strip()
-    if not line or line.startswith('#'): return []
-    if '\t' not in line:
-        print(f"\n❌ Error (Line {line_num}): タブ(Tab)が見つかりません。")
-        sys.exit(1)
-
-    raw_part, read_full = line.split('\t')
-    read_blocks = read_full.split('/')
-    
-    regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|(\s+)|(.)'
-    
-    raw_units = []
-    for m in re.finditer(regex, raw_part):
-        bracket, combined, space, char = m.groups()
-        if bracket is not None: raw_units.append(bracket)
-        elif combined is not None: raw_units.append(combined)
-        elif space is not None: raw_units.append(space)
-        else: raw_units.append(char)
-
-    tsv_rows = []
-    raw_ptr = 0
-    current_orig_pos = 0
-
-    for r_label in read_blocks:
-        if r_label == " ":
-            if tsv_rows:
-                parts = tsv_rows[-1].split('\t')
-                if "+S" not in parts[1]:
-                    parts[1] = parts[1] + "+S"
-                    tsv_rows[-1] = "\t".join(parts)
-            while raw_ptr < len(raw_units) and raw_units[raw_ptr].isspace():
-                current_orig_pos += len(raw_units[raw_ptr])
-                raw_ptr += 1
-            continue
-
-        while raw_ptr < len(raw_units) and raw_units[raw_ptr].isspace():
-            current_orig_pos += len(raw_units[raw_ptr])
-            raw_ptr += 1
-            
-        if raw_ptr >= len(raw_units):
-            print(f"\n❌ Error (Line {line_num}): 読みラベルが多すぎます。")
-            sys.exit(1)
-
-        target_chars = raw_units[raw_ptr]
-        if is_suspicious(target_chars, r_label):
-            print(f"⚠️  Suspicious (Line {line_num}): '{target_chars}' に対して '{r_label}' が当てられています。")
-
-        block_len = len(target_chars)
-        for i, char in enumerate(target_chars):
-            ctype = get_char_type(char)
-            r_val = r_label if i == 0 else "---"
-            tag = "S" if block_len == 1 else ("B" if i == 0 else ("E" if i == block_len - 1 else "I"))
-            tsv_rows.append(f"{char}\t{r_val}\t{ctype}\t{tag}\t{current_orig_pos + i}")
-            
-        current_orig_pos += block_len
-        raw_ptr += 1
-            
-    remaining = [u for u in raw_units[raw_ptr:] if not u.isspace()]
-    if remaining:
-        print(f"\n❌ Error (Line {line_num}): 原文が余っています ('{''.join(remaining)}')")
-        sys.exit(1)
-
-    return tsv_rows
-
-# --- [3. 学習・予測ロジック (変更なし)] ---
-
-def char2features(sentence: List[List[str]], i: int) -> FeatureDict:
+def char2features(sentence: List[List[Union[str, int]]], i: int) -> FeatureDict:
+    """
+    周辺コンテキスト（半径2文字）から特徴量を抽出。
+    """
     char, _, ctype = sentence[i][0], sentence[i][1], sentence[i][2]
     features = {'bias': 1.0, 'char': char, 'type': ctype}
     if i > 0:
@@ -137,40 +64,104 @@ def char2features(sentence: List[List[str]], i: int) -> FeatureDict:
     else: features['EOS'] = True
     return features
 
-def run_train(tsv_path: str) -> None:
-    if not os.path.exists(tsv_path):
-        print(f"❌ TSV未検出: {tsv_path}"); sys.exit(1)
-    sentences, current = [], []
-    with open(tsv_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            if line.startswith('#') or not line.strip():
-                if current: sentences.append(current); current = []
-                continue
-            parts = line.strip().split('\t')
-            if len(parts) >= 4: current.append(parts)
-    if current: sentences.append(current)
-    X = [[char2features(s, i) for i in range(len(s))] for s in sentences]
-    y = [[s[i][1] for i in range(len(s))] for s in sentences]
-    print(f"⚙️  学習開始...")
-    crf = sklearn_crfsuite.CRF(algorithm='lbfgs', c1=0.1, c2=0.1, max_iterations=100)
-    crf.fit(X, y)
-    model_path = tsv_path.rsplit('.', 1)[0] + ".model"
-    with open(model_path, 'wb') as f: pickle.dump(crf, f)
-    print(f"💾 モデル保存完了: {model_path}")
+# --- [3. 学習・データ作成ロジック] ---
+
+def process_line_to_tsv(line: str, line_num: int) -> List[str]:
+    line = line.strip()
+    if '\t' not in line:
+        print(f"\n❌ Error (Line {line_num}): タブが見つかりません。"); sys.exit(1)
+    raw_part, read_full = line.split('\t')
+    read_blocks = read_full.split('/')
+    raw_units_info = get_units(raw_part)
+    
+    tsv_rows, raw_ptr = [], 0
+    for r_label in read_blocks:
+        if r_label == " ":
+            if tsv_rows:
+                parts = tsv_rows[-1].split('\t')
+                if "+S" not in parts[1]:
+                    parts[1] += "+S"
+                    tsv_rows[-1] = "\t".join(parts)
+            while raw_ptr < len(raw_units_info) and raw_units_info[raw_ptr][0].isspace():
+                raw_ptr += 1
+            continue
+        while raw_ptr < len(raw_units_info) and raw_units_info[raw_ptr][0].isspace():
+            raw_ptr += 1
+        if raw_ptr >= len(raw_units_info):
+            print(f"\n❌ Error (Line {line_num}): 読みラベル過多。"); sys.exit(1)
+        
+        target_chars, orig_idx = raw_units_info[raw_ptr]
+        if is_suspicious(target_chars, r_label):
+            print(f"⚠️  Suspicious (Line {line_num}): '{target_chars}' -> '{r_label}'")
+        
+        block_len = len(target_chars)
+        for i, char in enumerate(target_chars):
+            ctype = get_char_type(char)
+            r_val = r_label if i == 0 else "---"
+            tag = "S" if block_len == 1 else ("B" if i == 0 else ("E" if i == block_len - 1 else "I"))
+            tsv_rows.append(f"{char}\t{r_val}\t{ctype}\t{tag}\t{orig_idx + i}")
+        raw_ptr += 1
+    
+    if any(not u.isspace() for u, _ in raw_units_info[raw_ptr:]):
+        print(f"\n❌ Error (Line {line_num}): 原文余り。"); sys.exit(1)
+    return tsv_rows
+
+# --- [4. 推論・インデックス同期] ---
+
+def get_original_index(index_map: List[int], pos: int) -> int:
+    """
+    変換後テキストの指定位置から原文のインデックスを返す。
+    """
+    if 0 <= pos < len(index_map):
+        return index_map[pos]
+    return -1
 
 def run_predict(model_path: str) -> None:
     if not os.path.exists(model_path):
         print(f"❌ モデル未検出: {model_path}"); sys.exit(1)
     with open(model_path, 'rb') as f: model = pickle.load(f)
-    print("🔮 予測モード (Ctrl+D / Ctrl+Z で終了)")
+    
+    print("🔮 予測・同期モード (Ctrl+D で終了)")
     for line in sys.stdin:
         text = line.strip()
         if not text: continue
-        test_sentence = [[c, "", get_char_type(c)] for c in text]
-        X_test = [char2features(test_sentence, i) for i in range(len(test_sentence))]
+        
+        # ユニット分解と原文位置の保持
+        units_info = get_units(text)
+        # 入力データを構築
+        test_data = []
+        for val, idx in units_info:
+            for i, c in enumerate(val):
+                test_data.append([c, idx + i, get_char_type(c)])
+        
+        X_test = [char2features(test_data, i) for i in range(len(test_data))]
         y_pred = model.predict_single(X_test)
-        result = "".join([p.replace("+S", " ") for p in y_pred if p not in ["_", "---"]])
-        print(f"予測: {result.strip()}\n" + "-"*20)
+        
+        translated, index_map = "", []
+        for i, label in enumerate(y_pred):
+            if label in ["_", "---"]: continue
+            
+            clean_reading = label.replace("+S", "")
+            orig_idx = test_data[i][1] # 原文のインデックス
+            
+            # 各読み文字に原文位置を紐付け
+            for char in clean_reading:
+                translated += char
+                index_map.append(orig_idx)
+            
+            if "+S" in label:
+                translated += " "
+                index_map.append(orig_idx) # スペースも直前文字のインデックスに紐付け
+        
+        print(f"予測: {translated}")
+        # インデックス検証デモ
+        if translated:
+            test_pos = len(translated) // 2
+            orig_pos = get_original_index(index_map, test_pos)
+            print(f"同期検証: 変換後 {test_pos}文字目『{translated[test_pos]}』 -> 原文インデックス {orig_pos} 付近")
+        print("-" * 20)
+
+# --- [5. メイン] ---
 
 def main():
     parser = argparse.ArgumentParser(prog="translate")
@@ -184,13 +175,29 @@ def main():
         out = args.raw.rsplit('_', 1)[0] + "_data.tsv"
         with open(args.raw, 'r', encoding='utf-8') as f: lines = f.readlines()
         all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
-        success_count = 0
+        success = 0
         for i, line in enumerate(lines, 1):
+            if not line.strip() or line.startswith('#'): continue
             rows = process_line_to_tsv(line, i)
-            if rows: all_tsv.extend(rows); all_tsv.append(""); success_count += 1
+            if rows: all_tsv.extend(rows); all_tsv.append(""); success += 1
         with open(out, 'w', encoding='utf-8') as f: f.write("\n".join(all_tsv))
-        print(f"✅ TSV作成成功: {success_count}行処理完了。 -> {out}")
-    elif args.command == "train": run_train(args.tsv)
+        print(f"✅ TSV作成完了 ({success}行): {out}")
+    elif args.command == "train":
+        sentences, current = [], []
+        with open(args.tsv, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.startswith('#') or not line.strip():
+                    if current: sentences.append(current); current = []
+                    continue
+                parts = line.strip().split('\t')
+                if len(parts) >= 4: current.append(parts)
+        if current: sentences.append(current)
+        X = [[char2features(s, i) for i in range(len(s))] for s in sentences]
+        y = [[s[i][1] for i in range(len(s))] for s in sentences]
+        crf = sklearn_crfsuite.CRF(algorithm='lbfgs', c1=0.1, c2=0.1, max_iterations=100)
+        crf.fit(X, y)
+        with open(args.tsv.rsplit('.', 1)[0] + ".model", 'wb') as f: pickle.dump(crf, f)
+        print("💾 学習完了")
     elif args.command == "predict": run_predict(args.model)
 
 if __name__ == "__main__":

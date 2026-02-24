@@ -289,8 +289,15 @@ def segment_to_kana(src_string: str):
                 kanaString += '/'
             else:
                 # その他
-                kanaString += convert_prolonged_sound_mark(m)
-                kanaString += '/'
+                converted_prolonged: str = convert_prolonged_sound_mark(m)
+                # 元の単語がすべてひらがなであり、変換後の文字数と同じであれば文字を分割して追加する
+                if all('ぁ' <= c <= 'ん' for c in m.surface()) and len(converted_prolonged) == len(m.surface()):
+                    for c in converted_prolonged:
+                        kanaString += c
+                        kanaString += '/'
+                else:
+                    kanaString += converted_prolonged
+                    kanaString += '/'
         # この品詞のルールを、ルールリストに基づいて処理する
         if m_index < len(tokenized_list) - 1:
             if is_space_required(m, tokenized_list[m_index + 1]):

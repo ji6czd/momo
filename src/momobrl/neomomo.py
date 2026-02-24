@@ -22,35 +22,50 @@ def get_char_type(c: str) -> str:
 def get_units(text: str) -> List[Tuple[str, int]]:
     """
     テキストを音節ユニットに分解し、それぞれの原文開始位置を返す。
-    [今日] のようなブラケット、拗音、単字を識別。
+    ブラケット内の文字も、原文の正確なインデックス（0始まり）を保持する。
     """
     regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|(\s+)|(.)'
     units = []
     for m in re.finditer(regex, text):
-        bracket, combined, space, char = m.groups()
-        val = bracket or combined or space or char
-        if val:
-            units.append((val, m.start()))
+        if m.group(1) is not None:
+            # ブラケットの中身の場合、'['の次(start(1))のインデックスを取得
+            units.append((m.group(1), m.start(1)))
+        elif m.group(2) is not None:
+            units.append((m.group(2), m.start(2)))
+        elif m.group(3) is not None:
+            units.append((m.group(3), m.start(3)))
+        else:
+            units.append((m.group(4), m.start(4)))
     return units
 
 def is_suspicious(raw: str, read: str) -> bool:
+    """
+    ひらがな/カタカナの単純な対応ミスを検知。
+    「は/ワ」「へ/エ」は点訳ルールとして許可。
+    """
     if (raw == "" and read == " ") or read == "_": return False
     clean_read = read.replace("+S", "")
+    
+    # カタカナ -> カタカナの完全一致チェック
     if all('KATAKANA' in unicodedata.name(c, "") for c in raw):
         return raw != clean_read
+        
+    # ひらがな -> カタカナの一致チェック（例外あり）
     PARTICLE_EXCEPTIONS = {"は": ["ハ", "ワ"], "へ": ["ヘ", "エ"]}
     if raw in PARTICLE_EXCEPTIONS:
         return clean_read not in PARTICLE_EXCEPTIONS[raw]
+        
     if all('HIRAGANA' in unicodedata.name(c, "") for c in raw):
         expected = "".join([chr(ord(c) + 0x60) for c in raw])
         return expected != clean_read
+        
     return False
 
 # --- [2. 特徴量抽出] ---
 
 def char2features(sentence: List[List[Union[str, int]]], i: int) -> FeatureDict:
     """
-    周辺コンテキスト（半径2文字）から特徴量を抽出。
+    周辺コンテキスト（半径2文字/計5文字ウィンドウ）から特徴量を抽出。
     """
     char, _, ctype = sentence[i][0], sentence[i][1], sentence[i][2]
     features = {'bias': 1.0, 'char': char, 'type': ctype}
@@ -75,7 +90,9 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
     raw_units_info = get_units(raw_part)
     
     tsv_rows, raw_ptr = [], 0
-    for r_label in read_blocks:
+    
+    # 0始まりでブロックをカウント
+    for label_idx, r_label in enumerate(read_blocks):
         if r_label == " ":
             if tsv_rows:
                 parts = tsv_rows[-1].split('\t')
@@ -85,25 +102,37 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
             while raw_ptr < len(raw_units_info) and raw_units_info[raw_ptr][0].isspace():
                 raw_ptr += 1
             continue
+            
         while raw_ptr < len(raw_units_info) and raw_units_info[raw_ptr][0].isspace():
             raw_ptr += 1
+            
         if raw_ptr >= len(raw_units_info):
-            print(f"\n❌ Error (Line {line_num}): 読みラベル過多。"); sys.exit(1)
+            print(f"\n❌ Error (Line {line_num}): 読みラベル過多。")
+            print(f"   -> 読みインデックス [{label_idx}] のブロック '{r_label}' に対応する原文がありません！")
+            sys.exit(1)
         
         target_chars, orig_idx = raw_units_info[raw_ptr]
+        
         if is_suspicious(target_chars, r_label):
-            print(f"⚠️  Suspicious (Line {line_num}): '{target_chars}' -> '{r_label}'")
+            print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})")
         
         block_len = len(target_chars)
         for i, char in enumerate(target_chars):
             ctype = get_char_type(char)
             r_val = r_label if i == 0 else "---"
             tag = "S" if block_len == 1 else ("B" if i == 0 else ("E" if i == block_len - 1 else "I"))
+            # TSVにも正確な0オリジンのインデックスを記録
+            # print(f"{orig_idx + i}\t{char}\t{label_idx}\t{r_val}")
             tsv_rows.append(f"{char}\t{r_val}\t{ctype}\t{tag}\t{orig_idx + i}")
         raw_ptr += 1
     
-    if any(not u.isspace() for u, _ in raw_units_info[raw_ptr:]):
-        print(f"\n❌ Error (Line {line_num}): 原文余り。"); sys.exit(1)
+    remaining = [u for u in raw_units_info[raw_ptr:] if not u[0].isspace()]
+    if remaining:
+        first_leftover_val, first_leftover_idx = remaining[0]
+        print(f"\n❌ Error (Line {line_num}): 原文余り。")
+        print(f"   -> 原文インデックス [{first_leftover_idx}] の '{first_leftover_val}' 以降に対応する読みラベルがありません！")
+        sys.exit(1)
+        
     return tsv_rows
 
 # --- [4. 推論・インデックス同期] ---
@@ -126,9 +155,7 @@ def run_predict(model_path: str) -> None:
         text = line.strip()
         if not text: continue
         
-        # ユニット分解と原文位置の保持
         units_info = get_units(text)
-        # 入力データを構築
         test_data = []
         for val, idx in units_info:
             for i, c in enumerate(val):
@@ -142,23 +169,21 @@ def run_predict(model_path: str) -> None:
             if label in ["_", "---"]: continue
             
             clean_reading = label.replace("+S", "")
-            orig_idx = test_data[i][1] # 原文のインデックス
+            orig_idx = test_data[i][1]
             
-            # 各読み文字に原文位置を紐付け
             for char in clean_reading:
                 translated += char
                 index_map.append(orig_idx)
-            
+                
             if "+S" in label:
                 translated += " "
-                index_map.append(orig_idx) # スペースも直前文字のインデックスに紐付け
-        
+                index_map.append(orig_idx)
+                
         print(f"予測: {translated}")
-        # インデックス検証デモ
         if translated:
             test_pos = len(translated) // 2
             orig_pos = get_original_index(index_map, test_pos)
-            print(f"同期検証: 変換後 {test_pos}文字目『{translated[test_pos]}』 -> 原文インデックス {orig_pos} 付近")
+            print(f"同期検証: 変換後インデックス [{test_pos}] 『{translated[test_pos]}』 -> 原文インデックス [{orig_pos}] 付近")
         print("-" * 20)
 
 # --- [5. メイン] ---
@@ -172,7 +197,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "createdata":
-        out = args.raw.rsplit('_', 1)[0] + "_data.tsv"
+        out = args.raw.rsplit('.', 1)[0] + "_data.tsv"
         with open(args.raw, 'r', encoding='utf-8') as f: lines = f.readlines()
         all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
         success = 0

@@ -11,12 +11,21 @@ from typing import Union, List, Dict, Tuple
 FeatureDict = Dict[str, Union[str, float, bool]]
 
 def get_char_type(c: str) -> str:
+    """文字種を判定。句読点・記号を独立したカテゴリ(SYMBOL)として扱う。"""
     if not c or c.isspace(): return 'SPACE'
     if c.isdigit() or ('0' <= c <= '9'): return 'NUM'
+    
+    # Unicodeカテゴリで句読点(P)や記号(S)を判定
+    cat = unicodedata.category(c)
+    if cat.startswith('P') or cat.startswith('S'):
+        return 'SYMBOL'
+        
     name = unicodedata.name(c, "")
     if "HIRAGANA" in name: return 'HIRAGANA'
     if "KATAKANA" in name: return 'KATAKANA'
     if "CJK UNIFIED IDEOGRAPH" in name: return 'KANJI'
+    if "LATIN" in name: return 'ALPHA'
+    
     return 'OTHER'
 
 def get_units(text: str) -> List[Tuple[str, int]]:
@@ -83,9 +92,17 @@ def char2features(sentence: List[List[Union[str, int]]], i: int) -> FeatureDict:
 
 def process_line_to_tsv(line: str, line_num: int) -> List[str]:
     line = line.strip()
-    if '\t' not in line:
+    parts = line.split('\t')
+    
+    if len(parts) < 2:
         print(f"\n❌ Error (Line {line_num}): タブが見つかりません。"); sys.exit(1)
-    raw_part, read_full = line.split('\t')
+    elif len(parts) > 2:
+        print(f"\n❌ Error (Line {line_num}): タブが複数（{len(parts)-1}個）含まれています。")
+        print(f"   -> 原文と読みを区切るためのタブは「1つだけ」にしてください。分かち書き等にタブが混ざっていないか確認してください。")
+        print(parts[2])
+        sys.exit(1)
+        
+    raw_part, read_full = parts[0], parts[1]
     read_blocks = read_full.split('/')
     raw_units_info = get_units(raw_part)
     
@@ -116,13 +133,17 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
         if is_suspicious(target_chars, r_label):
             print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})")
         
+        # 🌟 句読点を見つけたら、読みラベルに自動で「+S」を補う
+        KUTOUTEN = ["。", "、", "？", "！", ".", ","]
+        if target_chars in KUTOUTEN and "+S" not in r_label:
+            r_label += "+S"
+            
         block_len = len(target_chars)
         for i, char in enumerate(target_chars):
             ctype = get_char_type(char)
             r_val = r_label if i == 0 else "---"
             tag = "S" if block_len == 1 else ("B" if i == 0 else ("E" if i == block_len - 1 else "I"))
             # TSVにも正確な0オリジンのインデックスを記録
-            # print(f"{orig_idx + i}\t{char}\t{label_idx}\t{r_val}")
             tsv_rows.append(f"{char}\t{r_val}\t{ctype}\t{tag}\t{orig_idx + i}")
         raw_ptr += 1
     
@@ -197,7 +218,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "createdata":
-        out = args.raw.rsplit('.', 1)[0] + "_data.tsv"
+        out = args.raw.rsplit('_', 1)[0] + "_data.tsv"
         with open(args.raw, 'r', encoding='utf-8') as f: lines = f.readlines()
         all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
         success = 0

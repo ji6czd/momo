@@ -32,19 +32,22 @@ def get_units(text: str) -> List[Tuple[str, int]]:
     """
     テキストを音節ユニットに分解し、それぞれの原文開始位置を返す。
     ブラケット内の文字も、原文の正確なインデックス（0始まり）を保持する。
+    英数字の連続（カンマやハイフン含む）は自動的に1つのブロックとしてまとめる。
     """
-    regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|(\s+)|(.)'
+    # 🌟 グループ3で英数字の塊（iPhone, 120,000, Wi-Fiなど）を捉える
+    regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|([a-zA-Z0-9\.\-,]+)|(\s+)|(.)'
     units = []
     for m in re.finditer(regex, text):
         if m.group(1) is not None:
-            # ブラケットの中身の場合、'['の次(start(1))のインデックスを取得
             units.append((m.group(1), m.start(1)))
         elif m.group(2) is not None:
             units.append((m.group(2), m.start(2)))
         elif m.group(3) is not None:
             units.append((m.group(3), m.start(3)))
-        else:
+        elif m.group(4) is not None:
             units.append((m.group(4), m.start(4)))
+        else:
+            units.append((m.group(5), m.start(5)))
     return units
 
 def is_suspicious(raw: str, read: str) -> bool:
@@ -138,7 +141,7 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
         if is_suspicious(target_chars, r_label):
             print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})")
         
-        # 🌟 句読点を見つけたら、読みラベルに自動で「+S」を補う
+        # 句読点を見つけたら、読みラベルに自動で「+S」を補う
         KUTOUTEN = ["。", "、", "？", "！", ".", ","]
         if target_chars in KUTOUTEN and "+S" not in r_label:
             r_label += "+S"
@@ -192,19 +195,31 @@ def run_predict(model_path: str) -> None:
         
         translated, index_map = "", []
         for i, label in enumerate(y_pred):
-            if label in ["_", "---"]: continue
-            
-            clean_reading = label.replace("+S", "")
+            if label == "_": 
+                continue
+                
+            orig_char = test_data[i][0]
+            ctype = test_data[i][2]
             orig_idx = test_data[i][1]
             
-            for char in clean_reading:
-                translated += char
+            # 予測ラベルから +S を除去した純粋な読み
+            clean_label = label.replace("+S", "")
+
+            # 🌟 新規最適化：英数字の場合は常に原文を1文字ずつ出力
+            if ctype in ['NUM', 'ALPHA']:
+                translated += orig_char
                 index_map.append(orig_idx)
-                
+            # 日本語の場合で、継続タグ（---）ではない場合のみ読みを出力
+            elif clean_label != "---":
+                for char in clean_label:
+                    translated += char
+                    index_map.append(orig_idx)
+            
+            # 🌟 分かち書きの処理 (+S が含まれていればスペースを足す)
             if "+S" in label:
                 translated += " "
                 index_map.append(orig_idx)
-                
+
         print(f"予測: {translated}")
         if translated:
             test_pos = len(translated) // 2

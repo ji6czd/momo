@@ -103,6 +103,11 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
         sys.exit(1)
         
     raw_part, read_full = parts[0], parts[1]
+    
+    # '//' の連続チェック
+    if '//' in read_full:
+        print(f"⚠️  Warning (Line {line_num}): 読み部分に連続した '/' が含まれています: '{read_full}'")
+    
     read_blocks = read_full.split('/')
     raw_units_info = get_units(raw_part)
     

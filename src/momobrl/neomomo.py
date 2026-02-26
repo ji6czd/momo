@@ -69,7 +69,11 @@ def is_suspicious(raw: str, read: str) -> bool:
         
     if all('HIRAGANA' in unicodedata.name(c, "") for c in raw):
         expected = "".join([chr(ord(c) + 0x60) for c in raw])
-        return expected != clean_read
+        # 点字の長音変換と文字が一致したときはfalse
+        if expected == 'ウ' and clean_read == 'ー':
+            return False
+        else:
+            return expected != clean_read 
         
     return False
 
@@ -174,6 +178,61 @@ def get_original_index(index_map: List[int], pos: int) -> int:
         return index_map[pos]
     return -1
 
+def predict_text(text: str, model) -> Tuple[str, List[int]]:
+    """
+    単一行のテキストから予測結果（読み）とインデックスマップを返す。
+    run_predict() と predict_oneline() の両方から利用される共通処理。
+    """
+    units_info = get_units(text)
+    test_data = []
+    for val, idx in units_info:
+        for i, c in enumerate(val):
+            test_data.append([c, idx + i, get_char_type(c)])
+    
+    X_test = [char2features(test_data, i) for i in range(len(test_data))]
+    y_pred = model.predict_single(X_test)
+    
+    translated, index_map = "", []
+    for i, label in enumerate(y_pred):
+        if label == "_": 
+            continue
+            
+        orig_char = test_data[i][0]
+        ctype = test_data[i][2]
+        orig_idx = test_data[i][1]
+        
+        # 予測ラベルから +S を除去した純粋な読み
+        clean_label = label.replace("+S", "")
+
+        # 🌟 新規最適化：英数字の場合は常に原文を1文字ずつ出力
+        if ctype in ['NUM', 'ALPHA']:
+            translated += orig_char
+            index_map.append(orig_idx)
+        # 日本語の場合で、継続タグ（---）ではない場合のみ読みを出力
+        elif clean_label != "---":
+            for char in clean_label:
+                translated += char
+                index_map.append(orig_idx)
+        
+        # 🌟 分かち書きの処理 (+S が含まれていればスペースを足す)
+        if "+S" in label:
+            translated += " "
+            index_map.append(orig_idx)
+    
+    return translated, index_map
+
+def predict_oneline(text: str, model_path: str) -> str:
+    """
+    ウェブAPIで流用する関数。
+    テキストを入力として、予測結果（読み）を出力。
+    """
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"❌ モデル未検出: {model_path}")
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+    translated, _ = predict_text(text, model)
+    return translated
+
 def run_predict(model_path: str) -> None:
     if not os.path.exists(model_path):
         print(f"❌ モデル未検出: {model_path}"); sys.exit(1)
@@ -184,41 +243,7 @@ def run_predict(model_path: str) -> None:
         text = line.strip()
         if not text: continue
         
-        units_info = get_units(text)
-        test_data = []
-        for val, idx in units_info:
-            for i, c in enumerate(val):
-                test_data.append([c, idx + i, get_char_type(c)])
-        
-        X_test = [char2features(test_data, i) for i in range(len(test_data))]
-        y_pred = model.predict_single(X_test)
-        
-        translated, index_map = "", []
-        for i, label in enumerate(y_pred):
-            if label == "_": 
-                continue
-                
-            orig_char = test_data[i][0]
-            ctype = test_data[i][2]
-            orig_idx = test_data[i][1]
-            
-            # 予測ラベルから +S を除去した純粋な読み
-            clean_label = label.replace("+S", "")
-
-            # 🌟 新規最適化：英数字の場合は常に原文を1文字ずつ出力
-            if ctype in ['NUM', 'ALPHA']:
-                translated += orig_char
-                index_map.append(orig_idx)
-            # 日本語の場合で、継続タグ（---）ではない場合のみ読みを出力
-            elif clean_label != "---":
-                for char in clean_label:
-                    translated += char
-                    index_map.append(orig_idx)
-            
-            # 🌟 分かち書きの処理 (+S が含まれていればスペースを足す)
-            if "+S" in label:
-                translated += " "
-                index_map.append(orig_idx)
+        translated, index_map = predict_text(text, model)
 
         print(f"予測: {translated}")
         if translated:

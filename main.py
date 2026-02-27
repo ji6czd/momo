@@ -2,20 +2,58 @@ import signal
 import sys
 from types import FrameType
 
-from flask import Flask
+from flask import Flask, request
 
-from translate import predict_oneline
+from neomomo import predict_oneline
 
 app = Flask(__name__)
 
+top_page = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neomomo</title>
+</head>
+<body>
+    <h1>Neomomo</h1>
+    <p>AI点訳だよ！まだまだお勉強中だけど、よろしくね！</p>
+    <p>
+    <form action="/predict" method="get">
+        <label for="source">点訳したい文章を入力してね：</label><br>
+        <input type="text" id="source" name="source" required><br>
+        <input type="submit" value="点訳する">
+    </form>
+    </p>
+</body>
+</html>
+"""
+
+predict_page = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neomomo - 点訳結果</title>
+</head>
+<body>
+    <h1>点訳結果</h1>
+    <p>点訳したい文章: {source}</p>
+    <p>点訳結果: {result}</p>
+    <a href="/">トップページに戻る</a>
+</body></html>
+"""
+
 @app.route("/")
 def hello() -> str:
-    return "Hello, Google Cloud Run! Please enjoy!"
+    return top_page
 
-@app.route("/predict/<source>", methods=["GET"])
-def predict(source: str) -> str:
-    # return "Predicting..."
-    return predict_oneline(source)
+@app.route("/predict", methods=["GET"])
+def predict() -> str:
+    source = request.args.get('source')
+    result = predict_oneline(source, "./dataset/training_data.model")
+    return predict_page.format(source=source, result=result)
 
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:
     # Safely exit program

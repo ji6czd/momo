@@ -32,19 +32,22 @@ def get_units(text: str) -> List[Tuple[str, int]]:
     """
     テキストを音節ユニットに分解し、それぞれの原文開始位置を返す。
     ブラケット内の文字も、原文の正確なインデックス（0始まり）を保持する。
+    英数字の連続（カンマやハイフン含む）は自動的に1つのブロックとしてまとめる。
     """
-    regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|(\s+)|(.)'
+    # 🌟 グループ3で英数字の塊（iPhone, 120,000, Wi-Fiなど）を捉える
+    regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|([a-zA-Z0-9\.\-,]+)|(\s+)|(.)'
     units = []
     for m in re.finditer(regex, text):
         if m.group(1) is not None:
-            # ブラケットの中身の場合、'['の次(start(1))のインデックスを取得
             units.append((m.group(1), m.start(1)))
         elif m.group(2) is not None:
             units.append((m.group(2), m.start(2)))
         elif m.group(3) is not None:
             units.append((m.group(3), m.start(3)))
-        else:
+        elif m.group(4) is not None:
             units.append((m.group(4), m.start(4)))
+        else:
+            units.append((m.group(5), m.start(5)))
     return units
 
 def is_suspicious(raw: str, read: str) -> bool:
@@ -66,7 +69,11 @@ def is_suspicious(raw: str, read: str) -> bool:
         
     if all('HIRAGANA' in unicodedata.name(c, "") for c in raw):
         expected = "".join([chr(ord(c) + 0x60) for c in raw])
-        return expected != clean_read
+        # 点字の長音変換と文字が一致したときはfalse
+        if expected == 'ウ' and clean_read == 'ー':
+            return False
+        else:
+            return expected != clean_read 
         
     return False
 
@@ -103,6 +110,11 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
         sys.exit(1)
         
     raw_part, read_full = parts[0], parts[1]
+    
+    # '//' の連続チェック
+    if '//' in read_full:
+        print(f"⚠️  Warning (Line {line_num}): 読み部分に連続した '/' が含まれています: '{read_full}'")
+    
     read_blocks = read_full.split('/')
     raw_units_info = get_units(raw_part)
     
@@ -133,7 +145,7 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
         if is_suspicious(target_chars, r_label):
             print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})")
         
-        # 🌟 句読点を見つけたら、読みラベルに自動で「+S」を補う
+        # 句読点を見つけたら、読みラベルに自動で「+S」を補う
         KUTOUTEN = ["。", "、", "？", "！", ".", ","]
         if target_chars in KUTOUTEN and "+S" not in r_label:
             r_label += "+S"
@@ -166,40 +178,79 @@ def get_original_index(index_map: List[int], pos: int) -> int:
         return index_map[pos]
     return -1
 
+def predict_text(text: str, model) -> Tuple[str, List[int]]:
+    """
+    単一行のテキストから予測結果（読み）とインデックスマップを返す。
+    run_predict() と predict_oneline() の両方から利用される共通処理。
+    """
+    units_info = get_units(text)
+    test_data = []
+    for val, idx in units_info:
+        for i, c in enumerate(val):
+            test_data.append([c, idx + i, get_char_type(c)])
+    
+    X_test = [char2features(test_data, i) for i in range(len(test_data))]
+    y_pred = model.predict_single(X_test)
+    
+    translated, index_map = "", []
+    for i, label in enumerate(y_pred):
+        if label == "_": 
+            continue
+            
+        orig_char = test_data[i][0]
+        ctype = test_data[i][2]
+        orig_idx = test_data[i][1]
+        
+        # 予測ラベルから +S を除去した純粋な読み
+        clean_label = label.replace("+S", "")
+
+        # 🌟 新規最適化：英数字の場合は常に原文を1文字ずつ出力
+        if ctype in ['NUM', 'ALPHA']:
+            translated += orig_char
+            index_map.append(orig_idx)
+        # 日本語の場合で、継続タグ（---）ではない場合のみ読みを出力
+        elif clean_label != "---":
+            for char in clean_label:
+                translated += char
+                index_map.append(orig_idx)
+        
+        # 🌟 分かち書きの処理 (+S が含まれていればスペースを足す)
+        if "+S" in label:
+            translated += " "
+            index_map.append(orig_idx)
+    
+    return translated, index_map
+
+def load_model(modelpath: str) -> sklearn_crfsuite.CRF:
+    """
+    モデルをファイルから読み込む。
+    """
+    if not os.path.exists(modelpath):
+        raise FileNotFoundError(f"❌ モデル未検出: {modelpath}")
+    with open(modelpath, 'rb') as f:
+        model = pickle.load(f)
+    return model
+
+
+def predict_oneline(text: str, model_path: str) -> str:
+    """
+    ウェブAPIで流用する関数。
+    テキストを入力として、予測結果（読み）を出力。
+    """
+    model = load_model(model_path)
+    translated, _ = predict_text(text, model)
+    return translated
+
 def run_predict(model_path: str) -> None:
-    if not os.path.exists(model_path):
-        print(f"❌ モデル未検出: {model_path}"); sys.exit(1)
-    with open(model_path, 'rb') as f: model = pickle.load(f)
+    model = load_model(model_path)
     
     print("🔮 予測・同期モード (Ctrl+D で終了)")
     for line in sys.stdin:
         text = line.strip()
         if not text: continue
         
-        units_info = get_units(text)
-        test_data = []
-        for val, idx in units_info:
-            for i, c in enumerate(val):
-                test_data.append([c, idx + i, get_char_type(c)])
-        
-        X_test = [char2features(test_data, i) for i in range(len(test_data))]
-        y_pred = model.predict_single(X_test)
-        
-        translated, index_map = "", []
-        for i, label in enumerate(y_pred):
-            if label in ["_", "---"]: continue
-            
-            clean_reading = label.replace("+S", "")
-            orig_idx = test_data[i][1]
-            
-            for char in clean_reading:
-                translated += char
-                index_map.append(orig_idx)
-                
-            if "+S" in label:
-                translated += " "
-                index_map.append(orig_idx)
-                
+        translated, index_map = predict_text(text, model)
+
         print(f"予測: {translated}")
         if translated:
             test_pos = len(translated) // 2
@@ -207,43 +258,107 @@ def run_predict(model_path: str) -> None:
             print(f"同期検証: 変換後インデックス [{test_pos}] 『{translated[test_pos]}』 -> 原文インデックス [{orig_pos}] 付近")
         print("-" * 20)
 
-def predict_oneline(text: str) -> str:
-    model_path = "./dataset/training_data.model"
-    if not os.path.exists(model_path):
-        print(f"❌ モデル未検出: {model_path}"); sys.exit(1)
-    with open(model_path, 'rb') as f: model = pickle.load(f)
+# --- [5. メイン（デバッグ用ツール群）] ---
+
+def get_labels(crf: sklearn_crfsuite.CRF, target_feature: str) -> List[Tuple[str, float]]:
+    """
+    指定された特徴量に対するラベルと重みのリストを返す
+    """
+    weights = []
+    # ⚠️ 修正: dictのメソッドは items() です
+    for (feature, label), weight in crf.state_features_.items():
+        if feature == target_feature:
+            weights.append((label, weight))
+
+    # 点数の高い順（降順）にソート
+    weights.sort(key=lambda x: x[1], reverse=True)
+    return weights
+
+def run_label_scanner(model_path: str) -> None:
+    """
+    標準入力から対話的に特徴量を受け取り、AIの脳内（配点表）を表示する
+    """
+    model = load_model(model_path)
     
-    if not text: return ""
-        
-    units_info = get_units(text)
-    test_data = []
-    for val, idx in units_info:
-        for i, c in enumerate(val):
-            test_data.append([c, idx + i, get_char_type(c)])
-
-    X_test = [char2features(test_data, i) for i in range(len(test_data))]
-    y_pred = model.predict_single(X_test)
-        
-    translated, index_map = "", []
-    for i, label in enumerate(y_pred):
-        if label in ["_", "---"]: continue
+    print("🧠 AI脳内スキャナー起動 (Ctrl+D で終了)")
+    print("使い方: 見たい文字を1文字入力してください。（例: 上）")
+    print("応用編: 特徴量名で直接検索も可能です。（例: -1:char:金, +1:char:手）")
+    print("-" * 40)
+    
+    for line in sys.stdin:
+        text = line.strip()
+        if not text:
+            continue
             
-        clean_reading = label.replace("+S", "")
-        orig_idx = test_data[i][1]
+        # 1文字だけ入力された場合は自動的に 'char:〇' に変換する親切設計
+        if len(text) == 1:
+            target_feature = f'char:{text}'
+        else:
+            target_feature = text
             
-        for char in clean_reading:
-            translated += char
-            index_map.append(orig_idx)
-                
-        if "+S" in label:
-            translated += " "
-            index_map.append(orig_idx)
-                
-    # print(f"{translated}")
+        weights = get_labels(model, target_feature)
         
-    return translated
+        print(f"\n🔍 検索対象: '{target_feature}'")
+        if not weights:
+            print("  -> (この特徴量は学習データに存在しません)")
+        else:
+            for label, weight in weights:
+                # 符号付き(±)で小数点以下3桁まで綺麗にフォーマット
+                print(f"  ラベル: {label:6} | 点数: {weight:+.3f}")
+        print("-" * 40)
 
-# --- [5. メイン] ---
+def createdata(rawdata: str, tsvdata: str) -> None:
+    """
+    原データファイル(rawdata)を処理して、TSVファイル(tsvdata)に出力する。
+    """
+    with open(rawdata, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
+    success = 0
+    for i, line in enumerate(lines, 1):
+        if not line.strip() or line.startswith('#'):
+            continue
+        rows = process_line_to_tsv(line, i)
+        if rows:
+            all_tsv.extend(rows)
+            all_tsv.append("")
+            success += 1
+    with open(tsvdata, 'w', encoding='utf-8') as f:
+        f.write("\n".join(all_tsv))
+    print(f"✅ TSV作成完了 ({success}行): {tsvdata}")
+
+def train(tsvdata: str) -> None:
+    """
+    TSVファイルを読み込み、CRFモデルを学習して保存する。
+    """
+    sentences, current = [], []
+    with open(tsvdata, 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.startswith('#') or not line.strip():
+                if current:
+                    sentences.append(current)
+                current = []
+                continue
+            parts = line.strip().split('\t')
+            if len(parts) >= 4:
+                current.append(parts)
+    if current:
+        sentences.append(current)
+    X = [[char2features(s, i) for i in range(len(s))] for s in sentences]
+    y = [[s[i][1] for i in range(len(s))] for s in sentences]
+    
+    crf = sklearn_crfsuite.CRF(
+        algorithm='lbfgs',  # 総当りで完全学習
+        max_iterations=30,
+        all_possible_transitions=False,  # あり得ない遷移パターンの計算をスキップさせる
+        verbose=True
+    )
+    crf.fit(X, y)
+    
+    model_path = tsvdata.rsplit('.', 1)[0] + ".model"
+    with open(model_path, 'wb') as f:
+        pickle.dump(crf, f)
+    print("💾 学習完了")
 
 def main():
     parser = argparse.ArgumentParser(prog="translate")
@@ -251,36 +366,18 @@ def main():
     cp = subparsers.add_parser("createdata"); cp.add_argument("--raw", required=True)
     tp = subparsers.add_parser("train"); tp.add_argument("--tsv", required=True)
     pp = subparsers.add_parser("predict"); pp.add_argument("--model", required=True)
+    lp = subparsers.add_parser("label"); lp.add_argument("--model", required=True)
     args = parser.parse_args()
 
     if args.command == "createdata":
         out = args.raw.rsplit('_', 1)[0] + "_data.tsv"
-        with open(args.raw, 'r', encoding='utf-8') as f: lines = f.readlines()
-        all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
-        success = 0
-        for i, line in enumerate(lines, 1):
-            if not line.strip() or line.startswith('#'): continue
-            rows = process_line_to_tsv(line, i)
-            if rows: all_tsv.extend(rows); all_tsv.append(""); success += 1
-        with open(out, 'w', encoding='utf-8') as f: f.write("\n".join(all_tsv))
-        print(f"✅ TSV作成完了 ({success}行): {out}")
+        createdata(args.raw, out)
     elif args.command == "train":
-        sentences, current = [], []
-        with open(args.tsv, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.startswith('#') or not line.strip():
-                    if current: sentences.append(current); current = []
-                    continue
-                parts = line.strip().split('\t')
-                if len(parts) >= 4: current.append(parts)
-        if current: sentences.append(current)
-        X = [[char2features(s, i) for i in range(len(s))] for s in sentences]
-        y = [[s[i][1] for i in range(len(s))] for s in sentences]
-        crf = sklearn_crfsuite.CRF(algorithm='lbfgs', c1=0.1, c2=0.1, max_iterations=100)
-        crf.fit(X, y)
-        with open(args.tsv.rsplit('.', 1)[0] + ".model", 'wb') as f: pickle.dump(crf, f)
-        print("💾 学習完了")
-    elif args.command == "predict": run_predict(args.model)
+        train(args.tsv)
+    elif args.command == "predict":
+        run_predict(args.model)
+    elif args.command == "label":
+        run_label_scanner(args.model)  # 🌟 ここで対話型スキャナーを起動！
 
 if __name__ == "__main__":
     main()

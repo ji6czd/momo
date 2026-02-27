@@ -221,22 +221,28 @@ def predict_text(text: str, model) -> Tuple[str, List[int]]:
     
     return translated, index_map
 
+def load_model(modelpath: str) -> sklearn_crfsuite.CRF:
+    """
+    モデルをファイルから読み込む。
+    """
+    if not os.path.exists(modelpath):
+        raise FileNotFoundError(f"❌ モデル未検出: {modelpath}")
+    with open(modelpath, 'rb') as f:
+        model = pickle.load(f)
+    return model
+
+
 def predict_oneline(text: str, model_path: str) -> str:
     """
     ウェブAPIで流用する関数。
     テキストを入力として、予測結果（読み）を出力。
     """
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"❌ モデル未検出: {model_path}")
-    with open(model_path, 'rb') as f:
-        model = pickle.load(f)
+    model = load_model(model_path)
     translated, _ = predict_text(text, model)
     return translated
 
 def run_predict(model_path: str) -> None:
-    if not os.path.exists(model_path):
-        print(f"❌ モデル未検出: {model_path}"); sys.exit(1)
-    with open(model_path, 'rb') as f: model = pickle.load(f)
+    model = load_model(model_path)
     
     print("🔮 予測・同期モード (Ctrl+D で終了)")
     for line in sys.stdin:
@@ -252,7 +258,107 @@ def run_predict(model_path: str) -> None:
             print(f"同期検証: 変換後インデックス [{test_pos}] 『{translated[test_pos]}』 -> 原文インデックス [{orig_pos}] 付近")
         print("-" * 20)
 
-# --- [5. メイン] ---
+# --- [5. メイン（デバッグ用ツール群）] ---
+
+def get_labels(crf: sklearn_crfsuite.CRF, target_feature: str) -> List[Tuple[str, float]]:
+    """
+    指定された特徴量に対するラベルと重みのリストを返す
+    """
+    weights = []
+    # ⚠️ 修正: dictのメソッドは items() です
+    for (feature, label), weight in crf.state_features_.items():
+        if feature == target_feature:
+            weights.append((label, weight))
+
+    # 点数の高い順（降順）にソート
+    weights.sort(key=lambda x: x[1], reverse=True)
+    return weights
+
+def run_label_scanner(model_path: str) -> None:
+    """
+    標準入力から対話的に特徴量を受け取り、AIの脳内（配点表）を表示する
+    """
+    model = load_model(model_path)
+    
+    print("🧠 AI脳内スキャナー起動 (Ctrl+D で終了)")
+    print("使い方: 見たい文字を1文字入力してください。（例: 上）")
+    print("応用編: 特徴量名で直接検索も可能です。（例: -1:char:金, +1:char:手）")
+    print("-" * 40)
+    
+    for line in sys.stdin:
+        text = line.strip()
+        if not text:
+            continue
+            
+        # 1文字だけ入力された場合は自動的に 'char:〇' に変換する親切設計
+        if len(text) == 1:
+            target_feature = f'char:{text}'
+        else:
+            target_feature = text
+            
+        weights = get_labels(model, target_feature)
+        
+        print(f"\n🔍 検索対象: '{target_feature}'")
+        if not weights:
+            print("  -> (この特徴量は学習データに存在しません)")
+        else:
+            for label, weight in weights:
+                # 符号付き(±)で小数点以下3桁まで綺麗にフォーマット
+                print(f"  ラベル: {label:6} | 点数: {weight:+.3f}")
+        print("-" * 40)
+
+def createdata(rawdata: str, tsvdata: str) -> None:
+    """
+    原データファイル(rawdata)を処理して、TSVファイル(tsvdata)に出力する。
+    """
+    with open(rawdata, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
+    success = 0
+    for i, line in enumerate(lines, 1):
+        if not line.strip() or line.startswith('#'):
+            continue
+        rows = process_line_to_tsv(line, i)
+        if rows:
+            all_tsv.extend(rows)
+            all_tsv.append("")
+            success += 1
+    with open(tsvdata, 'w', encoding='utf-8') as f:
+        f.write("\n".join(all_tsv))
+    print(f"✅ TSV作成完了 ({success}行): {tsvdata}")
+
+def train(tsvdata: str) -> None:
+    """
+    TSVファイルを読み込み、CRFモデルを学習して保存する。
+    """
+    sentences, current = [], []
+    with open(tsvdata, 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.startswith('#') or not line.strip():
+                if current:
+                    sentences.append(current)
+                current = []
+                continue
+            parts = line.strip().split('\t')
+            if len(parts) >= 4:
+                current.append(parts)
+    if current:
+        sentences.append(current)
+    X = [[char2features(s, i) for i in range(len(s))] for s in sentences]
+    y = [[s[i][1] for i in range(len(s))] for s in sentences]
+    
+    crf = sklearn_crfsuite.CRF(
+        algorithm='lbfgs',  # 総当りで完全学習
+        max_iterations=30,
+        all_possible_transitions=False,  # あり得ない遷移パターンの計算をスキップさせる
+        verbose=True
+    )
+    crf.fit(X, y)
+    
+    model_path = tsvdata.rsplit('.', 1)[0] + ".model"
+    with open(model_path, 'wb') as f:
+        pickle.dump(crf, f)
+    print("💾 学習完了")
 
 def main():
     parser = argparse.ArgumentParser(prog="translate")
@@ -260,36 +366,18 @@ def main():
     cp = subparsers.add_parser("createdata"); cp.add_argument("--raw", required=True)
     tp = subparsers.add_parser("train"); tp.add_argument("--tsv", required=True)
     pp = subparsers.add_parser("predict"); pp.add_argument("--model", required=True)
+    lp = subparsers.add_parser("label"); lp.add_argument("--model", required=True)
     args = parser.parse_args()
 
     if args.command == "createdata":
         out = args.raw.rsplit('_', 1)[0] + "_data.tsv"
-        with open(args.raw, 'r', encoding='utf-8') as f: lines = f.readlines()
-        all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
-        success = 0
-        for i, line in enumerate(lines, 1):
-            if not line.strip() or line.startswith('#'): continue
-            rows = process_line_to_tsv(line, i)
-            if rows: all_tsv.extend(rows); all_tsv.append(""); success += 1
-        with open(out, 'w', encoding='utf-8') as f: f.write("\n".join(all_tsv))
-        print(f"✅ TSV作成完了 ({success}行): {out}")
+        createdata(args.raw, out)
     elif args.command == "train":
-        sentences, current = [], []
-        with open(args.tsv, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.startswith('#') or not line.strip():
-                    if current: sentences.append(current); current = []
-                    continue
-                parts = line.strip().split('\t')
-                if len(parts) >= 4: current.append(parts)
-        if current: sentences.append(current)
-        X = [[char2features(s, i) for i in range(len(s))] for s in sentences]
-        y = [[s[i][1] for i in range(len(s))] for s in sentences]
-        crf = sklearn_crfsuite.CRF(algorithm='lbfgs', c1=0.1, c2=0.1, max_iterations=100)
-        crf.fit(X, y)
-        with open(args.tsv.rsplit('.', 1)[0] + ".model", 'wb') as f: pickle.dump(crf, f)
-        print("💾 学習完了")
-    elif args.command == "predict": run_predict(args.model)
+        train(args.tsv)
+    elif args.command == "predict":
+        run_predict(args.model)
+    elif args.command == "label":
+        run_label_scanner(args.model)  # 🌟 ここで対話型スキャナーを起動！
 
 if __name__ == "__main__":
     main()

@@ -10,6 +10,9 @@ from typing import Union, List, Dict, Tuple
 # --- [1. 共通定義・型定義] ---
 FeatureDict = Dict[str, Union[str, float, bool]]
 
+# --- [共通定数] ---
+MORA_SPLIT = "+S"   # このラベルの後に分かち書きスペースを挿入する
+
 def get_char_type(c: str) -> str:
     """文字種を判定。句読点・記号を独立したカテゴリ(SYMBOL)として扱う。"""
     if not c or c.isspace(): return 'SPACE'
@@ -27,6 +30,7 @@ def get_char_type(c: str) -> str:
     if "LATIN" in name: return 'ALPHA'
     
     return 'OTHER'
+
 
 def get_units(text: str) -> List[Tuple[str, int]]:
     """
@@ -78,22 +82,76 @@ def is_suspicious(raw: str, read: str) -> bool:
     return False
 
 # --- [2. 特徴量抽出] ---
+# ソース文字系列 = [(char, orig_idx, ctype), ...]
+SourceEntry = Tuple[str, int, str]
 
-def char2features(sentence: List[List[Union[str, int]]], i: int) -> FeatureDict:
+
+def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
     """
-    周辺コンテキスト（半径2文字/計5文字ウィンドウ）から特徴量を抽出。
+    ソース文字系列全体に対して、各文字の文脈特徴量を一括計算する。
+    1文字=1ラベルの設計に対応し、各文字に対応するFeatureDictのリストを返す。
+
+    特徴量一覧（char/type/バイグラムに加えて）:
+    - type_transition  : 前文字->現文字 の文字種遷移パターン
+    - kanji_run_len    : 現在位置を中心とした漢字連続数（両方向）
+    - kanji_pos_first  : 漢字ランの先頭文字か否か
     """
-    char, _, ctype = sentence[i][0], sentence[i][1], sentence[i][2]
-    features = {'bias': 1.0, 'char': char, 'type': ctype}
-    if i > 0:
-        features.update({'-1:char': sentence[i-1][0], '-1:bi': sentence[i-1][0] + char})
-        if i > 1: features['-2:char'] = sentence[i-2][0]
-    else: features['BOS'] = True
-    if i < len(sentence) - 1:
-        features.update({'+1:char': sentence[i+1][0], '+1:bi': char + sentence[i+1][0]})
-        if i < len(sentence) - 2: features['+2:char'] = sentence[i+2][0]
-    else: features['EOS'] = True
-    return features
+    result: List[FeatureDict] = []
+    n = len(source_seq)
+
+    for i, (char, _orig_idx, ctype) in enumerate(source_seq):
+        prev_char  = source_seq[i - 1][0] if i > 0 else ""
+        prev_ctype = source_seq[i - 1][2] if i > 0 else ""
+        next_char  = source_seq[i + 1][0] if i < n - 1 else ""
+        next_ctype = source_seq[i + 1][2] if i < n - 1 else ""
+
+        features: FeatureDict = {
+            'bias': 1.0,
+            'char': char,
+            'type': ctype,
+        }
+
+        # --- 前後1文字コンテキスト ---
+        if i > 0:
+            features['-1:char'] = prev_char
+            features['-1:type'] = prev_ctype
+            features['-1:bi']   = prev_char + char
+            if i > 1:
+                features['-2:char'] = source_seq[i - 2][0]
+                features['-2:type'] = source_seq[i - 2][2]
+        else:
+            features['BOS'] = True
+
+        if i < n - 1:
+            features['+1:char'] = next_char
+            features['+1:type'] = next_ctype
+            features['+1:bi']   = char + next_char
+            if i < n - 2:
+                features['+2:char'] = source_seq[i + 2][0]
+                features['+2:type'] = source_seq[i + 2][2]
+        else:
+            features['EOS'] = True
+
+        # --- 新特徴量1: 文字種遷移パターン ---
+        if i > 0:
+            features['type_transition'] = prev_ctype + '->' + ctype
+
+        # --- 新特徴量2 & 3: 漢字連続長 / 漢字ラン先頭フラグ ---
+        if ctype == 'KANJI':
+            run = 1
+            j = i + 1
+            while j < n and source_seq[j][2] == 'KANJI':
+                run += 1; j += 1
+            j = i - 1
+            while j >= 0 and source_seq[j][2] == 'KANJI':
+                run += 1; j -= 1
+            features['kanji_run_len']   = run
+            features['kanji_pos_first'] = (i == 0 or source_seq[i - 1][2] != 'KANJI')
+
+        result.append(features)
+
+    return result
+
 
 # --- [3. 学習・データ作成ロジック] ---
 
@@ -182,44 +240,51 @@ def predict_text(text: str, model) -> Tuple[str, List[int]]:
     """
     単一行のテキストから予測結果（読み）とインデックスマップを返す。
     run_predict() と predict_oneline() の両方から利用される共通処理。
+
+    【1文字=1ラベル設計の推論フロー】
+    1. get_units() でソース文字系列を構築
+    2. compute_source_features() で文脈特徴量を計算
+    3. CRFが各文字に対して1ラベルを予測
+    4. ラベルからテキストを再構成（---は多文字ユニット継続、+Sは分かち書き）
     """
     units_info = get_units(text)
-    test_data = []
+
+    # ソース文字系列を構築
+    source_seq: List[SourceEntry] = []
     for val, idx in units_info:
         for i, c in enumerate(val):
-            test_data.append([c, idx + i, get_char_type(c)])
-    
-    X_test = [char2features(test_data, i) for i in range(len(test_data))]
-    y_pred = model.predict_single(X_test)
-    
-    translated, index_map = "", []
-    for i, label in enumerate(y_pred):
-        if label == "_": 
-            continue
-            
-        orig_char = test_data[i][0]
-        ctype = test_data[i][2]
-        orig_idx = test_data[i][1]
-        
-        # 予測ラベルから +S を除去した純粋な読み
-        clean_label = label.replace("+S", "")
+            source_seq.append((c, idx + i, get_char_type(c)))
 
-        # 🌟 新規最適化：英数字の場合は常に原文を1文字ずつ出力
-        if ctype in ['NUM', 'ALPHA']:
-            translated += orig_char
-            index_map.append(orig_idx)
-        # 日本語の場合で、継続タグ（---）ではない場合のみ読みを出力
+    if not source_seq:
+        return "", []
+
+    # 特徴量計算 → 予測
+    src_features = compute_source_features(source_seq)
+    y_pred = model.predict_single(src_features)
+
+    # ラベル列からテキストを再構成
+    translated: str       = ""
+    index_map:  List[int] = []
+
+    for i, (char, orig_idx, ctype) in enumerate(source_seq):
+        label = y_pred[i]
+        clean_label = label.replace(MORA_SPLIT, "")
+
+        if clean_label == "_":
+            pass  # スキップ文字（空白等）
         elif clean_label != "---":
-            for char in clean_label:
-                translated += char
+            # 通常の読みラベル
+            for ch in clean_label:
+                translated += ch
                 index_map.append(orig_idx)
-        
-        # 🌟 分かち書きの処理 (+S が含まれていればスペースを足す)
-        if "+S" in label:
+
+        # 分かち書きスペース
+        if MORA_SPLIT in label:
             translated += " "
             index_map.append(orig_idx)
-    
+
     return translated, index_map
+
 
 def load_model(modelpath: str) -> sklearn_crfsuite.CRF:
     """
@@ -316,6 +381,7 @@ def createdata(rawdata: str, tsvdata: str) -> None:
     all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
     success = 0
     for i, line in enumerate(lines, 1):
+        # '#'で始まる行はコメント行としてスキップする（TSVのヘッダー行もこれに含まれる）
         if not line.strip() or line.startswith('#'):
             continue
         rows = process_line_to_tsv(line, i)
@@ -344,13 +410,26 @@ def train(tsvdata: str) -> None:
                 current.append(parts)
     if current:
         sentences.append(current)
-    X = [[char2features(s, i) for i in range(len(s))] for s in sentences]
-    y = [[s[i][1] for i in range(len(s))] for s in sentences]
-    
+    X: List[List[FeatureDict]] = []
+    y: List[List[str]] = []
+    for sentence in sentences:
+        # TSV列: [char, reading, ctype, tag, orig_idx]
+        source_seq: List[SourceEntry] = [
+            (p[0], int(p[4]) if len(p) > 4 and p[4].lstrip('-').isdigit() else idx,
+             p[2])
+            for idx, p in enumerate(sentence)
+        ]
+        labels = [p[1] for p in sentence]
+
+        X.append(compute_source_features(source_seq))
+        y.append(labels)
+
     crf = sklearn_crfsuite.CRF(
-        algorithm='lbfgs',  # 総当りで完全学習
-        max_iterations=30,
-        all_possible_transitions=False,  # あり得ない遷移パターンの計算をスキップさせる
+        algorithm='lbfgs',
+        c1=0.1,   # L1正則化: 低情報特徴量の重みをゼロに近づける
+        c2=0.01,  # L2正則化: 重みを全体的に小さく抑える
+        max_iterations=100,
+        all_possible_transitions=False,  # あり得ない遷移パターンの計算をスキップ
         verbose=True
     )
     crf.fit(X, y)

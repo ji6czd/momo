@@ -1,6 +1,6 @@
 [project]
 name = "momobrl"
-version = "0.1.0"
+version = "0.1.1"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -8,10 +8,10 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "loguru>=0.7.3",
-    "protobuf>=6.33.1",
-    "sudachidict-core>=20251022",
-    "sudachipy>=0.6.10",
+    "loguru",
+    "protobuf",
+    "sudachidict-core",
+    "sudachipy",
 ]
 
 [build-system]

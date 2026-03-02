@@ -11,6 +11,8 @@ message PartOfSpeech {
   repeated string word_not_match = 6;
   int32 reading_word_length_less = 7;
   int32 reading_word_length_greater = 8;
+  int32 surface_word_length_less = 9;
+  int32 surface_word_length_greater = 10;
 }
 
 message Rule {

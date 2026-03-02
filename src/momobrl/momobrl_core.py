@@ -77,11 +77,12 @@ def score_part_of_speech(morpheme: Morpheme, pos: PartOfSpeech) -> Optional[int]
             and has_item_in_list(pos.word_match, src_surface)
             and (
                 pos.reading_word_length_less == 0
-                or sound_len(src_reading_form) <= pos.reading_word_length_less
-            )
+                or (sound_len(src_reading_form) <= pos.reading_word_length_less
+                    and len(src_surface) <= pos.surface_word_length_less))
             and (
                 pos.reading_word_length_greater == 0
-                or sound_len(src_reading_form) >= pos.reading_word_length_greater
+                or (sound_len(src_reading_form) >= pos.reading_word_length_greater
+                    and len(src_surface) >= pos.surface_word_length_greater)
             )
         ):
             return index
@@ -163,15 +164,16 @@ def convert_prolonged_sound_mark(morpheme: Morpheme) -> str:
     # 動詞以外の長音記号を変換する
     # カタカナ語は変換しない
     # 先頭が「ウ」の場合は変換しない
+    # 動詞であっても意思を表すものは変換する
     reading_str_as_list = list(morpheme.reading_form())
-    if not has_part_of_speech(morpheme, "動詞"):
+    if (not has_part_of_speech(morpheme, "動詞")
+        or has_part_of_speech(morpheme, "意志推量形")):
         for index in range(len(reading_str_as_list)):
             if index == 0:
                 continue
             if reading_str_as_list[index] == "ウ":
                 reading_str_as_list[index] = "ー"
     return "".join(reading_str_as_list)
-
 
 def correct_counter_suffix_reading(
     morphemeNum: Morpheme, morphemeCounter: Morpheme
@@ -248,7 +250,11 @@ def convert_to_kana(src_string: str):
                 kanaString += counter
             else:
                 # その他
-                kanaString += convert_prolonged_sound_mark(m)
+                if m.part_of_speech()[0] == "名詞" and m.part_of_speech()[1] == "数詞":
+                    # 数詞は、表記を追加する
+                    kanaString += m.normalized_form()
+                else:
+                    kanaString += convert_prolonged_sound_mark(m)
         # この品詞のルールを、ルールリストに基づいて処理する
         if m_index < len(tokenized_list) - 1:
             if is_space_required(m, tokenized_list[m_index + 1]):

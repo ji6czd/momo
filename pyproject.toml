@@ -20,3 +20,15 @@ requires = ["uv_build>=0.9.9,<0.10.0"]
 build-backend = "uv_build"
 [project.scripts]
 momo = "momobrl.main:main"
+
+[[tool.mypy.overrides]]
+module = ["sklearn_crfsuite.*", "joblib.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

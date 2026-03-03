@@ -1,19 +1,15 @@
 import sys
 import argparse
 
-import sklearn_crfsuite
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
-try:
-    from .trainer import createdata, train
-    from .pybraille import to_jp_braille, to_braille
-    from .predictor import Predictor
-    from .translator import Translator
-except ImportError:
-    from trainer import createdata, train  # type: ignore
-    from pybraille import to_jp_braille, to_braille  # type: ignore
-    from predictor import Predictor  # type: ignore
-    from translator import Translator  # type: ignore
+if TYPE_CHECKING:
+    import sklearn_crfsuite
+
+from .trainer import create_data, train
+from .pybraille import to_jp_braille, to_braille
+from .predictor import Predictor
+from .translator import Translator
 
 def run_translate():
     """
@@ -46,7 +42,7 @@ def run_predict(model_path: str) -> None:
 
 # --- [5. メイン（デバッグ用ツール群）] ---
 
-def get_labels(crf: sklearn_crfsuite.CRF, target_feature: str) -> List[Tuple[str, float]]:
+def get_labels(crf: "sklearn_crfsuite.CRF", target_feature: str) -> List[Tuple[str, float]]:
     """
     指定された特徴量に対するラベルと重みのリストを返す
     """
@@ -109,7 +105,11 @@ def main():
 
     if args.command == "createdata":
         out = args.raw.rsplit('_', 1)[0] + "_data.tsv"
-        createdata(args.raw, out)
+        try:
+            create_data(args.raw, out)
+        except ValueError as e:
+            print(f"\n❌ Error: {e}", file=sys.stderr)
+            sys.exit(1)
     elif args.command == "train":
         train(args.tsv)
     elif args.command == "predict":

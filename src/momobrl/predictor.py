@@ -1,14 +1,11 @@
 import os
-import pickle
+import joblib
 import json
 from dataclasses import dataclass
 from typing import List
 import sklearn_crfsuite
 
-try:
-    from .features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT
-except ImportError:
-    from features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT  # type: ignore
+from .features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT
 
 @dataclass
 class PredictionResult:
@@ -41,8 +38,7 @@ class Predictor:
     def __init__(self, model_path: str):
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"❌ モデル未検出: {model_path}")
-        with open(model_path, 'rb') as f:
-            self.model = pickle.load(f)
+        self.model = joblib.load(model_path)
 
     def predict(self, text: str) -> PredictionResult:
         # 1. 共通関数を使ってソース文字系列を構築

@@ -1,20 +1,15 @@
-import sys
-import pickle
+import joblib
 import unicodedata
 
 import sklearn_crfsuite
 from typing import List
 
-try:
-    from .features import (
-        get_units, get_char_type, compute_source_features,
-        SourceEntry, FeatureDict,
-    )
-except ImportError:
-    from features import (  # type: ignore
-        get_units, get_char_type, compute_source_features,
-        SourceEntry, FeatureDict,
-    )
+from .features import (
+    get_units, get_char_type, compute_source_features,
+    SourceEntry, FeatureDict,
+)
+
+KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
 
 
 def is_suspicious(raw: str, read: str) -> bool:
@@ -50,12 +45,13 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
     parts = line.split('\t')
 
     if len(parts) < 2:
-        print(f"\n❌ Error (Line {line_num}): タブが見つかりません。"); sys.exit(1)
+        raise ValueError(f"(Line {line_num}): タブが見つかりません。")
     elif len(parts) > 2:
-        print(f"\n❌ Error (Line {line_num}): タブが複数（{len(parts)-1}個）含まれています。")
-        print(f"   -> 原文と読みを区切るためのタブは「1つだけ」にしてください。分かち書き等にタブが混ざっていないか確認してください。")
-        print(parts[2])
-        sys.exit(1)
+        raise ValueError(
+            f"(Line {line_num}): タブが複数（{len(parts)-1}個）含まれています。\n"
+            f"   -> 原文と読みを区切るためのタブは「1つだけ」にしてください。分かち書き等にタブが混ざっていないか確認してください。\n"
+            f"   余分な列の内容: {parts[2]}"
+        )
 
     raw_part, read_full = parts[0], parts[1]
 
@@ -84,9 +80,10 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
             raw_ptr += 1
 
         if raw_ptr >= len(raw_units_info):
-            print(f"\n❌ Error (Line {line_num}): 読みラベル過多。")
-            print(f"   -> 読みインデックス [{label_idx}] のブロック '{r_label}' に対応する原文がありません！")
-            sys.exit(1)
+            raise ValueError(
+                f"(Line {line_num}): 読みラベル過多。\n"
+                f"   -> 読みインデックス [{label_idx}] のブロック '{r_label}' に対応する原文がありません！"
+            )
 
         target_chars, orig_idx = raw_units_info[raw_ptr]
 
@@ -94,7 +91,6 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
             print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})")
 
         # 句読点を見つけたら、読みラベルに自動で「+S」を補う
-        KUTOUTEN = ["。", "、", "？", "！", ".", ","]
         if target_chars in KUTOUTEN and "+S" not in r_label:
             r_label += "+S"
 
@@ -110,14 +106,15 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
     remaining = [u for u in raw_units_info[raw_ptr:] if not u[0].isspace()]
     if remaining:
         first_leftover_val, first_leftover_idx = remaining[0]
-        print(f"\n❌ Error (Line {line_num}): 原文余り。")
-        print(f"   -> 原文インデックス [{first_leftover_idx}] の '{first_leftover_val}' 以降に対応する読みラベルがありません！")
-        sys.exit(1)
+        raise ValueError(
+            f"(Line {line_num}): 原文余り。\n"
+            f"   -> 原文インデックス [{first_leftover_idx}] の '{first_leftover_val}' 以降に対応する読みラベルがありません！"
+        )
 
     return tsv_rows
 
 
-def createdata(rawdata: str, tsvdata: str) -> None:
+def create_data(rawdata: str, tsvdata: str) -> None:
     """
     原データファイル(rawdata)を処理して、TSVファイル(tsvdata)に出力する。
     """
@@ -181,6 +178,5 @@ def train(tsvdata: str) -> None:
     crf.fit(X, y)
 
     model_path = tsvdata.rsplit('.', 1)[0] + ".model"
-    with open(model_path, 'wb') as f:
-        pickle.dump(crf, f)
+    joblib.dump(crf, model_path)
     print("💾 学習完了")

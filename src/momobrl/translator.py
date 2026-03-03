@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from typing import Optional
 from google.protobuf import text_format
 from importlib import resources
@@ -8,14 +7,9 @@ import sys
 from sudachipy import tokenizer
 from sudachipy import dictionary
 from sudachipy import Morpheme
-try:
-    from .braille_rules_pb2 import BrailleRules
-    from .braille_rules_pb2 import PartOfSpeech
-    from . import pybraille
-except ImportError:
-    from braille_rules_pb2 import BrailleRules  # type: ignore
-    from braille_rules_pb2 import PartOfSpeech  # type: ignore
-    import pybraille  # type: ignore
+from .braille_rules_pb2 import BrailleRules
+from .braille_rules_pb2 import PartOfSpeech
+from . import pybraille
 
 class Translator:
     """
@@ -167,25 +161,25 @@ class Translator:
         return "".join(reading_str_as_list)
 
     def _correct_counter_suffix_reading(
-        self, morphemeNum: Morpheme, morphemeCounter: Morpheme
+        self, morpheme_num: Morpheme, morpheme_counter: Morpheme
     ) -> str:
-        reading = morphemeCounter.reading_form()
-        if self._has_part_of_speech(morphemeCounter, "助数詞可能") or self._has_part_of_speech(
-            morphemeCounter, "助数詞"
+        reading = morpheme_counter.reading_form()
+        if self._has_part_of_speech(morpheme_counter, "助数詞可能") or self._has_part_of_speech(
+            morpheme_counter, "助数詞"
         ):
-            reading = morphemeCounter.reading_form()
-            number = morphemeNum.surface()
-            if morphemeCounter.surface() in "匹":
+            reading = morpheme_counter.reading_form()
+            number = morpheme_num.surface()
+            if morpheme_counter.surface() in "匹":
                 if number[len(number) - 1] in "168":
                     reading = chr(ord(reading[0]) + 2) + reading[1:]
                 elif number[len(number) - 1] == "3":
                     reading = chr(ord(reading[0]) + 1) + reading[1:]
-            elif morphemeCounter.surface() == "本":
+            elif morpheme_counter.surface() == "本":
                 if number[len(number) - 1] in "24579":
                     reading = chr(ord(reading[0]) - 2) + reading[1:]
                 elif number[len(number) - 1] in "3":
                     reading = chr(ord(reading[0]) - 1) + reading[1:]
-            elif morphemeCounter.surface() == "版":
+            elif morpheme_counter.surface() == "版":
                 if number[len(number) - 1] in "24579":
                     reading = chr(ord(reading[0]) - 1) + reading[1:]
                 elif number[len(number) - 1] in "168":
@@ -209,43 +203,33 @@ class Translator:
 
     def convert_to_kana(self, src_string: str) -> str:
         """テキストをかな（カタカナ）読みに変換する。"""
-        kanaString: str = ""
+        kana_str: str = ""
         tokenized_list = self._tokenizer_obj.tokenize(src_string)
         for m_index, m in enumerate(tokenized_list):
             if m.part_of_speech()[0] == "助詞":
                 if m.reading_form() == "ハ":
-                    kanaString += "ワ"
+                    kana_str += "ワ"
                 elif m.reading_form() == "ヘ":
-                    kanaString += "エ"
+                    kana_str += "エ"
                 else:
-                    kanaString += m.reading_form()
+                    kana_str += m.reading_form()
             elif not self._is_kana_conversion_required(m):
-                kanaString += m.surface()
+                kana_str += m.surface()
             else:
                 counter = self._correct_counter_suffix_reading(tokenized_list[m_index - 1], m)
                 if counter != "":
-                    kanaString += counter
+                    kana_str += counter
                 else:
                     if m.part_of_speech()[0] == "名詞" and m.part_of_speech()[1] == "数詞":
-                        kanaString += m.normalized_form()
+                        kana_str += m.normalized_form()
                     else:
-                        kanaString += self._convert_prolonged_sound_mark(m)
+                        kana_str += self._convert_prolonged_sound_mark(m)
             if m_index < len(tokenized_list) - 1:
                 if self._is_space_required(m, tokenized_list[m_index + 1]):
-                    kanaString += " "
-        return kanaString
+                    kana_str += " "
+        return kana_str
 
     def convert_to_braille(self, src: str) -> str:
         """テキストを点字に変換する。"""
         kana_str = self.convert_to_kana(src)
         return pybraille.to_jp_braille(kana_str)
-
-
-if __name__ == "__main__":
-    t = Translator()
-    src = "原文を分割する機能も追加してみました。"
-    print(src)
-    print(t.segment_braille_rule(src))
-    kana_str = t.convert_to_kana(src)
-    print(kana_str)
-    print(pybraille.to_jp_braille(kana_str))

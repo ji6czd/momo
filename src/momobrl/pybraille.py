@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-#
 # This is a Python script to convert Japanese katakana text to Braille.
 
 import unicodedata

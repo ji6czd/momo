@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "momobrl"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
@@ -47,9 +47,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "loguru" },
     { name = "protobuf" },
-    { name = "sklearn-crfsuite", specifier = ">=0.5.0" },
+    { name = "sklearn-crfsuite" },
     { name = "sudachidict-core" },
     { name = "sudachipy" },
 ]

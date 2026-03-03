@@ -1,9 +1,10 @@
 import os
-import joblib
 import json
 from dataclasses import dataclass
 from typing import List
-import sklearn_crfsuite
+
+# 🌟 joblib と sklearn_crfsuite を削除し、本家 pycrfsuite をインポート
+import pycrfsuite
 
 from .features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT
 
@@ -33,12 +34,15 @@ class PredictionResult:
 
 class Predictor:
     """
-    CRFモデルをロードし、テキストの推論（点訳）を行うエンジンクラス
+    CRFモデル（ネイティブバイナリ）をロードし、テキストの推論（点訳）を行うエンジンクラス
     """
     def __init__(self, model_path: str):
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"❌ モデル未検出: {model_path}")
-        self.model = joblib.load(model_path)
+        
+        # 🌟 pycrfsuite の Tagger を直接使い、バイナリファイルを安全にロード
+        self.tagger = pycrfsuite.Tagger()
+        self.tagger.open(model_path)
 
     def predict(self, text: str) -> PredictionResult:
         # 1. 共通関数を使ってソース文字系列を構築
@@ -52,17 +56,31 @@ class Predictor:
             # 空文字が渡された場合の安全処理
             return PredictionResult(text, "", [], [], [[] for _ in text])
 
-        # 2. 特徴量計算と予測
+        # 2. 特徴量計算
         src_features = compute_source_features(source_seq)
-        y_pred = self.model.predict_single(src_features)
-        y_marginals = self.model.predict_marginals_single(src_features)
+        
+        # 🌟 pycrfsuite による予測と確率（自信度）の取得
+        # まず特徴量を Tagger にセットする
+        self.tagger.set(src_features)
+        
+        # 最も確率の高いラベル列を取得
+        y_pred = self.tagger.tag()
+        
+        # 各文字のラベルに対する確率（自信度）を計算
+        # （sklearn_crfsuite の predict_marginals_single と同等の処理）
+        y_marginals = []
+        labels = self.tagger.labels() # モデルが知っている全てのラベル
+        for i in range(len(src_features)):
+            # その位置(i)での各ラベルの確率を辞書化
+            probs = {label: self.tagger.marginal(label, i) for label in labels}
+            y_marginals.append(probs)
 
         # 3. 結果構築用の変数
         translated: str = ""
         kana_to_src_index: List[int] = []
         confidences: List[float] = []
         
-        # 🌟 原文から仮名への逆引き用（原文の文字数分、空のリストを用意）
+        # 原文から仮名への逆引き用（原文の文字数分、空のリストを用意）
         src_to_kana_index: List[List[int]] = [[] for _ in text]
         kana_pos = 0  # 構築中の仮名文字列の現在位置
 
@@ -81,7 +99,7 @@ class Predictor:
                     kana_to_src_index.append(orig_idx)
                     confidences.append(confidence)
                     
-                    # 🌟 原文 -> 仮名のインデックスを記録
+                    # 原文 -> 仮名のインデックスを記録
                     src_to_kana_index[orig_idx].append(kana_pos)
                     kana_pos += 1
 
@@ -90,7 +108,7 @@ class Predictor:
                 kana_to_src_index.append(orig_idx)
                 confidences.append(confidence)
                 
-                # 🌟 スペースも仮名の1文字としてインデックスに記録
+                # スペースも仮名の1文字としてインデックスに記録
                 src_to_kana_index[orig_idx].append(kana_pos)
                 kana_pos += 1
 

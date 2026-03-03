@@ -1,9 +1,10 @@
 import unicodedata
 import re
-from typing import Union, List, Dict, Tuple
+from typing import List, Dict, Tuple
 
 # --- [共通定義・型定義] ---
-FeatureDict = Dict[str, Union[str, float, bool]]
+# 🌟 pycrfsuiteネイティブ仕様に変更：値はすべて float（重み）になります
+FeatureDict = Dict[str, float]
 # ソース文字系列 = [(char, orig_idx, ctype), ...]
 SourceEntry = Tuple[str, int, str]
 
@@ -52,7 +53,7 @@ def get_units(text: str) -> List[Tuple[str, int]]:
 def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
     """
     ソース文字系列全体に対して、各文字の文脈特徴量を一括計算する。
-    1文字=1ラベルの設計に対応し、各文字に対応するFeatureDictのリストを返す。
+    pycrfsuiteネイティブの { "feature_name=value": 1.0 } 形式で出力する。
     """
     result: List[FeatureDict] = []
     n = len(source_seq)
@@ -63,38 +64,39 @@ def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
         next_char  = source_seq[i + 1][0] if i < n - 1 else ""
         next_ctype = source_seq[i + 1][2] if i < n - 1 else ""
 
+        # 🌟 自身の文字と文字種（f文字列を使ってキー側に埋め込む）
         features: FeatureDict = {
             'bias': 1.0,
-            'char': char,
-            'type': ctype,
+            f'char={char}': 1.0,
+            f'type={ctype}': 1.0,
         }
 
         # --- 前後1文字コンテキスト ---
         if i > 0:
-            features['-1:char'] = prev_char
-            features['-1:type'] = prev_ctype
-            features['-1:bi']   = prev_char + char
+            features[f'-1:char={prev_char}'] = 1.0
+            features[f'-1:type={prev_ctype}'] = 1.0
+            features[f'-1:bi={prev_char}{char}'] = 1.0
             if i > 1:
-                features['-2:char'] = source_seq[i - 2][0]
-                features['-2:type'] = source_seq[i - 2][2]
-                features['-2:-1:bi'] = source_seq[i - 2][0] + prev_char
+                features[f'-2:char={source_seq[i - 2][0]}'] = 1.0
+                features[f'-2:type={source_seq[i - 2][2]}'] = 1.0
+                features[f'-2:-1:bi={source_seq[i - 2][0]}{prev_char}'] = 1.0
         else:
-            features['BOS'] = True
+            features['BOS'] = 1.0
 
         if i < n - 1:
-            features['+1:char'] = next_char
-            features['+1:type'] = next_ctype
-            features['+1:bi']   = char + next_char
+            features[f'+1:char={next_char}'] = 1.0
+            features[f'+1:type={next_ctype}'] = 1.0
+            features[f'+1:bi={char}{next_char}'] = 1.0
             if i < n - 2:
-                features['+2:char'] = source_seq[i + 2][0]
-                features['+2:type'] = source_seq[i + 2][2]
-                features['+1:+2:bi'] = next_char + source_seq[i + 2][0]
+                features[f'+2:char={source_seq[i + 2][0]}'] = 1.0
+                features[f'+2:type={source_seq[i + 2][2]}'] = 1.0
+                features[f'+1:+2:bi={next_char}{source_seq[i + 2][0]}'] = 1.0
         else:
-            features['EOS'] = True
+            features['EOS'] = 1.0
 
         # --- 特徴量1: 文字種遷移パターン ---
         if i > 0:
-            features['type_transition'] = prev_ctype + '->' + ctype
+            features[f'type_transition={prev_ctype}->{ctype}'] = 1.0
 
         # --- 特徴量2 & 3: 漢字連続長 / 漢字ラン先頭フラグ ---
         if ctype == 'KANJI':
@@ -105,8 +107,12 @@ def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
             j = i - 1
             while j >= 0 and source_seq[j][2] == 'KANJI':
                 run += 1; j -= 1
-            features['kanji_run_len']   = run
-            features['kanji_pos_first'] = (i == 0 or source_seq[i - 1][2] != 'KANJI')
+                
+            # 数値（長さ）はそのまま重みとして渡す
+            features['kanji_run_len'] = float(run)
+            
+            if i == 0 or source_seq[i - 1][2] != 'KANJI':
+                features['kanji_pos_first'] = 1.0
 
         result.append(features)
 

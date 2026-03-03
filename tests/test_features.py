@@ -122,21 +122,22 @@ class TestComputeSourceFeatures:
     def test_bos_flag_on_first(self):
         seq = self._make_seq("あい")
         features = compute_source_features(seq)
-        assert features[0].get("BOS") is True
+        assert features[0].get("BOS") == 1.0
         assert "BOS" not in features[1]
 
     def test_eos_flag_on_last(self):
         seq = self._make_seq("あい")
         features = compute_source_features(seq)
-        assert features[-1].get("EOS") is True
+        assert features[-1].get("EOS") == 1.0
         assert "EOS" not in features[0]
 
     def test_context_features_middle(self):
         seq = self._make_seq("あいう")
         features = compute_source_features(seq)
         mid = features[1]
-        assert mid["-1:char"] == "あ"
-        assert mid["+1:char"] == "う"
+        # pycrfsuiteネイティブ形式: 値がキーに埋め込まれる
+        assert mid.get("-1:char=あ") == 1.0
+        assert mid.get("+1:char=う") == 1.0
 
     def test_kanji_run_len(self):
         seq = self._make_seq("漢字")
@@ -147,16 +148,17 @@ class TestComputeSourceFeatures:
     def test_kanji_pos_first(self):
         seq = self._make_seq("漢字")
         features = compute_source_features(seq)
-        assert features[0]["kanji_pos_first"] is True
-        assert features[1]["kanji_pos_first"] is False
+        assert features[0]["kanji_pos_first"] == 1.0
+        assert "kanji_pos_first" not in features[1]
 
     def test_type_transition(self):
         seq = self._make_seq("あ字")
         features = compute_source_features(seq)
-        assert features[1]["type_transition"] == "HIRAGANA->KANJI"
+        # pycrfsuiteネイティブ形式: 値がキーに埋め込まれる
+        assert features[1].get("type_transition=HIRAGANA->KANJI") == 1.0
 
     def test_single_char(self):
         seq = self._make_seq("あ")
         features = compute_source_features(seq)
-        assert features[0].get("BOS") is True
-        assert features[0].get("EOS") is True
+        assert features[0].get("BOS") == 1.0
+        assert features[0].get("EOS") == 1.0

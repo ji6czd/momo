@@ -1,8 +1,8 @@
-import joblib
 import unicodedata
-
-import sklearn_crfsuite
 from typing import List
+
+# 🌟 joblib と sklearn_crfsuite を削除し、本家 pycrfsuite をインポート
+import pycrfsuite
 
 from .features import (
     get_units, get_char_type, compute_source_features,
@@ -153,13 +153,13 @@ def train(tsvdata: str) -> None:
                 current.append(parts)
     if current:
         sentences.append(current)
+        
     X: List[List[FeatureDict]] = []
     y: List[List[str]] = []
     for sentence in sentences:
         # TSV列: [char, reading, ctype, tag, orig_idx]
         source_seq: List[SourceEntry] = [
-            (p[0], int(p[4]) if len(p) > 4 and p[4].lstrip('-').isdigit() else idx,
-             p[2])
+            (p[0], int(p[4]) if len(p) > 4 and p[4].lstrip('-').isdigit() else idx, p[2])
             for idx, p in enumerate(sentence)
         ]
         labels = [p[1] for p in sentence]
@@ -167,16 +167,25 @@ def train(tsvdata: str) -> None:
         X.append(compute_source_features(source_seq))
         y.append(labels)
 
-    crf = sklearn_crfsuite.CRF(
-        algorithm='lbfgs',
-        c1=0.1,   # L1正則化: 低情報特徴量の重みをゼロに近づける
-        c2=0.01,  # L2正則化: 重みを全体的に小さく抑える
-        max_iterations=70,
-        all_possible_transitions=False,  # あり得ない遷移パターンの計算をスキップ
-        verbose=True
-    )
-    crf.fit(X, y)
+    # 🌟 sklearn_crfsuite を使わず、本家 pycrfsuite の Trainer を直接呼び出す
+    trainer = pycrfsuite.Trainer(verbose=True)
 
-    model_path = tsvdata.rsplit('.', 1)[0] + ".model"
-    joblib.dump(crf, model_path)
-    print("💾 学習完了")
+    # データを1文ずつ追加
+    for xseq, yseq in zip(X, y):
+        trainer.append(xseq, yseq)
+
+    # ハイパーパラメータの設定
+    trainer.set_params({
+        'c1': 0.1,   # L1正則化: 低情報特徴量の重みをゼロに近づける
+        'c2': 0.01,  # L2正則化: 重みを全体的に小さく抑える
+        'max_iterations': 70,
+        'feature.possible_transitions': False  # あり得ない遷移パターンの計算をスキップ
+    })
+
+    # モデルファイルの拡張子を明示的に .crfsuite に変更（世界共通バイナリ）
+    model_path = tsvdata.rsplit('.', 1)[0] + ".crfsuite"
+    
+    # 🌟 学習と同時に、指定したパスに直接ネイティブバイナリを吐き出す
+    trainer.train(model_path)
+    
+    print(f"💾 学習完了: {model_path} にネイティブバイナリを保存しました！")

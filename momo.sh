@@ -2,8 +2,8 @@
 set -eu
 raw=dataset/training_raw.tsv
 tsv=dataset/training_data.tsv
-model=dataset/training_data.model
-cmd=./src/momobrl/main.py
+model=dataset/training_data.crfsuite
+cmd=momo
 # 学習用関数
 check() {
     echo "Training..."

@@ -9,8 +9,8 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "loguru",
-    "sklearn-crfsuite",
     "protobuf",
+    "python-crfsuite>=0.9.12",
     "sudachidict-core",
     "sudachipy",
 ]
@@ -22,7 +22,7 @@ build-backend = "uv_build"
 momo = "momobrl.main:main"
 
 [[tool.mypy.overrides]]
-module = ["sklearn_crfsuite.*", "joblib.*"]
+module = ["pycrfsuite.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

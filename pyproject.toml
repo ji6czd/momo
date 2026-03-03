@@ -1,6 +1,6 @@
 [project]
 name = "momobrl"
-version = "0.1.0"
+version = "0.1.1"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -9,15 +9,14 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "loguru>=0.7.3",
-    "protobuf>=6.33.1",
     "sklearn-crfsuite>=0.5.0",
-    "sudachidict-core>=20251022",
-    "sudachipy>=0.6.10",
+    "protobuf",
+    "sudachidict-core",
+    "sudachipy",
 ]
 
 [build-system]
 requires = ["uv_build>=0.9.9,<0.10.0"]
 build-backend = "uv_build"
 [project.scripts]
-momo = "momobrl.momo:main"
-neomomo = "momobrl.neomomo:main"
+neomomo = "momobrl.main:main"

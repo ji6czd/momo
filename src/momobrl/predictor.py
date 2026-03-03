@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from typing import List
 import sklearn_crfsuite
 
-from .features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT
+try:
+    from .features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT
+except ImportError:
+    from features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT  # type: ignore
 
 @dataclass
 class PredictionResult:

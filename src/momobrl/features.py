@@ -35,18 +35,18 @@ def get_units(text: str) -> List[Tuple[str, int]]:
     英数字の連続（カンマやハイフン含む）は自動的に1つのブロックとしてまとめる。
     """
     regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|([a-zA-Z0-9\.\-,]+)|(\s+)|(.)'
-    units = []
+    units: List[Tuple[str, int]] = []
     for m in re.finditer(regex, text):
-        if m.group(1) is not None:
-            units.append((m.group(1), m.start(1)))
-        elif m.group(2) is not None:
-            units.append((m.group(2), m.start(2)))
-        elif m.group(3) is not None:
-            units.append((m.group(3), m.start(3)))
-        elif m.group(4) is not None:
-            units.append((m.group(4), m.start(4)))
+        if (g := m.group(1)) is not None:
+            units.append((g, m.start(1)))
+        elif (g := m.group(2)) is not None:
+            units.append((g, m.start(2)))
+        elif (g := m.group(3)) is not None:
+            units.append((g, m.start(3)))
+        elif (g := m.group(4)) is not None:
+            units.append((g, m.start(4)))
         else:
-            units.append((m.group(5), m.start(5)))
+            units.append((m.group(5) or "", m.start(5)))
     return units
 
 def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
@@ -77,6 +77,7 @@ def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
             if i > 1:
                 features['-2:char'] = source_seq[i - 2][0]
                 features['-2:type'] = source_seq[i - 2][2]
+                features['-2:-1:bi'] = source_seq[i - 2][0] + prev_char
         else:
             features['BOS'] = True
 
@@ -87,6 +88,7 @@ def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
             if i < n - 2:
                 features['+2:char'] = source_seq[i + 2][0]
                 features['+2:type'] = source_seq[i + 2][2]
+                features['+1:+2:bi'] = next_char + source_seq[i + 2][0]
         else:
             features['EOS'] = True
 

@@ -3,7 +3,7 @@ set -eu
 raw=dataset/training_raw.tsv
 tsv=dataset/training_data.tsv
 model=dataset/training_data.model
-cmd=./src/momobrl/neomomo.py
+cmd=./src/momobrl/main.py
 # 学習用関数
 check() {
     echo "Training..."
@@ -22,6 +22,15 @@ predict() {
     uv run $cmd predict --model=$model
 }
 
+translate() {
+    echo "Translating..."
+    uv run $cmd translate
+}
+
+label() {
+    echo "Labeling..."
+    uv run $cmd label --model=$model
+}
 # メイン処理
 case "$1" in
     train)
@@ -32,6 +41,12 @@ case "$1" in
         ;;
     check)
         check
+        ;;
+    translate)
+        translate
+        ;;
+    label)
+        label
         ;;
     *)
         echo "Usage: $0 {train|predict}"

@@ -55,17 +55,25 @@ predict_page = """<!DOCTYPE html>
 """
 
 model_file = "./dataset/training_data.zip"
-def make_confidences_table(res: PredictionResult) -> str:
-    confidences_table = "<table border='1'><tr><th>文字</th>"
-    # まず文字を横に並べる
+def make_characters_table(res: PredictionResult) -> str:
+    characters_table = "<table border='1'><tr><th>元の文字</th>"
+
+    for i, idx in enumerate(res.kana_to_src_index):
+        if res.kana_text[i] == ' ':
+            orig_char = ' '
+        else:
+            orig_char = res.source_text[idx] if idx < len(res.source_text) else ''
+        characters_table += f"<td>{orig_char}</td>"
+    characters_table += "</tr><tr><th>文字</th>"
+    # かな約結果を並べる
     for c in res.kana_text:
-        confidences_table += f"<td>{c}</td>"
-    confidences_table += "</tr><tr><th>確信度</th>"
+        characters_table += f"<td>{c}</td>"
+    characters_table += "</tr><tr><th>確信度</th>"
     # 次に確信度を横に並べる
     for conf in res.confidences:
-        confidences_table += f"<td>{conf:.2f}</td>"
-    confidences_table += "</tr></table>"
-    return confidences_table
+        characters_table += f"<td>{conf:.2f}</td>"
+    characters_table += "</tr></table>"
+    return characters_table
 
 @app.route("/")
 def hello() -> str:
@@ -79,7 +87,7 @@ def predict() -> str:
 
     res = p.predict(source)
     
-    return predict_page.format(source=source, result=res.kana_text, confidences_table=make_confidences_table(res), model_version=model_version)
+    return predict_page.format(source=source, result=res.kana_text, confidences_table=make_characters_table(res), model_version=model_version)
 
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:
     # Safely exit program

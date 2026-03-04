@@ -1,4 +1,8 @@
+import json
+import os
 import unicodedata
+import zipfile
+from datetime import datetime, timezone
 from typing import List
 
 # 🌟 joblib と sklearn_crfsuite を削除し、本家 pycrfsuite をインポート
@@ -189,3 +193,14 @@ def train(tsvdata: str) -> None:
     trainer.train(model_path)
     
     print(f"💾 学習完了: {model_path} にネイティブバイナリを保存しました！")
+
+    # バージョン情報と合わせて ZIP に梱包する
+    zip_path = model_path.rsplit(".", 1)[0] + ".zip"
+    version_info = {
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "model_file": os.path.basename(model_path),
+    }
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(model_path, os.path.basename(model_path))
+        zf.writestr("version_info.json", json.dumps(version_info, ensure_ascii=False, indent=2))
+    print(f"📦 ZIPパッケージ作成完了: {zip_path}")

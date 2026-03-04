@@ -1,5 +1,8 @@
-import os
 import json
+import os
+import shutil
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from typing import List
 
@@ -39,10 +42,48 @@ class Predictor:
     def __init__(self, model_path: str):
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"❌ モデル未検出: {model_path}")
-        
+
+        self._version_info: dict | None = None
+        self._tmp_dir: str | None = None
+
+        if model_path.endswith(".zip"):
+            with zipfile.ZipFile(model_path, "r") as zf:
+                namelist = zf.namelist()
+                # バージョン情報を読み込む
+                if "version_info.json" in namelist:
+                    self._version_info = json.loads(
+                        zf.read("version_info.json").decode("utf-8")
+                    )
+                # .crfsuite ファイルを一時ディレクトリに展開
+                crfsuite_files = [n for n in namelist if n.endswith(".crfsuite")]
+                if not crfsuite_files:
+                    raise ValueError(
+                        f"❌ ZIPファイル内に .crfsuite ファイルが見つかりません: {model_path}"
+                    )
+                self._tmp_dir = tempfile.mkdtemp()
+                zf.extract(crfsuite_files[0], self._tmp_dir)
+                actual_model_path = os.path.join(self._tmp_dir, crfsuite_files[0])
+        else:
+            actual_model_path = model_path
+
         # 🌟 pycrfsuite の Tagger を直接使い、バイナリファイルを安全にロード
         self.tagger = pycrfsuite.Tagger()
-        self.tagger.open(model_path)
+        self.tagger.open(actual_model_path)
+
+    def __del__(self) -> None:
+        """一時ディレクトリを削除してクリーンアップする"""
+        if self._tmp_dir and os.path.exists(self._tmp_dir):
+            shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def get_version_info(self) -> dict | None:
+        """
+        ZIP形式で読み込んだ場合に保存されているバージョン情報を返す。
+
+        Returns:
+            dict: version_info.json の内容（少なくとも ``trained_at`` キーを含む）。
+                  .crfsuite ファイルを直接ロードした場合は ``None``。
+        """
+        return self._version_info
 
     def predict(self, text: str) -> PredictionResult:
         # 1. 共通関数を使ってソース文字系列を構築

@@ -4,16 +4,30 @@ import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
 
 import pycrfsuite
 
 from .features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT
-# 🌟 先ほど作ったフォールバック辞書を読み込む
 from .fallback_dict import FALLBACK_DICT
 
-# 🌟 フォールバックを発動させる自信度の境界線（30%）
+# フォールバックを発動させる自信度の境界線（30%）
 CONFIDENCE_THRESHOLD = 0.3
+
+# 🌟 訓読みを誘発しやすい「安全な送り仮名」のリスト
+# ※「す」「し」（サ変＋する等）や「に」「を」「は」等の助詞になりやすい文字は除外
+SAFE_OKURIGANA = set(
+    "あいうえお"
+    "かきくけこ"
+    "たちつてと"
+    "なにぬねの"
+    "まみむめも"
+    "やゆよ"
+    "らりるれろ"
+    "わ"
+    "ばびぶべぼ"
+)
+
 
 @dataclass
 class PredictionResult:
@@ -66,6 +80,45 @@ class Predictor:
     def get_version_info(self) -> dict | None:
         return self._version_info
 
+    # 🌟 切り出したフォールバック処理の関数（メソッド）
+    def _apply_fallback(self, i: int, char: str, ctype: str, label: str, confidence: float, source_seq: List[SourceEntry], last_fallback: str) -> Tuple[str, str, bool]:
+        """
+        AIの予測結果に対して、必要に応じて単漢字辞書による上書き（フォールバック）を行う。
+        戻り値: (上書き後のラベル, 新しい last_fallback の値, フォールバックが適用されたかどうかのフラグ)
+        """
+        is_applied = False
+        has_split = (MORA_SPLIT in label)
+        new_label = label
+        new_last_fallback = last_fallback
+
+        if ctype == 'KANJI' and confidence < CONFIDENCE_THRESHOLD and char in FALLBACK_DICT:
+            # 次の文字と文字種を取得
+            next_char = source_seq[i + 1][0] if i < len(source_seq) - 1 else ""
+            next_ctype = source_seq[i + 1][2] if i < len(source_seq) - 1 else ""
+            
+            # 安全な送り仮名リストに含まれるひらがなか判定
+            if next_ctype == 'HIRAGANA' and next_char in SAFE_OKURIGANA:
+                replacement_reading = FALLBACK_DICT[char]["kun"]
+            else:
+                replacement_reading = FALLBACK_DICT[char]["on"]
+            
+            new_label = replacement_reading + (MORA_SPLIT if has_split else "")
+            new_last_fallback = replacement_reading
+            is_applied = True
+            
+        elif char == '々' and last_fallback:
+            # 直前が辞書置換されていて「々」が来た場合
+            new_label = last_fallback + (MORA_SPLIT if has_split else "")
+            new_last_fallback = last_fallback
+            is_applied = True
+            
+        # 辞書が適用されず、記号でもなかった場合は、記憶をリセット
+        if not is_applied and ctype != 'SYMBOL':
+            new_last_fallback = ""
+
+        return new_label, new_last_fallback, is_applied
+
+
     def predict(self, text: str) -> PredictionResult:
         units_info = get_units(text)
         source_seq: List[SourceEntry] = []
@@ -93,40 +146,16 @@ class Predictor:
         src_to_kana_index: List[List[int]] = [[] for _ in text]
         kana_pos = 0
         
-        # 🌟 「々」が来た時のための、直前の辞書読み記憶変数
         last_fallback_reading = ""
 
         for i, (char, orig_idx, ctype) in enumerate(source_seq):
             label = y_pred[i]
             confidence = y_marginals[i].get(label, 0.0)
             
-            # ===== 🌟 辞書フォールバック（バックオフ）ロジック =====
-            is_fallback_applied = False
-            has_split = (MORA_SPLIT in label) # 元のAIの「分かち書き意志」は保護する
-            
-            if ctype == 'KANJI' and confidence < CONFIDENCE_THRESHOLD and char in FALLBACK_DICT:
-                # 1. 辞書置換が発動！ 次の文字を見て音/訓を判定
-                next_ctype = source_seq[i + 1][2] if i < len(source_seq) - 1 else ""
-                
-                if next_ctype == 'HIRAGANA':
-                    replacement_reading = FALLBACK_DICT[char]["kun"]
-                else:
-                    replacement_reading = FALLBACK_DICT[char]["on"]
-                
-                # ラベルを強制上書き
-                label = replacement_reading + (MORA_SPLIT if has_split else "")
-                last_fallback_reading = replacement_reading
-                is_fallback_applied = True
-                
-            elif char == '々' and last_fallback_reading:
-                # 2. 直前が辞書置換されていて「々」が来た場合、読みをリピートさせる
-                label = last_fallback_reading + (MORA_SPLIT if has_split else "")
-                is_fallback_applied = True
-                
-            # 辞書が適用されず、記号でもなかった場合は、記憶をリセット（無関係な「々」の誤作動防止）
-            if not is_fallback_applied and ctype != 'SYMBOL':
-                last_fallback_reading = ""
-            # =========================================================
+            # 🌟 切り出した関数を呼び出してラベルを評価＆更新
+            label, last_fallback_reading, _ = self._apply_fallback(
+                i, char, ctype, label, confidence, source_seq, last_fallback_reading
+            )
 
             clean_label = label.replace(MORA_SPLIT, "")
 

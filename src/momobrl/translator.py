@@ -190,7 +190,7 @@ class Translator:
 
     # --- 公開メソッド ---
 
-    def segment_braille_rule(self, src_string: str) -> str:
+    def segment_source_text(self, src_string: str) -> str:
         """分かち書きルールに従ってテキストを分割する。"""
         segmented_string: str = ""
         tokenized_list = self._tokenizer_obj.tokenize(src_string)
@@ -228,6 +228,35 @@ class Translator:
                 if self._is_space_required(m, tokenized_list[m_index + 1]):
                     kana_str += " "
         return kana_str
+
+    def segment_kana_string(self, src_string: str) -> str:
+        """ソーステキストを仮名に変換しながら、ソーステキストの各文字に対する仮名を'/'で区切って出力する"""
+        segmented_kana_string: str = ""
+        tokenized_list = self._tokenizer_obj.tokenize(src_string)
+        tokenized_list = self._tokenizer_obj.tokenize(src_string)
+        for m_index, m in enumerate(tokenized_list):
+            if m.part_of_speech()[0] == "助詞":
+                if m.reading_form() == "ハ":
+                    segmented_kana_string += "ワ/"
+                elif m.reading_form() == "ヘ":
+                    segmented_kana_string += "エ/"
+                else:
+                    segmented_kana_string += m.reading_form() + "/"
+            elif not self._is_kana_conversion_required(m):
+                segmented_kana_string += m.surface() + "/"
+            else:
+                counter = self._correct_counter_suffix_reading(tokenized_list[m_index - 1], m)
+                if counter != "":
+                    segmented_kana_string += counter + "/"
+                else:
+                    if m.part_of_speech()[0] == "名詞" and m.part_of_speech()[1] == "数詞":
+                        segmented_kana_string += m.normalized_form() + "/"
+                    else:
+                        segmented_kana_string += self._convert_prolonged_sound_mark(m) + "/"
+            if m_index < len(tokenized_list) - 1:
+                if self._is_space_required(m, tokenized_list[m_index + 1]):
+                    segmented_kana_string += " /"
+        return segmented_kana_string
 
     def convert_to_braille(self, src: str) -> str:
         """テキストを点字に変換する。"""

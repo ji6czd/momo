@@ -1,15 +1,15 @@
 import sys
 import argparse
 from typing import List, Tuple
+from importlib.metadata import version
 
 from .trainer import create_data, train
 from .predictor import Predictor
 
-# ※ Translator や pybraille は現状の構成に合わせてそのまま残しています
 from .pybraille import to_jp_braille, to_braille
 from .translator import Translator
 
-def run_translate():
+def run_translate(opt_segment: bool = False):
     """
     Sudachiを使い、形態素解析ベースの点訳を行う。
     標準入力からテキストを読み込み、点字変換して標準出力に出力する対話型モード。
@@ -21,9 +21,11 @@ def run_translate():
             src = line.strip()
             if not src:
                 continue
-            kana = t.convert_to_kana(src)
+            kana = t.segment_kana_string(src) if opt_segment else t.convert_to_kana(src)
+            braille = to_jp_braille(kana)
             print(src)
             print(kana)
+            print(braille)
     except KeyboardInterrupt:
         print("\n🛑 翻訳モード終了。")
 
@@ -101,13 +103,14 @@ def run_label_scanner(model_path: str) -> None:
 def main():
     parser = argparse.ArgumentParser(prog="momo")
     subparsers = parser.add_subparsers(dest="command")
-    parser.add_argument("--version", action="version", version="momo 0.1.0")
+    parser.add_argument("-v", "--version", action="version", version=f"Momo {version('momobrl')}")
     
     # コマンドの定義
     pp = subparsers.add_parser("predict")
     pp.add_argument("--model", required=True)
     
     tp = subparsers.add_parser("translate")
+    tp.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
     
     lp = subparsers.add_parser("label")
     lp.add_argument("--model", required=True)
@@ -139,7 +142,7 @@ def main():
         run_predict(args.model)
         
     elif args.command == "translate":
-        run_translate()
+        run_translate(args.segment)
         
     elif args.command == "label":
         run_label_scanner(args.model)

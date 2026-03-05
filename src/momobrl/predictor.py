@@ -134,12 +134,6 @@ class Predictor:
         self.tagger.set(src_features)
         y_pred = self.tagger.tag()
         
-        y_marginals = []
-        labels = self.tagger.labels()
-        for i in range(len(src_features)):
-            probs = {label: self.tagger.marginal(label, i) for label in labels}
-            y_marginals.append(probs)
-
         translated: str = ""
         kana_to_src_index: List[int] = []
         confidences: List[float] = []
@@ -150,9 +144,8 @@ class Predictor:
 
         for i, (char, orig_idx, ctype) in enumerate(source_seq):
             label = y_pred[i]
-            confidence = y_marginals[i].get(label, 0.0)
-            
-            # 🌟 切り出した関数を呼び出してラベルを評価＆更新
+            confidence = self.tagger.marginal(label, i)
+                            # confidence = self.tagger.marginal(label, i)            
             label, last_fallback_reading, _ = self._apply_fallback(
                 i, char, ctype, label, confidence, source_seq, last_fallback_reading
             )

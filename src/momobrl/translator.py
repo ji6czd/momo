@@ -21,7 +21,8 @@ class Translator:
         logger.debug("Starting MOMO!")
         logger.remove()
         self._mode = tokenizer.Tokenizer.SplitMode.B
-        self._tokenizer_obj = dictionary.Dictionary().create(self._mode)
+        self._dic_obj = dictionary.Dictionary()
+        self._tokenizer_obj = self._dic_obj.create(self._mode)
         self._rules = BrailleRules()
         self._load_braille_rules()
 
@@ -150,15 +151,53 @@ class Translator:
         return True
 
     def _convert_prolonged_sound_mark(self, morpheme: Morpheme) -> str:
-        reading_str_as_list = list(morpheme.reading_form())
+        reading = morpheme.reading_form()
         if (not self._has_part_of_speech(morpheme, "動詞")
                 or self._has_part_of_speech(morpheme, "意志推量形")):
-            for index in range(len(reading_str_as_list)):
-                if index == 0:
-                    continue
-                if reading_str_as_list[index] == "ウ":
-                    reading_str_as_list[index] = "ー"
-        return "".join(reading_str_as_list)
+            surface = morpheme.surface()
+            # 複数の漢字で構成されているか確認
+            if (len(surface) >= 2
+                    and all('\u4e00' <= c <= '\u9fff' or '\u3400' <= c <= '\u4dbf'
+                            for c in surface)):
+                segments = self._segment_reading_by_kanji(surface, reading)
+                if segments is not None:
+                    result = ""
+                    for seg in segments:
+                        if len(seg) >= 2:
+                            result += seg[0] + seg[1:].replace('ウ', 'ー')
+                        else:
+                            result += seg
+                    return result
+            # 連続するひらがなで構成されているか確認
+            elif all('\u3041' <= c <= '\u3096' for c in surface):
+                if len(reading) >= 2:
+                    return reading[0] + reading[1:].replace('ウ', 'ー')
+            else:
+                # 末尾の連続ひらがな部分について変換
+                trailing_hiragana = ""
+                for c in reversed(surface):
+                    if '\u3041' <= c <= '\u3096':
+                        trailing_hiragana = c + trailing_hiragana
+                    else:
+                        break
+                if len(trailing_hiragana) >= 2:
+                    suffix_reading = reading[-len(trailing_hiragana):]
+                    prefix_reading = reading[:-len(trailing_hiragana)]
+                    return prefix_reading + suffix_reading[0] + suffix_reading[1:].replace('ウ', 'ー')
+        return reading
+
+    def _segment_reading_by_kanji(self, surface: str, reading: str) -> Optional[list[str]]:
+        """漢字列 surface の各文字に対応するカタカナ reading のセグメントを返す。
+        マッチしない場合は None を返す。"""
+        if not surface:
+            return [] if not reading else None
+        for r in self._get_reading_form_in_dictionary(surface[0]):
+            if reading.startswith(r):
+                rest = self._segment_reading_by_kanji(surface[1:], reading[len(r):])
+                if rest is not None:
+                    return [r] + rest
+        return None
+
 
     def _correct_counter_suffix_reading(
         self, morpheme_num: Morpheme, morpheme_counter: Morpheme
@@ -187,6 +226,22 @@ class Translator:
         else:
             reading = ""
         return reading
+
+    def _has_reading_in_dictionary(self, surface: str, reading: str) -> bool:
+        reading_list = self._dic_obj.lookup(surface)
+        for m in reading_list:
+            if m.reading_form() == reading:
+                return True
+        return False
+
+    def _get_reading_form_in_dictionary(self, surface: str) -> list[str]:
+        m_list = self._dic_obj.lookup(surface)
+        if not m_list:
+            return []
+        reading_list = []
+        for m in m_list:
+            reading_list.append(m.reading_form())
+        return reading_list
 
     # --- 公開メソッド ---
 

@@ -22,7 +22,7 @@ def run_translate(opt_segment: bool = False):
             if not src:
                 continue
             kana = t.segment_kana_string(src) if opt_segment else t.convert_to_kana(src)
-            braille = to_jp_braille(kana)
+            braille = t.convert_to_braille(src)
             print(src)
             print(kana)
             print(braille)

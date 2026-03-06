@@ -151,13 +151,14 @@ class Translator:
             return False
         return True
 
-    def _convert_prolonged_sound_mark(self, morpheme: Morpheme) -> str:
+    def _convert_prolonged_sound_mark(self, morpheme: Morpheme, split: bool = False) -> str:
         reading = morpheme.reading_form()
+        delimiter = '/' if split else ''
         if (not self._has_part_of_speech(morpheme, "動詞")
                 or self._has_part_of_speech(morpheme, "意志推量形")):
             surface = morpheme.surface()
-            # 複数の漢字で構成されているか確認
-            if (len(surface) >= 2
+            # 漢字で構成されているか確認
+            if (len(surface) >= 1
                     and all('\u4e00' <= c <= '\u9fff' or '\u3400' <= c <= '\u4dbf'
                             for c in surface)):
                 segments = self._segment_reading_by_kanji(surface, reading)
@@ -165,18 +166,18 @@ class Translator:
                     result = ""
                     for seg in segments:
                         if len(seg) >= 2:
-                            result += seg[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', seg[1:])
+                            result += seg[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', seg[1:]) + delimiter
                         else:
                             result += seg
                     return result
                 else:
                     # 各漢字の読みが特定できない場合はひらがな扱いにフォールバック
                     if len(reading) >= 2:
-                        return reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:])
+                        return reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:]) + delimiter
             # 連続するひらがなで構成されているか確認
             elif all('\u3041' <= c <= '\u3096' for c in surface):
                 if len(reading) >= 2:
-                    return reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:])
+                    return reading[0] + delimiter + self._split_kanastr(re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:])) + delimiter
             else:
                 # 末尾の連続ひらがな部分について変換
                 trailing_hiragana = ""
@@ -188,8 +189,8 @@ class Translator:
                 if len(trailing_hiragana) >= 2:
                     suffix_reading = reading[-len(trailing_hiragana):]
                     prefix_reading = reading[:-len(trailing_hiragana)]
-                    return prefix_reading + suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:])
-        return reading
+                    return prefix_reading + delimiter + self._split_kanastr(suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:])) + delimiter
+        return self._split_kana(morpheme) + delimiter if all('\u3041' <= c <= '\u3096' for c in morpheme.surface()) else reading + delimiter
 
     def _segment_reading_by_kanji(self, surface: str, reading: str) -> Optional[list[str]]:
         """漢字列 surface の各文字に対応するカタカナ reading のセグメントを返す。
@@ -289,6 +290,21 @@ class Translator:
                     kana_str += " "
         return kana_str
 
+    def _split_kanastr(self, s: str) -> str:
+        """カタカナ文字列を1文字ずつ分割する。"""
+        l = list(s)
+        # 文字と文字の間に'/'を挿入して結合する
+        return '/'.join(l)
+
+    def _split_kana(self, m: Morpheme) -> str:
+        """ソーステキストがひらがな化カタカナだけだったらカタカナ文字列を1文字ずつ分割する。"""
+        if (all('\u30a0' <= c <= '\u30ff' for c in m.surface())
+        or all('\u3041' <= c <= '\u3096' for c in m.surface())):
+            l = list(m.reading_form())
+            # 文字と文字の間に'/'を挿入して結合する
+            return '/'.join(l)
+        return m.reading_form()
+
     def segment_kana_string(self, src_string: str) -> str:
         """ソーステキストを仮名に変換しながら、ソーステキストの各文字に対する仮名を'/'で区切って出力する"""
         segmented_kana_string: str = ""
@@ -301,9 +317,9 @@ class Translator:
                 elif m.reading_form() == "ヘ":
                     segmented_kana_string += "エ/"
                 else:
-                    segmented_kana_string += m.reading_form() + "/"
+                    segmented_kana_string += self._split_kana(m) + "/"
             elif not self._is_kana_conversion_required(m):
-                segmented_kana_string += m.surface() + "/"
+                segmented_kana_string +=  self._split_kana(m) + "/"
             else:
                 counter = self._correct_counter_suffix_reading(tokenized_list[m_index - 1], m)
                 if counter != "":
@@ -312,7 +328,7 @@ class Translator:
                     if m.part_of_speech()[0] == "名詞" and m.part_of_speech()[1] == "数詞":
                         segmented_kana_string += m.normalized_form() + "/"
                     else:
-                        segmented_kana_string += self._convert_prolonged_sound_mark(m) + "/"
+                        segmented_kana_string += self._convert_prolonged_sound_mark(m, True)
             if m_index < len(tokenized_list) - 1:
                 if self._is_space_required(m, tokenized_list[m_index + 1]):
                     segmented_kana_string += " /"

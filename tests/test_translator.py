@@ -64,6 +64,11 @@ class TestConvertProlongedSoundMark:
         m = make_morpheme("今日", "キョウ", ("名詞", "普通名詞", "副詞可能", "*", "*", "*"))
         assert translator._convert_prolonged_sound_mark(m) == "キョー"
 
+    def test_kanji_compound_u_before_vowel_no_conversion(self, translator):
+        """ウの直後が別の母音のときは長音変換しない: 井上→イノウエ"""
+        m = make_morpheme("井上", "イノウエ", ("名詞", "固有名詞", "人名", "姓", "*", "*"))
+        assert translator._convert_prolonged_sound_mark(m) == "イノウエ"
+
     # --- 非動詞 + 複数漢字 surface → 各漢字の読みで変換 ---
 
     def test_kanji_compound_u_in_second_char(self, translator):

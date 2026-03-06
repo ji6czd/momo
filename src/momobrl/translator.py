@@ -1,4 +1,5 @@
 from typing import Optional
+import re
 from google.protobuf import text_format
 from importlib import resources
 
@@ -164,18 +165,18 @@ class Translator:
                     result = ""
                     for seg in segments:
                         if len(seg) >= 2:
-                            result += seg[0] + seg[1:].replace('ウ', 'ー')
+                            result += seg[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', seg[1:])
                         else:
                             result += seg
                     return result
                 else:
                     # 各漢字の読みが特定できない場合はひらがな扱いにフォールバック
                     if len(reading) >= 2:
-                        return reading[0] + reading[1:].replace('ウ', 'ー')
+                        return reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:])
             # 連続するひらがなで構成されているか確認
             elif all('\u3041' <= c <= '\u3096' for c in surface):
                 if len(reading) >= 2:
-                    return reading[0] + reading[1:].replace('ウ', 'ー')
+                    return reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:])
             else:
                 # 末尾の連続ひらがな部分について変換
                 trailing_hiragana = ""
@@ -187,7 +188,7 @@ class Translator:
                 if len(trailing_hiragana) >= 2:
                     suffix_reading = reading[-len(trailing_hiragana):]
                     prefix_reading = reading[:-len(trailing_hiragana)]
-                    return prefix_reading + suffix_reading[0] + suffix_reading[1:].replace('ウ', 'ー')
+                    return prefix_reading + suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:])
         return reading
 
     def _segment_reading_by_kanji(self, surface: str, reading: str) -> Optional[list[str]]:

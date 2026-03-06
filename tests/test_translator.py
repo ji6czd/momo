@@ -59,6 +59,11 @@ class TestConvertProlongedSoundMark:
         m = make_morpheme("行こう", "イコウ", ("動詞", "一般", "*", "*", "五段-カ行", "意志推量形"))
         assert translator._convert_prolonged_sound_mark(m) == "イコー"
 
+    def test_kanji_compound_unresolvable_fallback(self, translator):
+        """読みが各漢字に分割できない場合はひらがな扱いにフォールバック: 今日→キョー"""
+        m = make_morpheme("今日", "キョウ", ("名詞", "普通名詞", "副詞可能", "*", "*", "*"))
+        assert translator._convert_prolonged_sound_mark(m) == "キョー"
+
     # --- 非動詞 + 複数漢字 surface → 各漢字の読みで変換 ---
 
     def test_kanji_compound_u_in_second_char(self, translator):

@@ -168,6 +168,10 @@ class Translator:
                         else:
                             result += seg
                     return result
+                else:
+                    # 各漢字の読みが特定できない場合はひらがな扱いにフォールバック
+                    if len(reading) >= 2:
+                        return reading[0] + reading[1:].replace('ウ', 'ー')
             # 連続するひらがなで構成されているか確認
             elif all('\u3041' <= c <= '\u3096' for c in surface):
                 if len(reading) >= 2:

@@ -11,6 +11,17 @@ SourceEntry = Tuple[str, int, str]
 # --- [共通定数] ---
 MORA_SPLIT = "+S"   # このラベルの後に分かち書きスペースを挿入する
 
+def get_basic_char_category(c: str) -> str:
+    """1文字を受け取り、基本カテゴリ（かな/漢字/英字/その他）を返す。"""
+    cp = ord(c)
+    if 0x3040 <= cp <= 0x309F: return 'HIRAGANA'
+    if 0x30A0 <= cp <= 0x30FF: return 'KATAKANA'
+    if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF: return 'KANJI'
+    # 半角英字・全角英字
+    if 0x0041 <= cp <= 0x005A or 0x0061 <= cp <= 0x007A or 0xFF21 <= cp <= 0xFF3A or 0xFF41 <= cp <= 0xFF5A:
+        return 'ALPHA'
+    return 'OTHER'
+
 def get_char_type(c: str) -> str:
     """文字種を判定。極限まで高速化するために ord() による範囲判定を使用。"""
     if not c or c.isspace(): return 'SPACE'
@@ -18,16 +29,8 @@ def get_char_type(c: str) -> str:
     
     cat = unicodedata.category(c)
     if cat.startswith('P') or cat.startswith('S'): return 'SYMBOL'
-    
-    cp = ord(c)
-    if 0x3040 <= cp <= 0x309F: return 'HIRAGANA'
-    if 0x30A0 <= cp <= 0x30FF: return 'KATAKANA'
-    if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF: return 'KANJI'
-    # 半角英字・全角英字
-    if 0x0041 <= cp <= 0x005A or 0x0061 <= cp <= 0x007A or 0xFF21 <= cp <= 0xFF3A or 0xFF41 <= cp <= 0xFF5A: 
-        return 'ALPHA'
-        
-    return 'OTHER'
+
+    return get_basic_char_category(c)
 
 def get_units(text: str) -> List[Tuple[str, int]]:
     """

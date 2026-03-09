@@ -1,5 +1,6 @@
-from typing import Optional
 import re
+from typing import Optional
+from itertools import zip_longest
 from google.protobuf import text_format
 from importlib import resources
 
@@ -64,6 +65,20 @@ class Translator:
         for i in lst:
             if i == item or i == "*":
                 return True
+        return False
+
+    @staticmethod
+    def _kana_equal(a: Optional[str], b: Optional[str]) -> bool:
+        """ひらがなとカタカナを同一視して1文字同士を比較する。"""
+        if a is None or b is None:
+            return False
+        if a == b:
+            return True
+        # ひらがな(U+3041–U+3096)とカタカナ(U+30A1–U+30F6)はオフセット0x60で対応
+        if '\u3041' <= a <= '\u3096' and '\u30A1' <= b <= '\u30F6':
+            return ord(a) + 0x60 == ord(b)
+        if '\u30A1' <= a <= '\u30F6' and '\u3041' <= b <= '\u3096':
+            return ord(a) - 0x60 == ord(b)
         return False
 
     def _score_part_of_speech(self, morpheme: Morpheme, pos: PartOfSpeech) -> Optional[int]:
@@ -192,7 +207,7 @@ class Translator:
                     suffix_reading = reading[-len(trailing_hiragana):]
                     prefix_reading = reading[:-len(trailing_hiragana)]
                     return prefix_reading + delimiter + self._split_kanastr(suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:])) + delimiter
-        return self._split_kana(morpheme) + delimiter
+        return self._split_kana(morpheme) if split else reading
 
     def _segment_reading_by_kanji(self, surface: str, reading: str) -> Optional[list[str]]:
         """漢字列 surface の各文字に対応するカタカナ reading のセグメントを返す。
@@ -300,15 +315,23 @@ class Translator:
 
     def _split_kana(self, m: Morpheme) -> str:
         """ソーステキストと読みを比較して、後ろから一致する部分を１文字ずつデリミタで区切って出力する"""
+
         # 後ろから比較したいので、文字列を逆順にしてリスト化する
         r = list(reversed(m.reading_form()))
         s = list(reversed(m.surface()))
         res = ""
-        for r_char, s_char in zip(r, s):
-            if r_char == s_char:
-                res = r_char + "/" + res
-            else:
-                res = r_char + res
+        i: int = 0 # 次の２つのリープで使う
+        for i, r_char in enumerate(r):
+            if i < len(s):
+                if self._kana_equal(r_char, s[i]):
+                    res = r_char + "/" + res
+                else:
+                    break
+        # まだ残っている読みがある
+        if i < len(r) and not self._kana_equal(r[i], s[i]):
+            res = '/' + res
+            # 残りの文字列を追加
+            res = ''.join(reversed(r[i:])) + res
         return res
 
     def segment_kana_string(self, src_string: str) -> str:
@@ -323,7 +346,7 @@ class Translator:
                 elif m.reading_form() == "ヘ":
                     segmented_kana_string += "エ/"
                 else:
-                    segmented_kana_string += self._split_kana(m) + "/"
+                    segmented_kana_string += self._split_kana(m)
             elif not self._is_kana_conversion_required(m):
                 segmented_kana_string +=  self._split_kana(m)
             else:

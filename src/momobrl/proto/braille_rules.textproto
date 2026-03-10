@@ -10,6 +10,8 @@ rule {
     name: "名詞"
     name: "代名詞"
     name: "固有名詞"
+    name: "副詞"
+    name: "形容詞"
     name: "接続詞"
     reading_word_length_greater: 2
   }
@@ -25,7 +27,7 @@ rule {
     name: "接続詞"
     name: "形状詞"
     reading_word_length_greater: 2
-    surface_word_length_greater: 2
+    # surface_word_length_greater: 2
     before_space: true
   }
   next_pos {
@@ -215,9 +217,6 @@ rule {
   # 自立語
   # 例: 笑う
   next_pos {
-    name: "名詞"
-    name: "代名詞"
-    name: "固有名詞"
     name: "動詞"
     name: "形容詞"
     name: "形状詞"

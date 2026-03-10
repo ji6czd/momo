@@ -206,7 +206,10 @@ class Translator:
                 if len(trailing_hiragana) >= 2:
                     suffix_reading = reading[-len(trailing_hiragana):]
                     prefix_reading = reading[:-len(trailing_hiragana)]
-                    return prefix_reading + delimiter + self._split_kanastr(suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:])) + delimiter
+                    if split:
+                        return prefix_reading + delimiter + self._split_kanastr(suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:])) + delimiter
+                    else:
+                        return prefix_reading + delimiter + suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:]) + delimiter
         return self._split_kana(morpheme) if split else reading
 
     def _segment_reading_by_kanji(self, surface: str, reading: str) -> Optional[list[str]]:

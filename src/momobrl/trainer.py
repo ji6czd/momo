@@ -70,6 +70,16 @@ def process_line_to_tsv(line: str, line_num: int) -> List[str]:
 
     # 0始まりでブロックをカウント
     for label_idx, r_label in enumerate(read_blocks):
+        clean_r_label = r_label.replace("+S", "") # "+S" はシステムタグなので除外
+        for c in clean_r_label:
+            if c == "_" or c == " " or c == "-": # システム用の記号はスキップ
+                continue
+            
+            ctype = get_char_type(c)
+            if ctype == 'KANJI':
+                print(f"🚨 警告 (Line {line_num}): 読みに漢字が混入しています！ -> '{c}' (in '{r_label}')")
+            elif ctype == 'HIRAGANA':
+                print(f"🚨 警告 (Line {line_num}): 読みにひらがなが混入しています！ -> '{c}' (in '{r_label}')")
         if r_label == " ":
             if tsv_rows:
                 parts = tsv_rows[-1].split('\t')

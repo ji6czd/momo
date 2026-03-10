@@ -38,7 +38,7 @@ def get_units(text: str) -> List[Tuple[str, int]]:
     ブラケット内の文字も、原文の正確なインデックス（0始まり）を保持する。
     英数字の連続（カンマやハイフン含む）は自動的に1つのブロックとしてまとめる。
     """
-    regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃュょァィゥェォャュョ])|([a-zA-Z0-9\.\-,]+)|(\s+)|(.)'
+    regex = r'\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃゅょァィゥェォャュョ])|([a-zA-Z0-9\.\-,]+)|(\s+)|(.)'
     units: List[Tuple[str, int]] = []
     for m in re.finditer(regex, text):
         if (g := m.group(1)) is not None:

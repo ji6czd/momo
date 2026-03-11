@@ -1,10 +1,11 @@
 import json
 import os
+import re
 import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Set, Dict
 
 import pycrfsuite
 
@@ -15,17 +16,8 @@ from .fallback_dict import FALLBACK_DICT
 CONFIDENCE_THRESHOLD = 0.3
 
 # 🌟 訓読みを誘発しやすい「安全な送り仮名」のリスト
-# ※「す」「し」（サ変＋する等）や「に」「を」「は」等の助詞になりやすい文字は除外
 SAFE_OKURIGANA = set(
-    "あいうえお"
-    "かきくけこ"
-    "たちつてと"
-    "なにぬねの"
-    "まみむめも"
-    "やゆよ"
-    "らりるれろ"
-    "わ"
-    "ばびぶべぼ"
+    "あいうえおかきくけこたちつてとなにぬねのまみむめもやゆよらりるれろわばびぶべぼ"
 )
 
 
@@ -80,23 +72,135 @@ class Predictor:
     def get_version_info(self) -> dict | None:
         return self._version_info
 
-    # 🌟 切り出したフォールバック処理の関数（メソッド）
+
+    # ==========================================
+    # 🌟 推論パイプライン（The Conductor）
+    # ==========================================
+    def predict(self, text: str) -> PredictionResult:
+        """メインの推論フロー。各ステップをパイプラインとして呼び出す。"""
+        if not text:
+            return PredictionResult("", "", [], [], [])
+
+        # 1. 前処理（単位分割・バイパス判定・特徴量準備）
+        source_seq, bypass_indices, ascii_overrides = self._preprocess_text(text)
+        if not source_seq:
+            return PredictionResult(text, "", [], [], [[] for _ in text])
+
+        # 2. 推論（CRFによる生のラベル予測）
+        raw_labels = self._run_inference(source_seq)
+
+        # 3. 後処理（バイパスの適用・フォールバック・自信度の確定）
+        refined_labels, raw_confidences, has_splits = self._refine_predictions(
+            source_seq, raw_labels, bypass_indices, ascii_overrides
+        )
+
+        # 4. 結果の組み立て（文字列とインデックスの最終マッピング）
+        return self._assemble_result(
+            text, source_seq, refined_labels, raw_confidences, has_splits, bypass_indices
+        )
+
+
+    # ==========================================
+    # 🌟 ステップ 1: 前処理
+    # ==========================================
+    def _preprocess_text(self, text: str) -> Tuple[List[SourceEntry], Set[int], Dict[int, str]]:
+        units_info = get_units(text)
+        source_seq: List[SourceEntry] = []
+        bypass_indices: Set[int] = set()
+        ascii_overrides: Dict[int, str] = {}
+        
+        char_idx = 0
+        for val, orig_idx in units_info:
+            # ASCII文字列（英数字・記号・内部スペース）の塊かを判定
+            is_ascii_bypass = bool(re.fullmatch(r'[!-~]+(?:[ \t]+[!-~]+)*', val))
+            
+            for i, c in enumerate(val):
+                source_seq.append((c, orig_idx + i, get_char_type(c)))
+                # バイパス対象の場合、先頭に全文字列を詰め、以降はプレースホルダー
+                if is_ascii_bypass:
+                    bypass_indices.add(char_idx)
+                    ascii_overrides[char_idx] = val if i == 0 else "---"
+                char_idx += 1
+                
+        return source_seq, bypass_indices, ascii_overrides
+
+
+    # ==========================================
+    # 🌟 ステップ 2: 推論
+    # ==========================================
+    def _run_inference(self, source_seq: List[SourceEntry]) -> List[str]:
+        src_features = compute_source_features(source_seq)
+        self.tagger.set(src_features)
+        return list(self.tagger.tag())
+
+
+    # ==========================================
+    # 🌟 ステップ 3: 後処理（バイパスとフォールバック）
+    # ==========================================
+    def _refine_predictions(self, source_seq: List[SourceEntry], raw_labels: List[str], bypass_indices: Set[int], ascii_overrides: Dict[int, str]) -> Tuple[List[str], List[float], List[bool]]:
+        refined_labels = []
+        confidences = []
+        has_splits = []
+        last_fallback_reading = ""
+
+        parent_idx = -1  # 🌟 各文字の「読みの親（AIが予測したブロックの先頭）」のインデックス
+
+        for i, (char, _, ctype) in enumerate(source_seq):
+            # 現在の文字に対するAIの生の予測（システムタグを除去して判定）
+            raw_clean = raw_labels[i].replace(MORA_SPLIT, "")
+            
+            # 親の更新: 自分が何らかの読みを持っている（"---" や "_" でない）なら、自分が親になる
+            if raw_clean not in ("---", "_"):
+                parent_idx = i
+
+            if i in bypass_indices:
+                # バイパス対象（英語など）: 推論を上書きして100%の自信度を設定
+                clean_label = ascii_overrides[i]
+                confidence = 1.0
+                last_fallback_reading = ""
+                has_split = False
+            else:
+                # 通常対象（日本語）
+                label = raw_labels[i]
+                confidence = self.tagger.marginal(label, i)
+                
+                # 🚨 文字消失バグの救済ロジック
+                # 自分が "---" (親に吸収される予定) なのに、
+                # 親が未定義 または 親がバイパス対象(上書き済み) の場合、自分の読みが消失してしまう！
+                raw_clean_current = label.replace(MORA_SPLIT, "")
+                if raw_clean_current == "---" and (parent_idx == -1 or parent_idx in bypass_indices):
+                    # 自己救済: 辞書にあれば辞書読み（音読み）、なければ文字自身を強制設定
+                    if ctype == 'KANJI' and char in FALLBACK_DICT:
+                        label = FALLBACK_DICT[char]["on"]
+                    else:
+                        label = char
+                    confidence = 0.0  # フォールバック適用扱いとする
+                    
+                    # ⚠️ ここで parent_idx は更新しない（連続して消失する文字をすべて救済するため）
+
+                # 通常のフォールバック処理
+                label, last_fallback_reading, _ = self._apply_fallback(
+                    i, char, ctype, label, confidence, source_seq, last_fallback_reading
+                )
+                clean_label = label.replace(MORA_SPLIT, "")
+                has_split = (MORA_SPLIT in label)
+
+            refined_labels.append(clean_label)
+            confidences.append(confidence)
+            has_splits.append(has_split)
+
+        return refined_labels, confidences, has_splits
+
     def _apply_fallback(self, i: int, char: str, ctype: str, label: str, confidence: float, source_seq: List[SourceEntry], last_fallback: str) -> Tuple[str, str, bool]:
-        """
-        AIの予測結果に対して、必要に応じて単漢字辞書による上書き（フォールバック）を行う。
-        戻り値: (上書き後のラベル, 新しい last_fallback の値, フォールバックが適用されたかどうかのフラグ)
-        """
         is_applied = False
         has_split = (MORA_SPLIT in label)
         new_label = label
         new_last_fallback = last_fallback
 
         if ctype == 'KANJI' and confidence < CONFIDENCE_THRESHOLD and char in FALLBACK_DICT:
-            # 次の文字と文字種を取得
             next_char = source_seq[i + 1][0] if i < len(source_seq) - 1 else ""
             next_ctype = source_seq[i + 1][2] if i < len(source_seq) - 1 else ""
             
-            # 安全な送り仮名リストに含まれるひらがなか判定
             if next_ctype == 'HIRAGANA' and next_char in SAFE_OKURIGANA:
                 replacement_reading = FALLBACK_DICT[char]["kun"]
             else:
@@ -107,72 +211,63 @@ class Predictor:
             is_applied = True
             
         elif char == '々' and last_fallback:
-            # 直前が辞書置換されていて「々」が来た場合
             new_label = last_fallback + (MORA_SPLIT if has_split else "")
             new_last_fallback = last_fallback
             is_applied = True
             
-        # 辞書が適用されず、記号でもなかった場合は、記憶をリセット
         if not is_applied and ctype != 'SYMBOL':
             new_last_fallback = ""
 
         return new_label, new_last_fallback, is_applied
 
 
-    def predict(self, text: str) -> PredictionResult:
-        units_info = get_units(text)
-        source_seq: List[SourceEntry] = []
-        for val, idx in units_info:
-            for i, c in enumerate(val):
-                source_seq.append((c, idx + i, get_char_type(c)))
-
-        if not source_seq:
-            return PredictionResult(text, "", [], [], [[] for _ in text])
-
-        src_features = compute_source_features(source_seq)
-        
-        self.tagger.set(src_features)
-        y_pred = self.tagger.tag()
-        
-        translated: str = ""
+    # ==========================================
+    # 🌟 ステップ 4: 結果の組み立て
+    # ==========================================
+    def _assemble_result(self, text: str, source_seq: List[SourceEntry], refined_labels: List[str], raw_confidences: List[float], has_splits: List[bool], bypass_indices: Set[int]) -> PredictionResult:
+        translated = ""
         kana_to_src_index: List[int] = []
-        confidences: List[float] = []
+        final_confidences: List[float] = []
         src_to_kana_index: List[List[int]] = [[] for _ in text]
         kana_pos = 0
-        
-        last_fallback_reading = ""
 
-        for i, (char, orig_idx, ctype) in enumerate(source_seq):
-            label = y_pred[i]
-            confidence = self.tagger.marginal(label, i)
-                            # confidence = self.tagger.marginal(label, i)            
-            label, last_fallback_reading, _ = self._apply_fallback(
-                i, char, ctype, label, confidence, source_seq, last_fallback_reading
-            )
-
-            clean_label = label.replace(MORA_SPLIT, "")
-
+        for i, (char, orig_idx, _) in enumerate(source_seq):
+            clean_label = refined_labels[i]
+            confidence = raw_confidences[i]
+            
             if clean_label == "_":
                 pass
             elif clean_label != "---":
-                for ch in clean_label:
-                    translated += ch
-                    kana_to_src_index.append(orig_idx)
-                    confidences.append(confidence)
-                    src_to_kana_index[orig_idx].append(kana_pos)
-                    kana_pos += 1
+                if i in bypass_indices:
+                    # バイパス（英語）は1文字ずつ1:1マッピング
+                    for j, ch in enumerate(clean_label):
+                        translated += ch
+                        target_orig_idx = orig_idx + j
+                        kana_to_src_index.append(target_orig_idx)
+                        final_confidences.append(confidence)
+                        src_to_kana_index[target_orig_idx].append(kana_pos)
+                        kana_pos += 1
+                else:
+                    # 日本語はブロック全体を先頭文字にマッピング
+                    for ch in clean_label:
+                        translated += ch
+                        kana_to_src_index.append(orig_idx)
+                        final_confidences.append(confidence)
+                        src_to_kana_index[orig_idx].append(kana_pos)
+                        kana_pos += 1
 
-            if MORA_SPLIT in label:
+            # 分かち書きスペースの追加
+            if has_splits[i]:
                 translated += " "
                 kana_to_src_index.append(orig_idx)
-                confidences.append(confidence)
+                final_confidences.append(confidence)
                 src_to_kana_index[orig_idx].append(kana_pos)
                 kana_pos += 1
 
         return PredictionResult(
             source_text=text,
             kana_text=translated,
-            confidences=confidences,
+            confidences=final_confidences,
             kana_to_src_index=kana_to_src_index,
             src_to_kana_index=src_to_kana_index
         )

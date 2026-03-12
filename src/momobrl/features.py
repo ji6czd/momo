@@ -1,5 +1,6 @@
 import unicodedata
 import re
+from enum import Enum
 from typing import List, Dict, Tuple
 
 # --- [共通定義・型定義] ---
@@ -8,29 +9,50 @@ FeatureDict = Dict[str, float]
 # ソース文字系列 = [(char, orig_idx, ctype), ...]
 SourceEntry = Tuple[str, int, str]
 
+class CharCategory(str, Enum):
+    """文字カテゴリ列挙型（str継承で文字列互換性を維持）"""
+    HIRAGANA = 'HIRAGANA'
+    KATAKANA = 'KATAKANA'
+    KANJI = 'KANJI'
+    ALPHA = 'ALPHA'
+    OTHER = 'OTHER'
+
+class CharType(str, Enum):
+    """文字種列挙型"""
+    SPACE = 'SPACE'
+    NUM = 'NUM'
+    SYMBOL = 'SYMBOL'
+    HIRAGANA = 'HIRAGANA'
+    KATAKANA = 'KATAKANA'
+    KANJI = 'KANJI'
+    ALPHA = 'ALPHA'
+    OTHER = 'OTHER'
+
 # --- [共通定数] ---
 MORA_SPLIT = "+S"   # このラベルの後に分かち書きスペースを挿入する
 
-def get_basic_char_category(c: str) -> str:
+def get_basic_char_category(c: str) -> CharCategory:
     """1文字を受け取り、基本カテゴリ（かな/漢字/英字/その他）を返す。"""
     cp = ord(c)
-    if 0x3040 <= cp <= 0x309F: return 'HIRAGANA'
-    if 0x30A0 <= cp <= 0x30FF: return 'KATAKANA'
-    if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF: return 'KANJI'
+    if 0x3040 <= cp <= 0x309F: return CharCategory.HIRAGANA
+    if 0x30A0 <= cp <= 0x30FF: return CharCategory.KATAKANA
+    if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF: return CharCategory.KANJI
     # 半角英字・全角英字
     if 0x0041 <= cp <= 0x005A or 0x0061 <= cp <= 0x007A or 0xFF21 <= cp <= 0xFF3A or 0xFF41 <= cp <= 0xFF5A:
-        return 'ALPHA'
-    return 'OTHER'
+        return CharCategory.ALPHA
+    return CharCategory.OTHER
 
-def get_char_type(c: str) -> str:
+def get_char_type(c: str) -> CharType:
     """文字種を判定。極限まで高速化するために ord() による範囲判定を使用。"""
-    if not c or c.isspace(): return 'SPACE'
-    if c.isdigit() or ('0' <= c <= '9'): return 'NUM'
+    if not c or c.isspace(): return CharType.SPACE
+    if c.isdigit() or ('0' <= c <= '9'): return CharType.NUM
     
     cat = unicodedata.category(c)
-    if cat.startswith('P') or cat.startswith('S'): return 'SYMBOL'
+    if cat.startswith('P') or cat.startswith('S'): return CharType.SYMBOL
 
-    return get_basic_char_category(c)
+    # get_basic_char_categoryの結果を CharType に変換
+    basic = get_basic_char_category(c)
+    return CharType(basic.value)
 
 def get_units(text: str) -> List[Tuple[str, int]]:
     """

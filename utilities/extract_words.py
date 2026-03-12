@@ -1,6 +1,6 @@
 import sys
 
-def extract_words_from_tsv(tsv_file: str):
+def extract_words_from_tsv(tsv_file: str) -> list[tuple[str, str]]:
     words = []
     raw_buf = ""
     read_buf = ""

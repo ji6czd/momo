@@ -1,6 +1,5 @@
 import re
 from typing import Optional
-from itertools import zip_longest
 from google.protobuf import text_format
 from importlib import resources
 
@@ -12,7 +11,7 @@ from sudachipy import Morpheme
 from .braille_rules_pb2 import BrailleRules
 from .braille_rules_pb2 import PartOfSpeech
 from . import pybraille
-
+from .features import get_basic_char_category, CharType
 class Translator:
     """
     日本語テキストを点字（かな変換・分かち書き変換）に変換するクラス。
@@ -174,21 +173,20 @@ class Translator:
             surface = morpheme.surface()
             # 漢字で構成されているか確認
             if (len(surface) >= 1
-                    and all('\u4e00' <= c <= '\u9fff' or '\u3400' <= c <= '\u4dbf'
-                            for c in surface)):
+                    and all(get_basic_char_category(c) == CharType.KANJI for c in surface)):
                 segments = self._segment_reading_by_kanji(surface, reading)
                 if segments is not None:
                     result = ""
                     for seg in segments:
                         if len(seg) >= 2:
-                            result += seg[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', seg[1:]) + delimiter
+                            result += seg[0] + re.sub(r'ウ(?![ァィェォ])', 'ー', seg[1:]) + delimiter
                         else:
                             result += seg + delimiter
                     return result
                 else:
                     # 各漢字の読みが特定できない場合はひらがな扱いにフォールバック
                     if len(reading) >= 2:
-                        return reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:]) + delimiter
+                        return reading[0] + re.sub(r'ウ(?![ァィェォ])', 'ー', reading[1:]) + delimiter
             # 連続するひらがなで構成されているか確認
             elif all('\u3041' <= c <= '\u3096' for c in surface):
                 if len(reading) >= 2:

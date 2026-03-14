@@ -1,4 +1,5 @@
 import re
+import json
 from typing import Optional
 from google.protobuf import text_format
 from importlib import resources
@@ -26,6 +27,7 @@ class Translator:
         self._tokenizer_obj = self._dic_obj.create(self._mode)
         self._rules = BrailleRules()
         self._load_braille_rules()
+        self._single_char_dic = self._load_single_char_dic()
 
     # --- 初期化 ---
 
@@ -42,6 +44,55 @@ class Translator:
             )
         except IOError as e:
             print(f"Error: An I/O error occurred: {e}", file=sys.stderr)
+
+    def _load_single_char_dic(self) -> dict[str, list[str]]:
+        """単一漢字辞書（JSON）をロードして返す。
+        ひらがなを含むエントリーがあれば警告を出す。
+        
+        Returns:
+            dict[str, list[str]]: キーが漢字、値が読みのリスト
+        """
+        try:
+            with resources.open_text(
+                "momobrl", "single_character_dic.json", encoding="utf-8"
+            ) as f:
+                logger.debug("Loading single character dictionary from file.")
+                dic = json.load(f)
+                # ひらがなを含むエントリーをチェック
+                self._check_hiragana_in_dic(dic)
+                return dic
+        except FileNotFoundError:
+            print(
+                "Error: The file 'single_character_dic.json' was not found.", file=sys.stderr
+            )
+            return {}
+        except json.JSONDecodeError as e:
+            print(f"Error: Failed to parse JSON file: {e}", file=sys.stderr)
+            return {}
+        except IOError as e:
+            print(f"Error: An I/O error occurred: {e}", file=sys.stderr)
+            return {}
+
+    def _check_hiragana_in_dic(self, dic: dict[str, list[str]]) -> None:
+        """辞書内のひらがなをチェックして警告を出す。
+        
+        Args:
+            dic: チェック対象の辞書
+        """
+        issues = []
+        for kanji, readings in dic.items():
+            for reading in readings:
+                for char in reading:
+                    if get_basic_char_category(char) == CharType.HIRAGANA:
+                        issues.append((kanji, reading))
+                        break
+        
+        if issues:
+            logger.warning(f"Found {len(issues)} entries with hiragana in single_character_dic.json:")
+            for kanji, reading in issues[:10]:
+                logger.warning(f"  '{kanji}': {repr(reading)}")
+            if len(issues) > 10:
+                logger.warning(f"  ... and {len(issues) - 10} more")
 
     # --- ユーティリティ（プライベート） ---
 
@@ -258,13 +309,26 @@ class Translator:
                 return True
         return False
 
+    def _get_reading_from_single_char_dic(self, surface: str) -> list[str]:
+        """単一漢字辞書から読みを取得する"""
+        if surface in self._single_char_dic:
+            return self._single_char_dic[surface]
+        return []
+
     def _get_reading_form_in_dictionary(self, surface: str) -> list[str]:
         m_list = self._dic_obj.lookup(surface)
-        if not m_list:
-            return []
         reading_list = []
+        
+        # 通常の辞書から読みを取得
         for m in m_list:
             reading_list.append(m.reading_form())
+        
+        # 単一漢字辞書からも読みを取得して追加
+        single_char_readings = self._get_reading_from_single_char_dic(surface)
+        for reading in single_char_readings:
+            if reading not in reading_list:
+                reading_list.append(reading)
+            
         return reading_list
 
     # --- 公開メソッド ---

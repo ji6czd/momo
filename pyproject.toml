@@ -1,6 +1,6 @@
 [project]
 name = "momobrl"
-version = "0.2.0"
+version = "0.2.1"
 description = "A tool to convert Japanese text to Braille using machine learning."
 readme = "README.md"
 authors = [

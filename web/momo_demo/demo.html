@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日本語点字変換デモ</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>日本語 点字変換デモ</h1>
+        <p>下のテキストエリアに日本語を入力し、「点字に変換」ボタンを押してください。</p>
+        <form action="demo.html" method="post" id="braille-form">
+            <input name="src" id="inputText" type="text" placeholder="ここに日本語テキストを入力..."><br>
+            <input type="submit" id="convertButton" value="点字に変換">
+        </form>
+        <h2>変換結果 (点字):</h2>
+        <div id="resultArea" aria-live="polite">
+            ここに点字が表示されます。
+        </div>
+        <div id="errorArea" class="error" aria-live="assertive"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

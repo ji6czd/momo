@@ -24,6 +24,8 @@ def build_stats_from_tsv(tsvdata: str) -> dict:
     """過去のTSVファイルから安全な統計辞書を構築する"""
     stats = defaultdict(lambda: defaultdict(int))
     if not os.path.exists(tsvdata):
+        print("⚠️  注意: 過去のTSVファイルが見つかりません。初期辞書を作ります。")
+        stats['切']['キリ'] = 1
         return stats
         
     with open(tsvdata, 'r', encoding='utf-8') as f:
@@ -73,20 +75,22 @@ def _validate_label_chars(r_label: str, line_num: int) -> None:
         elif ctype == 'HIRAGANA':
             print(f"🚨 警告 (Line {line_num}): 読みにひらがなが混入しています！ -> '{c}' (in '{r_label}')")
 
-def _check_alignment_anomalies(target_chars: str, r_label: str, orig_idx: int, label_idx: int, line_num: int, stats: dict) -> None:
+def _check_alignment_anomalies(target_char: str, r_label: str, orig_idx: int, label_idx: int, line_num: int, stats: dict) -> None:
     """統計的異常や単純なミスマッチを警告する"""
     # 1. 過去のTSV実績に基づく自己学習型バリデーション
-    if stats and target_chars in stats:
-        if any(get_char_type(c) == 'KANJI' for c in target_chars):
-            clean_label = r_label.replace("+S", "")
-            total_occurrences = sum(stats[target_chars].values())
-            current_occurrences = stats[target_chars].get(clean_label, 0)
-            if total_occurrences >= 3 and current_occurrences == 0:
-                print(f"⚠️  Statistical Anomaly (Line {line_num}): '{target_chars}' が過去の実績にない読み '{clean_label}' になっています。ズレていませんか？")
+    if any(get_char_type(c) == 'KANJI' for c in target_char):
+        clean_label = r_label.replace("+S", "")
+        if stats and target_char in stats:
+            total_occurrences = sum(stats[target_char].values())
+            current_occurrences = stats[target_char].get(clean_label, 0)
+            if total_occurrences > 0 and current_occurrences == 0:
+                print(f"⚠️  Statistical Anomaly (Line {line_num}): '{target_char}' が過去の実績にない読み '{clean_label}' になっています。ズレていませんか？")
+        else:
+            print(f"⚠️ Line {line_num}: '{target_char}' は '{clean_label}' として学習されます。")
     
     # 2. 旧ルールの基本的なチェック
-    if _is_basic_suspicious(target_chars, r_label):
-        print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})")
+    if _is_basic_suspicious(target_char, r_label):
+        print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_char}' -> '{r_label}' (原文インデックス: {orig_idx})")
 
 
 # ==========================================

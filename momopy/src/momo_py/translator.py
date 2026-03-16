@@ -216,8 +216,7 @@ class Translator:
             return False
         return True
 
-    def _convert_prolonged_sound_mark(self, morpheme: Morpheme, split: bool = False) -> str:
-        reading = morpheme.reading_form()
+    def _convert_prolonged_sound_mark(self, morpheme: Morpheme, reading: str, split: bool = False) -> str:
         delimiter = '/' if split else ''
         if (not self._has_part_of_speech(morpheme, "動詞")
                 or self._has_part_of_speech(morpheme, "意志推量形")):
@@ -278,9 +277,7 @@ class Translator:
         self, morpheme_num: Morpheme, morpheme_counter: Morpheme
     ) -> str:
         reading = morpheme_counter.reading_form()
-        if self._has_part_of_speech(morpheme_counter, "助数詞可能") or self._has_part_of_speech(
-            morpheme_counter, "助数詞"
-        ):
+        if self._has_part_of_speech(morpheme_counter, "助数詞可能") or self._has_part_of_speech(morpheme_counter, "助数詞"):
             reading = morpheme_counter.reading_form()
             number = morpheme_num.surface()
             if morpheme_counter.surface() in "匹":
@@ -361,12 +358,12 @@ class Translator:
             else:
                 counter = self._correct_counter_suffix_reading(tokenized_list[m_index - 1], m)
                 if counter != "":
-                    kana_str += counter
+                    kana_str += self._convert_prolonged_sound_mark(m, counter)
                 else:
                     if m.part_of_speech()[0] == "名詞" and m.part_of_speech()[1] == "数詞":
                         kana_str += m.normalized_form()
                     else:
-                        kana_str += self._convert_prolonged_sound_mark(m, False)
+                        kana_str += self._convert_prolonged_sound_mark(m, m.reading_form(), False)
             if m_index < len(tokenized_list) - 1:
                 if self._is_space_required(m, tokenized_list[m_index + 1]):
                     kana_str += " "
@@ -417,12 +414,12 @@ class Translator:
             else:
                 counter = self._correct_counter_suffix_reading(tokenized_list[m_index - 1], m)
                 if counter != "":
-                    segmented_kana_string += counter + "/"
+                    segmented_kana_string += self._convert_prolonged_sound_mark(m, counter, True)
                 else:
                     if m.part_of_speech()[0] == "名詞" and m.part_of_speech()[1] == "数詞":
                         segmented_kana_string += m.normalized_form() + "/"
                     else:
-                        segmented_kana_string += self._convert_prolonged_sound_mark(m, True)
+                        segmented_kana_string += self._convert_prolonged_sound_mark(m, m.reading_form(), True)
             if m_index < len(tokenized_list) - 1:
                 if self._is_space_required(m, tokenized_list[m_index + 1]):
                     segmented_kana_string += " /"

@@ -5,7 +5,7 @@ translator.py の単体テスト
 import pytest
 from unittest.mock import MagicMock
 
-from momopy.translator import Translator
+from momo_py.translator import Translator
 
 
 def make_morpheme(surface: str, reading: str, pos: tuple) -> MagicMock:

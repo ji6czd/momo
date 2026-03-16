@@ -19,7 +19,7 @@ dependencies = [
 requires = ["uv_build>=0.9.9,<0.10.0"]
 build-backend = "uv_build"
 [project.scripts]
-momo = "momopy.main:main"
+momo = "momo_py.main:main"
 
 [[tool.mypy.overrides]]
 module = ["pycrfsuite.*"]

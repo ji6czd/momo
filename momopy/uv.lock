@@ -34,8 +34,8 @@ wheels = [
 ]
 
 [[package]]
-name = "momobrl"
-version = "0.2.1"
+name = "momo-py"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },

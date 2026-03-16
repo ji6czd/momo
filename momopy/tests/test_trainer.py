@@ -5,7 +5,7 @@ trainer.py の単体テスト
   - KUTOUTEN 定数
 """
 import pytest
-from momopy.trainer import is_suspicious, process_line_to_tsv, KUTOUTEN
+from momo_py.trainer import is_suspicious, process_line_to_tsv, KUTOUTEN
 
 
 # ------------------------------------------------------------------ #

@@ -5,7 +5,7 @@ predictor.py の単体テスト
 """
 import json
 import pytest
-from momopy.predictor import PredictionResult, Predictor
+from momo_py.predictor import PredictionResult, Predictor
 
 
 # ------------------------------------------------------------------ #

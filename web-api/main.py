@@ -1,15 +1,15 @@
 import signal
-import os
-import time
 import sys
-import json
 from types import FrameType
+from importlib.metadata import version
 from flask import Flask, request
-from momobrl import PredictionResult, Predictor, Translator
-
+from momo_py import PredictionResult, Predictor, Translator
+from momo_py import pybraille
 app = Flask(__name__)
 
-top_page = """
+version_info = f"Momo version {version('momo_py')}"
+
+top_page = f"""
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -18,18 +18,21 @@ top_page = """
     <title>Neomomo</title>
 </head>
 <body>
-    <h1>Neomomo</h1>
+    <h1>自動点訳システムMomo</h1>
     <p>AI点訳だよ！まだまだお勉強中だけど、よろしくね！</p>
     <p>
     <form action="/predict" method="get">
         <label for="source">点訳したい文章を入力してね：</label><br>
         <input type="text" id="source" name="source" required><br>
-        <input type="submit" value="点訳する">
+        <input type="submit" value="CRF機械学習点訳">
+        <input type="submit" formaction="/translate" value="Sudachi辞書点訳">
     </form>
     </p>
+    <p>{version_info}</p>
 </body>
 </html>
 """
+
 
 predict_page = """<!DOCTYPE html>
 <html lang="ja">
@@ -40,21 +43,50 @@ predict_page = """<!DOCTYPE html>
 </head>
 <body>
     <h1>点訳結果</h1>
-    <p>元の文章: {source}</p>
-    <p>点訳結果: {result}</p>
-    {confidences_table}
+    <p>原文: {source}</p>
+    <p>仮名: {result}</p>
+    <p>点字: {braille_result}</p>
+    <p>{confidences_table}</p>
     <p>
     <form action="/predict" method="get">
         <label for="source">点訳したい文章を入力してね：</label><br>
         <input type="text" id="source" value="{source}" name="source" required><br>
-        <input type="submit" value="点訳する">
+        <input type="submit" value="CRF機械学習点訳">
+        <input type="submit" formaction="/translate" value="Sudachi 辞書点訳">
     </form>
     </p>
-    <p>model version: {model_version}</p>
+    <p>Model version: {model_version}</p>
+    <p>{version_info}</p>
+</body></html>
+"""
+
+translate_page = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neomomo - 点訳結果</title>
+</head>
+<body>
+    <h1>点訳結果</h1>
+    <p>原文: {source}</p>
+    <p>仮名: {result}</p>
+    <p>点字: {braille_result}</p>
+    <p>
+    <form action="/predict" method="get">
+        <label for="source">点訳したい文章を入力してね：</label><br>
+        <input type="text" id="source" value="{source}" name="source" required><br>
+        <input type="submit" value="CRF機械学習点訳">
+        <input type="submit" formaction="/translate" value="Sudachi辞書点訳">
+    </form>
+    </p>
+    <p>Powered by Sudachi {sudachi_version}</p>
+    <p>{version_info}</p>
 </body></html>
 """
 
 model_file = "./dataset/training_data.zip"
+
 def make_characters_table(res: PredictionResult) -> str:
     characters_table = "<table border='1'><tr><th>元の文字</th>"
 
@@ -86,9 +118,24 @@ def predict() -> str:
     model_version = p.get_version_info().get('trained_at', '不明')
 
     res = p.predict(source)
+    braille = pybraille.to_jp_braille(res.kana_text)
     
-    return predict_page.format(source=source, result=res.kana_text, confidences_table=make_characters_table(res), model_version=model_version)
+    return predict_page.format(source=source, result=res.kana_text, confidences_table=make_characters_table(res), braille_result=braille, model_version=model_version, version_info=version_info)
 
+@app.route("/translate", methods=["GET"])
+def translate() -> str:
+    source = request.args.get('source')
+    t = Translator()
+    kana = t.convert_to_kana(source)
+    braille = pybraille.to_jp_braille(kana)
+    return translate_page.format(source=source, result=kana, braille_result=braille, version_info=version_info, sudachi_version=version('sudachipy'))
+
+@app.route("/api/predict", methods=["GET"])
+def api_predict() -> str:
+    source = request.args.get('source')
+    p = Predictor(model_file)
+    return p.predict(source).to_json()
+    
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:
     # Safely exit program
     sys.exit(0)

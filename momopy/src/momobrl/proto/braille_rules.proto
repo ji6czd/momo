@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package braillel_rules;
+
+message PartOfSpeech {
+  repeated string name = 1;
+  bool before_space = 2;
+  bool after_space = 3;
+  bool allow_line_break = 4;
+  repeated string word_match = 5;
+  repeated string word_not_match = 6;
+  int32 reading_word_length_less = 7;
+  int32 reading_word_length_greater = 8;
+  int32 surface_word_length_less = 9;
+  int32 surface_word_length_greater = 10;
+}
+
+message Rule {
+  PartOfSpeech current_pos = 1;
+  repeated PartOfSpeech next_pos = 2;
+}
+
+message BrailleRules {
+  repeated Rule rule = 1;
+}

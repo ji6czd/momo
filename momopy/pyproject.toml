@@ -1,0 +1,34 @@
+[project]
+name = "momobrl"
+version = "0.2.1"
+description = "A tool to convert Japanese text to Braille using machine learning."
+readme = "README.md"
+authors = [
+    { name = "KIRIAKE Masanori", email = "seiken@rd01.net" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "loguru",
+    "protobuf",
+    "python-crfsuite>=0.9.12",
+    "sudachidict-core",
+    "sudachipy",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.9,<0.10.0"]
+build-backend = "uv_build"
+[project.scripts]
+momo = "momobrl.main:main"
+
+[[tool.mypy.overrides]]
+module = ["pycrfsuite.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

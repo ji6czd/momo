@@ -1,6 +1,6 @@
 [project]
-name = "momobrl"
-version = "0.2.1"
+name = "momo-py"
+version = "0.3.0"
 description = "A tool to convert Japanese text to Braille using machine learning."
 readme = "README.md"
 authors = [
@@ -19,7 +19,7 @@ dependencies = [
 requires = ["uv_build>=0.9.9,<0.10.0"]
 build-backend = "uv_build"
 [project.scripts]
-momo = "momobrl.main:main"
+momo = "momopy.main:main"
 
 [[tool.mypy.overrides]]
 module = ["pycrfsuite.*"]

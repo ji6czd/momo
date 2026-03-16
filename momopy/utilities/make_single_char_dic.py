@@ -4,7 +4,7 @@ import json
 import argparse
 from collections import defaultdict
 from typing import DefaultDict, Set
-from momobrl.features import get_basic_char_category, CharType
+from momopy.features import get_basic_char_category, CharType
 
 def makedic(tsv_file: str, dic_file: str) -> None:
     dic: DefaultDict[str, Set[str]] = defaultdict(set)

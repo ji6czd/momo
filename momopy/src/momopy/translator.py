@@ -34,7 +34,7 @@ class Translator:
     def _load_braille_rules(self) -> None:
         try:
             with resources.open_text(
-                "momobrl", "proto/braille_rules.textproto", encoding="utf-8"
+                "momopy", "proto/braille_rules.textproto", encoding="utf-8"
             ) as f:
                 logger.debug("Loading braille rules from file.")
                 text_format.Parse(f.read(), self._rules)
@@ -54,7 +54,7 @@ class Translator:
         """
         try:
             with resources.open_text(
-                "momobrl", "single_character_dic.json", encoding="utf-8"
+                "momopy", "single_character_dic.json", encoding="utf-8"
             ) as f:
                 logger.debug("Loading single character dictionary from file.")
                 dic = json.load(f)

@@ -103,7 +103,7 @@ def run_label_scanner(model_path: str) -> None:
 def main():
     parser = argparse.ArgumentParser(prog="momo")
     subparsers = parser.add_subparsers(dest="command")
-    parser.add_argument("-v", "--version", action="version", version=f"Momo {version('momobrl')}")
+    parser.add_argument("-v", "--version", action="version", version=f"Momo {version('momo-py')}")
     
     # コマンドの定義
     pp = subparsers.add_parser("predict")

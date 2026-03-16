@@ -1,8 +1,8 @@
 #!/bin/env bash
 set -eu
-raw=dataset/training_raw.tsv
-tsv=dataset/training_data.tsv
-model=dataset/training_data.crfsuite
+raw=../dataset/training_raw.tsv
+tsv=../dataset/training_data.tsv
+model=../model/training_data.crfsuite
 cmd=momo
 # 学習用関数
 check() {

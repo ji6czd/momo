@@ -5,7 +5,7 @@ features.py の単体テスト
   - compute_source_features()
 """
 import pytest
-from momobrl.features import get_char_type, get_units, compute_source_features, SourceEntry
+from momopy.features import get_char_type, get_units, compute_source_features, SourceEntry
 
 
 # ------------------------------------------------------------------ #
@@ -106,7 +106,7 @@ class TestGetUnits:
 # ------------------------------------------------------------------ #
 class TestComputeSourceFeatures:
     def _make_seq(self, text: str) -> list[SourceEntry]:
-        from momobrl.features import get_char_type
+        from momopy.features import get_char_type
         return [(c, i, get_char_type(c)) for i, c in enumerate(text)]
 
     def test_length_matches_input(self):

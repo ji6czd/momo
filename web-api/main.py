@@ -85,7 +85,7 @@ translate_page = """<!DOCTYPE html>
 </body></html>
 """
 
-model_file = "./dataset/training_data.zip"
+model_file = "./dataset/basic_data.zip"
 
 def make_characters_table(res: PredictionResult) -> str:
     characters_table = "<table border='1'><tr><th>元の文字</th>"

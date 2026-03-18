@@ -10,7 +10,7 @@ itsdangerous==2.2.0
 jinja2==3.1.6
 loguru==0.7.3
 markupsafe==3.0.3
-momo-py @ git+https://github.com/ji6czd/momo@4f5da8310bab06c0981ad97b09a42c6aee520220#subdirectory=momopy
+momo-py @ git+https://github.com/ji6czd/momo@fe871b2aa1de5172f08d0c6cc6454f370e25f038#subdirectory=momopy
 packaging==26.0
 protobuf==7.34.0
 python-crfsuite==0.9.12

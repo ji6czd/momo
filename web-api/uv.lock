@@ -225,7 +225,7 @@ wheels = [
 [[package]]
 name = "momo-py"
 version = "0.3.0"
-source = { git = "https://github.com/ji6czd/momo?subdirectory=momopy#4f5da8310bab06c0981ad97b09a42c6aee520220" }
+source = { git = "https://github.com/ji6czd/momo?subdirectory=momopy#fe871b2aa1de5172f08d0c6cc6454f370e25f038" }
 dependencies = [
     { name = "loguru" },
     { name = "protobuf" },

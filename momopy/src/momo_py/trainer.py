@@ -75,26 +75,26 @@ def _validate_label_chars(r_label: str, line_num: int) -> None:
         elif ctype == 'HIRAGANA':
             print(f"🚨 警告 (Line {line_num}): 読みにひらがなが混入しています！ -> '{c}' (in '{r_label}')")
 
-def _check_alignment_anomalies(target_char: str, r_label: str, orig_idx: int, label_idx: int, line_num: int, stats: dict) -> None:
+def _check_alignment_anomalies(target_chars: str, ctype: str, r_label: str, orig_idx: int, label_idx: int, line_num: int, stats: dict) -> None:
     """統計的異常や単純なミスマッチを警告する"""
-    if any(get_char_type(c) == 'KANJI' for c in target_char):
+    if ctype == 'KANJI':
         clean_label = r_label.replace("+S", "")
-        if stats and target_char in stats:
-            total_occurrences = sum(stats[target_char].values())
-            current_occurrences = stats[target_char].get(clean_label, 0)
+        if stats and target_chars in stats:
+            total_occurrences = sum(stats[target_chars].values())
+            current_occurrences = stats[target_chars].get(clean_label, 0)
             if total_occurrences > 0 and current_occurrences == 0:
-                print(f"⚠️  Statistical Anomaly (Line {line_num}): '{target_char}' が過去の実績にない読み '{clean_label}' になっています。ズレていませんか？")
+                print(f"⚠️  Statistical Anomaly (Line {line_num}): '{target_chars}' が過去の実績にない読み '{clean_label}' になっています。ズレていませんか？")
         else:
-            print(f"⚠️ Line {line_num}: '{target_char}' は '{clean_label}' として学習されます。")
+            print(f"⚠️ Line {line_num}: '{target_chars}' は '{clean_label}' として学習されます。")
     
-    if _is_basic_suspicious(target_char, r_label):
-        print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_char}' -> '{r_label}' (原文インデックス: {orig_idx})")
+    if _is_basic_suspicious(target_chars, r_label):
+        print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})")
 
 
 # ==========================================
 # 🌟 3. TSV行の生成（フォーマッタ）
 # ==========================================
-def _create_biose_rows(target_chars: str, r_label: str, orig_idx: int) -> List[str]:
+def _create_biose_rows(target_chars: str, ctype: str, r_label: str, orig_idx: int) -> List[str]:
     """1ブロック分の文字列とラベルから、BIOSEタグ付きのTSV行リストを生成する"""
     if target_chars in KUTOUTEN and "+S" not in r_label:
         r_label += "+S"
@@ -102,7 +102,6 @@ def _create_biose_rows(target_chars: str, r_label: str, orig_idx: int) -> List[s
     rows = []
     block_len = len(target_chars)
     for i, char in enumerate(target_chars):
-        ctype = get_char_type(char)
         r_val = r_label if i == 0 else LABEL_CONTINUE
         tag = "S" if block_len == 1 else ("B" if i == 0 else ("E" if i == block_len - 1 else "I"))
         rows.append(f"{char}\t{r_val}\t{ctype}\t{tag}\t{orig_idx + i}")
@@ -129,7 +128,7 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
     read_blocks_raw = re.split(r'(?<!\\)/', read_full)
     read_blocks = [b.replace(r'\/', '/').replace(r'\_', '_') for b in read_blocks_raw]
 
-    raw_units_info = get_units(raw_part)
+    raw_units_info = get_units(raw_part)  # 戻り値: List[Tuple[str, int, str]]
     tsv_rows, raw_ptr = [], 0
 
     for label_idx, r_label in enumerate(read_blocks):
@@ -151,10 +150,10 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
         if raw_ptr >= len(raw_units_info):
             raise ValueError(f"(Line {line_num}): 読みラベル過多。\n -> 読みインデックス [{label_idx}] '{r_label}' に対応する原文がありません！")
 
-        target_chars, orig_idx = raw_units_info[raw_ptr]
-        _check_alignment_anomalies(target_chars, r_label, orig_idx, label_idx, line_num, stats)
+        target_chars, orig_idx, ctype = raw_units_info[raw_ptr]  # ctype を get_units() から受け取る
+        _check_alignment_anomalies(target_chars, ctype, r_label, orig_idx, label_idx, line_num, stats)
 
-        rows = _create_biose_rows(target_chars, r_label, orig_idx)
+        rows = _create_biose_rows(target_chars, ctype, r_label, orig_idx)
         tsv_rows.extend(rows)
         raw_ptr += 1
 
@@ -230,7 +229,7 @@ def _train_one(
 
 
 # ==========================================
-# 🌟 7. train()（ラベル分離版）
+# 🌟 7. train()
 # ==========================================
 def train(tsvdata: str) -> None:
     """
@@ -246,7 +245,6 @@ def train(tsvdata: str) -> None:
         - ラベルのみ _split_labels() で分離
         - 境界CRFはラベルが2種類のみなので学習が極めて高速
     """
-    # --- TSV読み込み ---
     sentences, current = [], []
     with open(tsvdata, 'r', encoding='utf-8') as f:
         for line in f:
@@ -261,7 +259,6 @@ def train(tsvdata: str) -> None:
     if current:
         sentences.append(current)
 
-    # --- 特徴量・ラベルの構築 ---
     X:            List[List[FeatureDict]] = []
     Y_read:       List[List[str]]         = []
     Y_boundary:   List[List[str]]         = []
@@ -273,39 +270,33 @@ def train(tsvdata: str) -> None:
         ]
         raw_labels = [p[1] for p in sentence]
 
-        # 🌟 特徴量は1回だけ計算して両モデルで共用
         X.append(compute_source_features(source_seq))
 
-        # 🌟 ラベルを読みと境界に分離
         y_read, y_boundary = _split_labels(raw_labels)
         Y_read.append(y_read)
         Y_boundary.append(y_boundary)
 
-    # --- モデルパスの決定 ---
     base       = tsvdata.rsplit('.', 1)[0]
     path_read  = base + "_read.crfsuite"
     path_bound = base + "_boundary.crfsuite"
     zip_path   = base + ".zip"
 
-    # --- 共通パラメータ ---
     common_params = {
-        'c1': 0.1,
-        'c2': 0.01,
-        'max_iterations': 70,
-        'feature.possible_transitions': False,
+        'c1': 0.1, # L1正則化の強さ（特徴選択効果）
+        'c2': 0.01, # L2正則化の強さ（過学習防止効果）
+        'max_iterations': 70, # 学習の最大反復回数
+        'feature.possible_transitions': False, # 遷移特徴量の自動生成を無効化（境界CRFは遷移特徴量が不要なため）
+        'feature.possible_states': False,  # 状態特徴量の自動生成を無効化（読みCRFは全ての状態が可能なため）
     }
 
-    # --- 読みモデルの学習 ---
     trainer_read = pycrfsuite.Trainer(verbose=True)
     trainer_read.set_params(common_params)
     _train_one(trainer_read, X, Y_read, path_read, "読みモデル")
 
-    # --- 境界モデルの学習（ラベル2種のみ → 高速） ---
-    trainer_bound = pycrfsuite.Trainer(verbose=True)
+    trainer_bound = pycrfsuite.Trainer(verbose=False)
     trainer_bound.set_params(common_params)
     _train_one(trainer_bound, X, Y_boundary, path_bound, "境界モデル")
 
-    # --- ZIPパッケージ化（2モデルを1ファイルに） ---
     version_info = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "model_read":     os.path.basename(path_read),

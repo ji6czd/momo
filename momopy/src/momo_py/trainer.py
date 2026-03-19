@@ -11,7 +11,7 @@ import pycrfsuite
 
 from .features import (
     get_units, get_char_type, compute_source_features,
-    SourceEntry, FeatureDict,
+    SourceEntry, FeatureDict, LABEL_CONTINUE, LABEL_SKIP,
 )
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
@@ -37,7 +37,7 @@ def build_stats_from_tsv(tsvdata: str) -> dict:
             if len(parts) >= 2:
                 char, reading = parts[0], parts[1]
                 clean_read = reading.replace("+S", "")
-                if clean_read != "---" and clean_read not in ("_", "-"):
+                if clean_read != LABEL_CONTINUE and clean_read not in (LABEL_SKIP, "-"):
                     stats[char][clean_read] += 1
     return stats
 
@@ -47,7 +47,7 @@ def build_stats_from_tsv(tsvdata: str) -> dict:
 # ==========================================
 def _is_basic_suspicious(raw: str, read: str) -> bool:
     """ひらがな/カタカナの単純な対応ミスを検知"""
-    if (raw == "" and read == " ") or read == "_": return False
+    if (raw == "" and read == " ") or read == LABEL_SKIP: return False
     clean_read = read.replace("+S", "")
 
     if all('KATAKANA' in unicodedata.name(c, "") for c in raw):
@@ -68,7 +68,7 @@ def _validate_label_chars(r_label: str, line_num: int) -> None:
     """読みに漢字やひらがなが混入していないかチェック"""
     clean_r_label = r_label.replace("+S", "")
     for c in clean_r_label:
-        if c in ("_", " ", "-"): continue
+        if c in (LABEL_SKIP, " ", "-"): continue
         ctype = get_char_type(c)
         if ctype == 'KANJI':
             print(f"🚨 警告 (Line {line_num}): 読みに漢字が混入しています！ -> '{c}' (in '{r_label}')")
@@ -103,7 +103,7 @@ def _create_biose_rows(target_chars: str, r_label: str, orig_idx: int) -> List[s
     block_len = len(target_chars)
     for i, char in enumerate(target_chars):
         ctype = get_char_type(char)
-        r_val = r_label if i == 0 else "---"
+        r_val = r_label if i == 0 else LABEL_CONTINUE
         tag = "S" if block_len == 1 else ("B" if i == 0 else ("E" if i == block_len - 1 else "I"))
         rows.append(f"{char}\t{r_val}\t{ctype}\t{tag}\t{orig_idx + i}")
     return rows
@@ -198,18 +198,18 @@ def _split_labels(raw_labels: List[str]) -> tuple:
     TSVの読みラベル列を読みCRF用と境界CRF用に分離する。
 
     例:
-        入力: ["カン+S", "ゼン", "ニ+S", "---"]
+        入力: ["カン+S", "ゼン", "ニ+S", LABEL_CONTINUE]
         出力:
-            y_read:     ["カン",  "ゼン", "ニ",  "---"]
+            y_read:     ["カン",  "ゼン", "ニ",  LABEL_CONTINUE]
             y_boundary: ["1",     "0",    "1",   "0"  ]
 
     設計上の注意:
-        "---" ラベル（BIOSEブロックの2文字目以降）は境界を持たない扱いとする。
-        境界は常にブロックの先頭文字（"---"でない行）にのみ付与されるため、
-        "---" の境界は常に "0" とする。
+        LABEL_CONTINUE（BIOSEブロックの2文字目以降）は境界を持たない扱いとする。
+        境界は常にブロックの先頭文字（LABEL_CONTINUEでない行）にのみ付与されるため、
+        LABEL_CONTINUE の境界は常に "0" とする。
     """
     y_read     = [label.replace("+S", "") for label in raw_labels]
-    y_boundary = ["0" if label == "---" else ("1" if "+S" in label else "0")
+    y_boundary = ["0" if label == LABEL_CONTINUE else ("1" if "+S" in label else "0")
                   for label in raw_labels]
     return y_read, y_boundary
 

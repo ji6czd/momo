@@ -9,7 +9,7 @@ from typing import List, Tuple, Set, Dict
 
 import pycrfsuite
 
-from .features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT
+from .features import get_units, get_char_type, compute_source_features, SourceEntry, MORA_SPLIT, LABEL_CONTINUE, LABEL_SKIP
 from .fallback_dict import FALLBACK_DICT
 
 # フォールバックを発動させる自信度の境界線（30%）
@@ -146,7 +146,7 @@ class Predictor:
                 source_seq.append((c, orig_idx + i, get_char_type(c)))
                 if is_ascii_bypass:
                     bypass_indices.add(char_idx)
-                    ascii_overrides[char_idx] = val if i == 0 else "---"
+                    ascii_overrides[char_idx] = val if i == 0 else LABEL_CONTINUE
                 char_idx += 1
                 
         return source_seq, bypass_indices, ascii_overrides
@@ -210,7 +210,7 @@ class Predictor:
         for i, (char, _, ctype) in enumerate(source_seq):
             raw_clean = raw_labels[i]  # 🌟 すでに +S なし
 
-            if raw_clean not in ("---", "_"):
+            if raw_clean not in (LABEL_CONTINUE, LABEL_SKIP):
                 parent_idx = i
 
             if i in bypass_indices:
@@ -223,7 +223,7 @@ class Predictor:
                 confidence = self.tagger_read.marginal(label, i)
 
                 # 🚨 文字消失バグの救済ロジック（旧版と同一）
-                if label == "---" and (parent_idx == -1 or parent_idx in bypass_indices):
+                if label == LABEL_CONTINUE and (parent_idx == -1 or parent_idx in bypass_indices):
                     if ctype == 'KANJI' and char in FALLBACK_DICT:
                         label = FALLBACK_DICT[char]["on"]
                     else:
@@ -248,7 +248,6 @@ class Predictor:
     def _apply_fallback(self, i: int, char: str, ctype: str, label: str, confidence: float, source_seq: List[SourceEntry], last_fallback: str) -> Tuple[str, str, bool]:
         """無変更"""
         is_applied = False
-        has_split  = False  # 🌟 +S はラベルに含まれないので常にFalse（境界はboundary_labelsが管理）
         new_label = label
         new_last_fallback = last_fallback
 
@@ -290,9 +289,9 @@ class Predictor:
             clean_label = refined_labels[i]
             confidence  = raw_confidences[i]
             
-            if clean_label == "_":
+            if clean_label == LABEL_SKIP:
                 pass
-            elif clean_label != "---":
+            elif clean_label != LABEL_CONTINUE:
                 if i in bypass_indices:
                     for j, ch in enumerate(clean_label):
                         translated += ch

@@ -30,6 +30,8 @@ class CharType(str, Enum):
 
 # --- [共通定数] ---
 MORA_SPLIT = "+S"   # このラベルの後に分かち書きスペースを挿入する
+LABEL_CONTINUE = "---"
+LABEL_SKIP = "_"
 
 def get_basic_char_category(c: str) -> CharCategory:
     """1文字を受け取り、基本カテゴリ（かな/漢字/英字/その他）を返す。"""

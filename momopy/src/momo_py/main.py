@@ -67,7 +67,7 @@ def run_label_scanner(model_path: str) -> None:
     """
     # Predictorからtaggerインスタンスを取り出して使用
     predictor = Predictor(model_path)
-    tagger = predictor.tagger
+    tagger = predictor.tagger_read
     
     print("🧠 AI脳内スキャナー起動 (Ctrl+D で終了)")
     print("使い方: 見たい文字を1文字入力してください。（例: 上）")

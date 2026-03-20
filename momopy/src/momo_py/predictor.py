@@ -278,7 +278,7 @@ class Predictor:
                     confidence = 0.0
 
                 if ctype == CharType.JAPANESE_NUMERIC:
-                    label, last_fallback_reading = self._convert_japanese_numeric(
+                    label, last_fallback_reading, confidence = self._convert_japanese_numeric(
                         i, char, label, confidence, source_seq, last_fallback_reading
                     )
                 else:
@@ -303,25 +303,26 @@ class Predictor:
         confidence: float,
         source_seq: List[SourceEntry],
         last_fallback: str,
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, str, float]:
         """
         JAPANESE_NUMERIC 文字の変換。
-        自信度が閾値以上であれば CRF の出力をそのまま使う。
-        閾値を下回る場合はルールベース変換にフォールバックする。
+        自信度が閾値以上であれば CRF の出力をそのまま使う（confidence はそのまま）。
+        閾値を下回る場合はルールベース変換にフォールバックし、confidence を 1.0 に書き換える。
+        （confidence=0.0 は CRF が失敗、confidence=1.0 はルールベースで確定、を意味する）
         """
         if confidence >= JAPANESE_NUMERIC_CONFIDENCE_THRESHOLD:
-            return label, ""
+            return label, "", confidence
 
-        # ルールベース変換
-        left_char  = source_seq[i - 1][0] if i > 0 else ""
-        left_ctype = source_seq[i - 1][2] if i > 0 else ""
+        # ルールベース変換（confidence はCRFの値をそのまま引き継ぐ）
+        left_char   = source_seq[i - 1][0] if i > 0 else ""
+        left_ctype  = source_seq[i - 1][2] if i > 0 else ""
         right_ctype = source_seq[i + 1][2] if i < len(source_seq) - 1 else ""
 
         if char in _DIGIT_TABLE:
-            return _DIGIT_TABLE[char], ""
+            return _DIGIT_TABLE[char], "", confidence
 
         # 位取り文字
-        return _kurai_fallback(char, left_char, left_ctype, right_ctype), ""
+        return _kurai_fallback(char, left_char, left_ctype, right_ctype), "", confidence
 
     def _apply_kanji_fallback(self, i: int, char: str, ctype: str, label: str, confidence: float, source_seq: List[SourceEntry], last_fallback: str) -> Tuple[str, str, bool]:
         """

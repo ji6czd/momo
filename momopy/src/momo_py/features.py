@@ -190,6 +190,27 @@ def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
             if i == 0 or source_seq[i - 1][2] != 'KANJI':
                 features['kanji_pos_first'] = 1.0
 
+            # 左隣の JAPANESE_NUMERIC 連続長を「日」などの隣接 KANJI に伝える
+            if i > 0 and source_seq[i - 1][2] == 'JAPANESE_NUMERIC':
+                num_run = 0
+                j = i - 1
+                while j >= 0 and source_seq[j][2] == 'JAPANESE_NUMERIC':
+                    num_run += 1; j -= 1
+                num_run_key = str(num_run) if num_run <= 4 else '5+'
+                features[f'-1:japanese_numeric_run_len={num_run_key}'] = 1.0
+
+        if ctype == 'JAPANESE_NUMERIC':
+            run = 1
+            j = i + 1
+            while j < n and source_seq[j][2] == 'JAPANESE_NUMERIC':
+                run += 1; j += 1
+            j = i - 1
+            while j >= 0 and source_seq[j][2] == 'JAPANESE_NUMERIC':
+                run += 1; j -= 1
+
+            run_key = str(run) if run <= 4 else '5+'
+            features[f'japanese_numeric_run_len={run_key}'] = 1.0
+
         result.append(features)
 
     return result

@@ -1,6 +1,6 @@
 import re
 import json
-from typing import Optional
+from typing import Optional, List
 from google.protobuf import text_format
 from importlib import resources
 
@@ -12,7 +12,7 @@ from sudachipy import Morpheme
 from .braille_rules_pb2 import BrailleRules
 from .braille_rules_pb2 import PartOfSpeech
 from . import pybraille
-from .features import get_basic_char_category, CharType
+from .features import get_basic_char_category, CharType, _has_vowel
 class Translator:
     """
     日本語テキストを点字（かな変換・分かち書き変換）に変換するクラス。
@@ -218,47 +218,26 @@ class Translator:
 
     def _convert_prolonged_sound_mark(self, morpheme: Morpheme, reading: str, split: bool = False) -> str:
         delimiter = '/' if split else ''
-        if (not self._has_part_of_speech(morpheme, "動詞")
-                or self._has_part_of_speech(morpheme, "意志推量形")):
-            surface = morpheme.surface()
-            # 漢字で構成されているか確認
-            if (len(surface) >= 1
-                    and all(get_basic_char_category(c) == CharType.KANJI for c in surface)):
-                segments = self._segment_reading_by_kanji(surface, reading)
-                if segments is not None:
-                    result = ""
-                    for seg in segments:
-                        if len(seg) >= 2:
-                            result += seg[0] + re.sub(r'ウ(?![ァィェォ])', 'ー', seg[1:]) + delimiter
-                        else:
-                            result += seg + delimiter
-                    return result
-                else:
-                    # 各漢字の読みが特定できない場合はひらがな扱いにフォールバック
-                    if len(reading) >= 2:
-                        return reading[0] + re.sub(r'ウ(?![ァィェォ])', 'ー', reading[1:]) + delimiter
-            # 連続するひらがなで構成されているか確認
-            elif all('\u3041' <= c <= '\u3096' for c in surface):
-                if len(reading) >= 2:
-                    res = reading[0] + delimiter
-                    res += (self._split_kanastr(re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:]))) if split else re.sub(r'ウ(?![アイエオァィェォ])', 'ー', reading[1:])
-                    return res + delimiter
-            else:
-                # 末尾の連続ひらがな部分について変換
-                trailing_hiragana = ""
-                for c in reversed(surface):
-                    if '\u3041' <= c <= '\u3096':
-                        trailing_hiragana = c + trailing_hiragana
-                    else:
-                        break
-                if len(trailing_hiragana) >= 2:
-                    suffix_reading = reading[-len(trailing_hiragana):]
-                    prefix_reading = reading[:-len(trailing_hiragana)]
-                    if split:
-                        return prefix_reading + delimiter + self._split_kanastr(suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:])) + delimiter
-                    else:
-                        return prefix_reading + delimiter + suffix_reading[0] + re.sub(r'ウ(?![アイエオァィェォ])', 'ー', suffix_reading[1:]) + delimiter
-        return self._split_kana(morpheme) if split else reading
+        # ソーステキストの一文字対して分割された読みを取得
+        segmented_list = self._segment_reading_string(morpheme)
+        if segmented_list:
+            # 動詞であれば変換しない
+            if self._has_part_of_speech(morpheme, "動詞"):
+                return delimiter.join(segmented_list) + delimiter
+
+            # 分割された読みの中で'ウ'を点字のルールに従って'ー'に変換する。
+            for i, seg in enumerate(segmented_list):
+                seg_len = len(seg)
+                if (seg_len > 1 and seg[seg_len-1] == 'ウ' and
+                    (_has_vowel(seg[seg_len-2], 'オ')
+                    or _has_vowel(seg[seg_len-2], 'ウ')
+                    or _has_vowel(seg[seg_len-1], 'ョ')
+                    or _has_vowel(seg[seg_len-2], 'ュ'))
+                ):
+                    segmented_list[i] = seg[:-1] + 'ー'
+
+            return delimiter.join(segmented_list) + delimiter
+
 
     def _segment_reading_by_kanji(self, surface: str, reading: str) -> Optional[list[str]]:
         """漢字列 surface の各文字に対応するカタカナ reading のセグメントを返す。
@@ -271,7 +250,6 @@ class Translator:
                 if rest is not None:
                     return [r] + rest
         return None
-
 
     def _correct_counter_suffix_reading(
         self, morpheme_num: Morpheme, morpheme_counter: Morpheme
@@ -318,8 +296,9 @@ class Translator:
         
         # 通常の辞書から読みを取得
         for m in m_list:
-            reading_list.append(m.reading_form())
-        
+            reading = m.reading_form()
+            if reading not in reading_list:
+                reading_list.append(reading)
         # 単一漢字辞書からも読みを取得して追加
         single_char_readings = self._get_reading_from_single_char_dic(surface)
         for reading in single_char_readings:
@@ -327,6 +306,209 @@ class Translator:
                 reading_list.append(reading)
             
         return reading_list
+
+    def _get_char_candidates(self, char: str) -> List[str]:
+        """
+        1文字に対する読み候補リストを返す。
+        ひらがな・カタカナは変換した1文字のみ、漢字等は辞書から取得。
+        """
+        if '\u3041' <= char <= '\u3096':
+            return [chr(ord(char) + 0x60)]   # ひらがな→カタカナ
+        if '\u30A1' <= char <= '\u30F6':
+            return [char]                      # カタカナはそのまま
+        readings = self._get_reading_form_in_dictionary(char)
+        return readings if readings else [char]
+
+    def _resolve_segment(
+        self,
+        surface_seg: str,
+        reading_seg: str,
+        candidates_seg: List[List[str]],
+    ) -> Optional[List[str]]:
+        """
+        surface_seg の各文字を reading_seg に過不足なく割り当てる。
+        解が一意に存在すればそのリストを返し、なければ None を返す。
+        """
+        if not surface_seg:
+            return [] if not reading_seg else None
+        results = []
+        for r in candidates_seg[0]:
+            if reading_seg.startswith(r):
+                rest = self._resolve_segment(
+                    surface_seg[1:],
+                    reading_seg[len(r):],
+                    candidates_seg[1:],
+                )
+                if rest is not None:
+                    results.append([r] + rest)
+        # 解が1つだけなら確定、0または複数なら None
+        return results[0] if len(results) == 1 else None
+
+    def _segment_reading_string(self, m: Morpheme) -> List[str]:
+        """
+        形態素 m の reading_form() を、surface の各文字に対応するように
+        '/' で区切った文字列を返す。
+
+        アルゴリズム:
+            1. 各文字の読み候補を収集する。
+            2. 前向きフルスキャン: reading 全体を見渡して、各文字の読みが
+               一意に確定できる（＝錨になれる）かどうかを判定する。
+               途中で詰まっても止まらず最後まで走る。
+            3. 錨と錨の間の未確定区間を _resolve_segment() で充填する。
+            4. 最終フォールバック: それでも確定できない文字は最短一致で埋める。
+
+        例:
+            surface="水い動う", reading="スイイドウウ"
+            前向きスキャン: 「動」→「ドウ」が錨として確定
+            後向き伝播:     「い」→「ドウ」直前の「イ」で確定
+            残り充填:       「水」→「スイ」で確定、「う」→「ウ」で確定
+            結果: "スイ/イ/ドウ/ウ"
+
+        Returns:
+            各文字に対応する読みのリスト。分割できない場合は reading_form() をそのまま含むリストを返す。
+        """
+        surface = m.surface()
+        reading = m.reading_form()
+
+        n = len(surface)
+        if n == 0:
+            return reading
+
+        # 各文字の読み候補を収集
+        candidates: List[List[str]] = [self._get_char_candidates(c) for c in surface]
+
+        # resolved[i] = (reading上の開始位置, 読み文字列) or None
+        resolved: List[Optional[Tuple[int, str]]] = [None] * n
+
+        # ==========================================
+        # 前向きフルスキャン: 錨を見つける
+        # ==========================================
+        # reading上の各位置から始まる候補を全文字についてチェックする。
+        # 「この文字がこの位置から始まる」という仮定のもとで、
+        # reading全体との整合が取れる割り当てが一意かどうかを判定する。
+
+        def find_anchors() -> bool:
+            """前向きスキャンで錨を探す。1つでも確定したら True を返す。"""
+            changed = False
+
+            # 確定済みの錨からreading上の位置制約を計算する
+            # anchor_constraints[i] = (pos_min, pos_max)
+            # その文字がreading上で取りうる開始位置の範囲
+            pos_min = [0] * n
+            pos_max = [len(reading)] * n
+
+            # 左から: 確定済みの錨を使って pos_min を絞り込む
+            cur_min = 0
+            for i in range(n):
+                if resolved[i] is not None:
+                    cur_min = resolved[i][0]
+                pos_min[i] = max(pos_min[i], cur_min)
+                # 確定していない場合は最短候補分だけ最低限進む
+                if resolved[i] is not None:
+                    cur_min = resolved[i][0] + len(resolved[i][1])
+                else:
+                    min_len = min(len(r) for r in candidates[i])
+                    cur_min += min_len
+
+            # 右から: 確定済みの錨を使って pos_max を絞り込む
+            cur_max = len(reading)
+            for i in range(n - 1, -1, -1):
+                if resolved[i] is not None:
+                    cur_max = resolved[i][0] + len(resolved[i][1])
+                pos_max[i] = min(pos_max[i], cur_max)
+                if resolved[i] is not None:
+                    cur_max = resolved[i][0]
+                else:
+                    min_len = min(len(r) for r in candidates[i])
+                    cur_max -= min_len
+
+            # 各未確定文字について、位置範囲内で一意に確定できるか試みる
+            for i in range(n):
+                if resolved[i] is not None:
+                    continue
+
+                matched = []
+                for r in candidates[i]:
+                    rlen = len(r)
+                    # この候補がpos_min[i]〜pos_max[i]の範囲内でreadingと一致するか
+                    for pos in range(pos_min[i], pos_max[i] - rlen + 1):
+                        if reading[pos:pos + rlen] == r:
+                            matched.append((pos, r))
+
+                if len(matched) == 1:
+                    # 一意確定 → 錨
+                    resolved[i] = matched[0]
+                    changed = True
+
+            return changed
+
+        # 収束するまで繰り返す
+        for _ in range(n):
+            if not find_anchors():
+                break
+            if all(r is not None for r in resolved):
+                break
+
+        # ==========================================
+        # 錨間の未確定区間を充填する
+        # ==========================================
+        # 確定済みの錨をソートして、区間ごとに _resolve_segment() を試みる
+        anchors = [(i, resolved[i][0], resolved[i][1])
+                   for i in range(n)
+                   if resolved[i] is not None]
+
+        # 錨の間の未確定区間を充填
+        def fill_gap(start_char: int, end_char: int, start_pos: int, end_pos: int) -> None:
+            """surface[start_char:end_char] を reading[start_pos:end_pos] で充填する。
+            分割できない場合は読み文字列をそのまま先頭文字に割り当て、文字消失を防ぐ。
+            """
+            if start_char >= end_char:
+                return
+            seg_surface    = surface[start_char:end_char]
+            seg_reading    = reading[start_pos:end_pos]
+            seg_candidates = candidates[start_char:end_char]
+            result = self._resolve_segment(seg_surface, seg_reading, seg_candidates)
+            if result is not None:
+                pos = start_pos
+                for k, r in enumerate(result):
+                    resolved[start_char + k] = (pos, r)
+                    pos += len(r)
+            else:
+                # 分割できない（熟字訓など）→ 読みをそのまま先頭文字に割り当て、
+                # 残りの文字は空文字で埋めて文字消失を防ぐ
+                resolved[start_char] = (start_pos, seg_reading)
+                for k in range(1, end_char - start_char):
+                    resolved[start_char + k] = (end_pos, "")
+
+        # 先頭〜最初の錨
+        if anchors:
+            first_i, first_pos, first_r = anchors[0]
+            fill_gap(0, first_i, 0, first_pos)
+
+            # 錨と錨の間
+            for idx in range(len(anchors) - 1):
+                i1, pos1, r1 = anchors[idx]
+                i2, pos2, r2 = anchors[idx + 1]
+                fill_gap(i1 + 1, i2, pos1 + len(r1), pos2)
+
+            # 最後の錨〜末尾
+            last_i, last_pos, last_r = anchors[-1]
+            fill_gap(last_i + 1, n, last_pos + len(last_r), len(reading))
+        else:
+            # 錨が1つも見つからなかった場合は全体を _resolve_segment() で試みる
+            result = self._resolve_segment(surface, reading, candidates)
+            if result is not None:
+                pos = 0
+                for i, r in enumerate(result):
+                    resolved[i] = (pos, r)
+                    pos += len(r)
+            else:
+                # 全体が分割不能（熟字訓など）→ 読みをそのまま先頭文字に割り当て
+                resolved[0] = (0, reading)
+                for i in range(1, n):
+                    resolved[i] = (len(reading), "")
+
+        return [r for _, r in resolved if r is not None]
 
     # --- 公開メソッド ---
 
@@ -429,3 +611,4 @@ class Translator:
         """テキストを点字に変換する。"""
         kana_str = self.convert_to_kana(src)
         return pybraille.to_jp_braille(kana_str)
+

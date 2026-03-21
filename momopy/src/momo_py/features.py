@@ -50,9 +50,6 @@ def get_basic_char_category(c: str) -> CharType:
 def get_char_type(c: str) -> CharType:
     """
     文字種を判定する。
-
-    位取り文字（十百千万…）の JAPANESE_NUMERIC への昇格は
-    get_units() の文脈判定で行われるため、この関数では KANJI を返す。
     """
     if not c or c.isspace(): return CharType.SPACE
     if c.isdigit() or ('0' <= c <= '9'): return CharType.NUM
@@ -62,6 +59,74 @@ def get_char_type(c: str) -> CharType:
 
     return get_basic_char_category(c)
 
+
+def _has_vowel(char: str, vowel: str) -> bool:
+    """
+    char（カナ1文字）が vowel（母音）を含むかどうかを返す。
+    ひらがな・カタカナ両対応。引数は同じ種類の文字であること。
+
+    Args:
+        char:  判定対象のカナ1文字（ひらがなまたはカタカナ）
+        vowel: 母音1文字（charと同じ種類）
+
+    Returns:
+        char が vowel の母音を持つなら True
+
+    Raises:
+        ValueError: 引数の文字種が異なる場合、またはカナ以外の場合
+    """
+
+    char_type  = get_basic_char_category(char)
+    vowel_type = get_basic_char_category(vowel)
+
+    if char_type not in (CharType.HIRAGANA, CharType.KATAKANA):
+        raise ValueError(f"char はひらがなまたはカタカナでなければなりません: {char!r}")
+    if vowel_type not in (CharType.HIRAGANA, CharType.KATAKANA):
+        raise ValueError(f"vowel はひらがなまたはカタカナでなければなりません: {vowel!r}")
+    if char_type != vowel_type:
+        raise ValueError(
+            f"char と vowel は同じ文字種でなければなりません: "
+            f"char={char!r}({char_type}), vowel={vowel!r}({vowel_type})"
+        )
+
+    # 比較のためカタカナに統一
+    def to_kata(c: str) -> str:
+        if get_basic_char_category(c) == CharType.HIRAGANA:
+            return chr(ord(c) + 0x60)
+        return c
+
+    # カタカナの母音マップ: 各文字→その母音
+    # 小書き文字（ァィゥェォ）も含む
+    _VOWEL_MAP = {
+        'ア': 'ア', 'イ': 'イ', 'ウ': 'ウ', 'エ': 'エ', 'オ': 'オ',
+         'ァ': 'ア', 'ィ': 'イ', 'ゥ': 'ウ', 'ェ': 'エ', 'ォ': 'オ',
+        'カ': 'ア', 'キ': 'イ', 'ク': 'ウ', 'ケ': 'エ', 'コ': 'オ',
+        'ガ': 'ア', 'ギ': 'イ', 'グ': 'ウ', 'ゲ': 'エ', 'ゴ': 'オ',
+        'サ': 'ア', 'シ': 'イ', 'ス': 'ウ', 'セ': 'エ', 'ソ': 'オ',
+        'ザ': 'ア', 'ジ': 'イ', 'ズ': 'ウ', 'ゼ': 'エ', 'ゾ': 'オ',
+        'タ': 'ア', 'チ': 'イ', 'ツ': 'ウ', 'テ': 'エ', 'ト': 'オ',
+        'ダ': 'ア', 'ヂ': 'イ', 'ヅ': 'ウ', 'デ': 'エ', 'ド': 'オ',
+        'ナ': 'ア', 'ニ': 'イ', 'ヌ': 'ウ', 'ネ': 'エ', 'ノ': 'オ',
+        'ハ': 'ア', 'ヒ': 'イ', 'フ': 'ウ', 'ヘ': 'エ', 'ホ': 'オ',
+        'バ': 'ア', 'ビ': 'イ', 'ブ': 'ウ', 'ベ': 'エ', 'ボ': 'オ',
+        'パ': 'ア', 'ピ': 'イ', 'プ': 'ウ', 'ペ': 'エ', 'ポ': 'オ',
+        'マ': 'ア', 'ミ': 'イ', 'ム': 'ウ', 'メ': 'エ', 'モ': 'オ',
+        'ヤ': 'ア', 'ユ': 'ウ', 'ヨ': 'オ',
+        'ャ': 'ア', 'ュ': 'ウ', 'ョ': 'オ',
+        'ラ': 'ア', 'リ': 'イ', 'ル': 'ウ', 'レ': 'エ', 'ロ': 'オ',
+        'ワ': 'ア', 'ヲ': 'オ',
+        'ヴ': 'ウ',
+    }
+
+    char_kata  = to_kata(char)
+    vowel_kata = to_kata(vowel)
+
+    char_vowel = _VOWEL_MAP.get(char_kata)
+    if char_vowel is None:
+        # ン・ッ など母音を持たない文字
+        return False
+
+    return char_vowel == vowel_kata
 
 def get_units(text: str) -> List[Tuple[str, int, str]]:
     """

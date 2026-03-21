@@ -4,7 +4,7 @@ from typing import List, Tuple
 from importlib.metadata import version
 
 from .trainer import create_data, train
-from .predictor import Predictor
+from .predictor import Predictor, PredictorConfig
 
 from .pybraille import to_jp_braille, to_braille
 from .translator import Translator
@@ -29,9 +29,12 @@ def run_translate(opt_segment: bool = False):
     except KeyboardInterrupt:
         print("\n🛑 翻訳モード終了。")
 
-def run_predict(model_path: str) -> None:
-    """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード"""
-    predictor = Predictor(model_path)
+def run_predict(config: PredictorConfig, show_trace: bool = False) -> None:
+    """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード。
+    show_trace が True の場合、各文字の決定根拠をターミナルにも表示する。
+    """
+    predictor = Predictor(config)
+    use_color = sys.stderr.isatty()
     try:
         for line in sys.stdin:
             text = line.strip()
@@ -39,6 +42,12 @@ def run_predict(model_path: str) -> None:
 
             result = predictor.predict(text)
             print(result.to_json())
+
+            if show_trace:
+                print("─" * 48, file=sys.stderr)
+                print(result.format_terminal(use_color=use_color), file=sys.stderr)
+                print("─" * 48, file=sys.stderr)
+
     except KeyboardInterrupt:
         print("\n🛑 予測モード終了。お疲れ様でした！")
 
@@ -108,6 +117,8 @@ def main():
     # コマンドの定義
     pp = subparsers.add_parser("predict")
     pp.add_argument("--model", required=True)
+    pp.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
+    pp.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
     
     tp = subparsers.add_parser("translate")
     tp.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
@@ -139,7 +150,11 @@ def main():
         train(args.tsv)
         
     elif args.command == "predict":
-        run_predict(args.model)
+        config = PredictorConfig(
+            model_path=args.model,
+            custom_dict_path=args.custom_dict,
+        )
+        run_predict(config, show_trace=args.trace)
         
     elif args.command == "translate":
         run_translate(args.segment)

@@ -235,6 +235,13 @@ class Translator:
                     or _has_vowel(seg[seg_len-2], 'ュ'))
                 ):
                     segmented_list[i] = seg[:-1] + 'ー'
+                elif (seg_len == 1 and seg == 'ウ' and i > 0
+                    and (_has_vowel(segmented_list[i-1][0], 'オ')
+                    or _has_vowel(segmented_list[i-1][0], 'ウ')
+                    or _has_vowel(segmented_list[i-1][0], 'ョ')
+                    or _has_vowel(segmented_list[i-1][0], 'ュ')
+                )):
+                    segmented_list[i] = 'ー'
 
             return delimiter.join(segmented_list) + delimiter
 

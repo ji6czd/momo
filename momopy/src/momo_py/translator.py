@@ -309,6 +309,8 @@ class Translator:
         # 単一漢字辞書からも読みを取得して追加
         single_char_readings = self._get_reading_from_single_char_dic(surface)
         for reading in single_char_readings:
+            # 点字ルールの'ー'を'ウ'に戻す
+            reading = reading.replace('ー', 'ウ')
             if reading not in reading_list:
                 reading_list.append(reading)
             

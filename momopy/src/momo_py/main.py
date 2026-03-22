@@ -70,12 +70,12 @@ def get_labels(tagger, target_feature: str) -> List[Tuple[str, float]]:
     weights.sort(key=lambda x: x[1], reverse=True)
     return weights
 
-def run_label_scanner(model_path: str) -> None:
+def run_label_scanner(config: PredictorConfig) -> None:
     """
     標準入力から対話的に特徴量を受け取り、AIの脳内（配点表）を表示する
     """
     # Predictorからtaggerインスタンスを取り出して使用
-    predictor = Predictor(model_path)
+    predictor = Predictor(config)
     tagger = predictor.tagger_read
     
     print("🧠 AI脳内スキャナー起動 (Ctrl+D で終了)")
@@ -115,22 +115,23 @@ def main():
     parser.add_argument("-v", "--version", action="version", version=f"Momo {version('momo-py')}")
     
     # コマンドの定義
-    pp = subparsers.add_parser("predict")
-    pp.add_argument("--model", required=True)
-    pp.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
-    pp.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
+    predict_parser = subparsers.add_parser("predict")
+    predict_parser.add_argument("--model", required=True)
+    predict_parser.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
+    predict_parser.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
     
-    tp = subparsers.add_parser("translate")
-    tp.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
+    translate_parser = subparsers.add_parser("translate")
+    translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
     
-    lp = subparsers.add_parser("label")
-    lp.add_argument("--model", required=True)
+    labelscan_parser = subparsers.add_parser("label")
+    labelscan_parser.add_argument("--model", required=True)
+    labelscan_parser.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")    
+
+    create_data_parser = subparsers.add_parser("createdata")
+    create_data_parser.add_argument("--raw", required=True)
     
-    cp = subparsers.add_parser("createdata")
-    cp.add_argument("--raw", required=True)
-    
-    tp_train = subparsers.add_parser("train")
-    tp_train.add_argument("--tsv", required=True)
+    trainer_parser = subparsers.add_parser("train")
+    trainer_parser.add_argument("--tsv", required=True)
     
     args = parser.parse_args()
 
@@ -160,7 +161,11 @@ def main():
         run_translate(args.segment)
         
     elif args.command == "label":
-        run_label_scanner(args.model)
+        config = PredictorConfig(
+            model_path=args.model,
+            custom_dict_path=args.custom_dict,
+        )
+        run_label_scanner(config)
 
 if __name__ == "__main__":
     main()

@@ -104,6 +104,10 @@ def make_characters_table(res: PredictionResult) -> str:
     # 次に確信度を横に並べる
     for conf in res.confidences:
         characters_table += f"<td>{conf:.2f}</td>"
+    characters_table += "</tr><tr><th>ソース</th>"
+    # 変換ソース
+    for dec in res.decision_sources:
+        characters_table += f"<td>{dec}</td>"
     characters_table += "</tr></table>"
     return characters_table
 

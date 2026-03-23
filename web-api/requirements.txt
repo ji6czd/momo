@@ -10,9 +10,9 @@ itsdangerous==2.2.0
 jinja2==3.1.6
 loguru==0.7.3
 markupsafe==3.0.3
-momo-py @ git+https://github.com/ji6czd/momo@fe871b2aa1de5172f08d0c6cc6454f370e25f038#subdirectory=momopy
+momo-py @ git+https://github.com/ji6czd/momo@2af6c5a1c91ce0c0081024def91895c914c994e7#subdirectory=momopy
 packaging==26.0
-protobuf==7.34.0
+protobuf==7.34.1
 python-crfsuite==0.9.12
 requests==2.32.5
 sudachidict-core==20260116

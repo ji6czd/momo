@@ -3,7 +3,7 @@ import sys
 from types import FrameType
 from importlib.metadata import version
 from flask import Flask, request
-from momo_py import PredictionResult, Predictor, Translator
+from momo_py import PredictionResult, Predictor, Translator, PredictorConfig
 from momo_py import pybraille
 app = Flask(__name__)
 
@@ -45,7 +45,7 @@ predict_page = """<!DOCTYPE html>
     <h1>点訳結果</h1>
     <p>原文: {source}</p>
     <p>仮名: {result}</p>
-    <p>点字: {braille_result}</p>
+    <p>点字: <span style="font-size: 24px; font-family: monospace; letter-spacing: 2px;">{braille_result}</span></p>
     <p>{confidences_table}</p>
     <p>
     <form action="/predict" method="get">
@@ -71,7 +71,7 @@ translate_page = """<!DOCTYPE html>
     <h1>点訳結果</h1>
     <p>原文: {source}</p>
     <p>仮名: {result}</p>
-    <p>点字: {braille_result}</p>
+    <p>点字: <span style="font-size: 24px; font-family: monospace; letter-spacing: 2px;">{braille_result}</span></p>
     <p>
     <form action="/predict" method="get">
         <label for="source">点訳したい文章を入力してね：</label><br>
@@ -86,7 +86,7 @@ translate_page = """<!DOCTYPE html>
 """
 
 model_file = "./dataset/basic_data.zip"
-
+custom_dic_file = "./dataset/custom_dictionary.tsv"
 def make_characters_table(res: PredictionResult) -> str:
     characters_table = "<table border='1'><tr><th>元の文字</th>"
 
@@ -114,10 +114,11 @@ def hello() -> str:
 @app.route("/predict", methods=["GET"])
 def predict() -> str:
     source = request.args.get('source')
-    p = Predictor(model_file)
-    model_version = p.get_version_info().get('trained_at', '不明')
+    cfg = PredictorConfig(model_path=model_file, custom_dict_path=custom_dic_file)
+    prd = Predictor(cfg)
+    model_version = prd.get_version_info().get('trained_at', '不明')
 
-    res = p.predict(source)
+    res = prd.predict(source)
     braille = pybraille.to_jp_braille(res.kana_text)
     
     return predict_page.format(source=source, result=res.kana_text, confidences_table=make_characters_table(res), braille_result=braille, model_version=model_version, version_info=version_info)
@@ -133,7 +134,8 @@ def translate() -> str:
 @app.route("/api/predict", methods=["GET"])
 def api_predict() -> str:
     source = request.args.get('source')
-    p = Predictor(model_file)
+    cfg = PredictorConfig(model_path=model_file, custom_dict_path=custom_dic_file)
+    p = Predictor(cfg)
     return p.predict(source).to_json()
     
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:

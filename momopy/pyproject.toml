@@ -20,7 +20,7 @@ requires = ["uv_build>=0.9.9,<0.10.0"]
 build-backend = "uv_build"
 [project.scripts]
 momo = "momo_py.main:main"
-
+lookup = "momo_py.lookup:main"
 [[tool.mypy.overrides]]
 module = ["pycrfsuite.*"]
 ignore_missing_imports = true

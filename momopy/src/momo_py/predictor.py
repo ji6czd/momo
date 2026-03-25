@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import shutil
 import tempfile
 import zipfile
@@ -11,6 +10,16 @@ import pycrfsuite
 
 from .features import get_units, get_char_type, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
 from .fallback_dict import FALLBACK_DICT
+from .utils import split_on_unescaped_slash
+
+
+def _is_ascii_printable_block(s: str) -> bool:
+    """ASCII印字文字（0x21-0x7E）とスペース/タブのみで構成され、
+    先頭・末尾がスペース/タブでないか判定する。"""
+    if not s or s[0] in ' \t' or s[-1] in ' \t':
+        return False
+    return all(0x21 <= ord(c) <= 0x7E or c in ' \t' for c in s)
+
 
 # 🌟 訓読みを誘発しやすい「安全な送り仮名」のリスト
 SAFE_OKURIGANA = set(
@@ -153,7 +162,7 @@ def load_custom_dict(path: str) -> Dict[str, List[str]]:
                     f"（タブ区切りで表層形と読みが必要）: {line!r}"
                 )
             surface, reading_str = parts
-            readings = [b.replace(r"\/", "/") for b in re.split(r"(?<!\\)/", reading_str)]
+            readings = [b.replace(r"\/", "/") for b in split_on_unescaped_slash(reading_str)]
             if len(readings) != len(surface):
                 raise ValueError(
                     f"カスタム辞書 {path} の {lineno} 行目: "
@@ -411,9 +420,7 @@ class Predictor:
 
         char_idx = 0
         for val, orig_idx, ctype in units_info:
-            is_ascii_bypass = (ctype == 'ALPHA' or ctype == 'NUM') and bool(
-                re.fullmatch(r'[!-~]+(?:[ \t]+[!-~]+)*', val)
-            )
+            is_ascii_bypass = (ctype == 'ALPHA' or ctype == 'NUM') and _is_ascii_printable_block(val)
             for i, c in enumerate(val):
                 source_seq.append((c, orig_idx + i, ctype))
                 if is_ascii_bypass:

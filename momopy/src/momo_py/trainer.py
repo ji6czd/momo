@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import unicodedata
 import zipfile
 from datetime import datetime, timezone
@@ -13,6 +12,7 @@ from .features import (
     get_units, get_char_type, compute_source_features,
     SourceEntry, FeatureDict, LABEL_CONTINUE, LABEL_SKIP,
 )
+from .utils import split_on_unescaped_slash
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
 
@@ -122,10 +122,9 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
 
     raw_part, read_full = parts[0], parts[1]
 
-    if re.search(r'(?<!\\)//', read_full):
+    read_blocks_raw = split_on_unescaped_slash(read_full)
+    if any(b == "" for b in read_blocks_raw[1:-1]):
         print(f"⚠️  Warning (Line {line_num}): 読み部分に連続した '/' が含まれています: '{read_full}'")
-
-    read_blocks_raw = re.split(r'(?<!\\)/', read_full)
     read_blocks = [b.replace(r'\/', '/').replace(r'\_', '_') for b in read_blocks_raw]
 
     raw_units_info = get_units(raw_part)  # 戻り値: List[Tuple[str, int, str]]

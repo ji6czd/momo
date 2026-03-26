@@ -24,7 +24,8 @@ endif()
 
 add_subdirectory(src)
 add_subdirectory(crfsuite)
+add_subdirectory(liblbfgs)
 
 # main application
 add_executable(${APP_NAME} main.cpp)
-target_link_libraries(${APP_NAME} PRIVATE ${PROJECT_NAME}-lib crfsuite-lib)
+target_link_libraries(${APP_NAME} PRIVATE ${PROJECT_NAME}-lib crfsuite-lib lbfgs-lib)

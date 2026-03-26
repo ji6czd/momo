@@ -9,18 +9,16 @@ cmake_minimum_required(VERSION 3.20)
 # Please rewrite the following 3 lines.
 set(PROJECT_NAME momo)
 set(APP_NAME momo)
-set(PROJECT_VERSION 0.4.0)
+set(PROJECT_VERSION 0.5.0)
 
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-
 if(MSVC)
     add_compile_options("/utf-8" "/W4")
 endif()
-
 
 add_subdirectory(src)
 add_subdirectory(crfsuite)

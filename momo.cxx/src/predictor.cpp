@@ -280,21 +280,20 @@ void Predictor::_run_inference(const std::vector<SourceUnit>& source_seq,
     auto features = compute_source_features(source_seq);
     int n = static_cast<int>(features.size());
 
-    // crfsuite のアイテム列を構築
     auto make_items = [&](std::vector<std::string>& labels_out,
                           std::vector<float>&        confidences_out,
+                          crfsuite_model_t*  model,
                           crfsuite_tagger_t* tagger) {
+        // モデルから属性辞書・ラベル辞書を取得
+        crfsuite_dictionary_t* attrs      = nullptr;
+        crfsuite_dictionary_t* labels_dict = nullptr;
+        model->get_attrs(model, &attrs);
+        model->get_labels(model, &labels_dict);
+
+        // インスタンス構築
         crfsuite_instance_t inst;
         crfsuite_instance_init(&inst);
         crfsuite_instance_init_n(&inst, n);
-
-        // 各文字の特徴量を crfsuite_item_t に変換
-        // attrs は tagger のモデルから取得する
-        crfsuite_dictionary_t* attrs = nullptr;
-        crfsuite_dictionary_t* labels_dict = nullptr;
-        // モデルから辞書を取得（read モデルを使用）
-        _model_read->get_attrs(_model_read, &attrs);
-        _model_read->get_labels(_model_read, &labels_dict);
 
         for (int i = 0; i < n; ++i) {
             crfsuite_item_t* item = &inst.items[i];
@@ -310,33 +309,80 @@ void Predictor::_run_inference(const std::vector<SourceUnit>& source_seq,
             }
         }
 
+        // tagger にインスタンスをセット
         tagger->set(tagger, &inst);
-        tagger->viterbi(tagger, inst.labels, nullptr);
+
+        // viterbi: 出力ラベル列を自前バッファで受け取る
+        std::vector<int> label_ids(n, 0);
+        tagger->viterbi(tagger, label_ids.data(), nullptr);
+
+        // marginal 確率の取得には lognorm() を先に呼ぶ必要がある
+        floatval_t lognorm = 0.0;
+        tagger->lognorm(tagger, &lognorm);
 
         labels_out.resize(n);
         confidences_out.resize(n, 1.0f);
         for (int i = 0; i < n; ++i) {
             const char* label_str = nullptr;
-            labels_dict->to_string(labels_dict, inst.labels[i], &label_str);
+            labels_dict->to_string(labels_dict, label_ids[i], &label_str);
             if (label_str) labels_out[i] = label_str;
             labels_dict->free(labels_dict, label_str);
 
-            // marginal 確率を取得
             floatval_t prob = 1.0;
-            tagger->marginal_point(tagger, inst.labels[i], i, &prob);
+            tagger->marginal_point(tagger, label_ids[i], i, &prob);
             confidences_out[i] = static_cast<float>(prob);
         }
 
-        if (attrs)      { attrs->release(attrs); }
-        if (labels_dict){ labels_dict->release(labels_dict); }
+        attrs->release(attrs);
+        labels_dict->release(labels_dict);
         crfsuite_instance_finish(&inst);
     };
 
-    make_items(raw_labels, raw_confidences, _tagger_read);
+    make_items(raw_labels, raw_confidences, _model_read, _tagger_read);
 
-    std::vector<float> dummy_conf;
     if (_tagger_boundary) {
-        make_items(boundary_labels, dummy_conf, _tagger_boundary);
+        // 境界モデルは "0"/"1" の2値ラベルのみ。marginalは不要なので別途シンプルに処理。
+        crfsuite_dictionary_t* b_labels_dict = nullptr;
+        _model_boundary->get_labels(_model_boundary, &b_labels_dict);
+
+        // インスタンスは read モデルと同じ特徴量を使う
+        crfsuite_dictionary_t* b_attrs = nullptr;
+        _model_boundary->get_attrs(_model_boundary, &b_attrs);
+
+        crfsuite_instance_t b_inst;
+        crfsuite_instance_init(&b_inst);
+        crfsuite_instance_init_n(&b_inst, n);
+
+        for (int i = 0; i < n; ++i) {
+            crfsuite_item_t* item = &b_inst.items[i];
+            crfsuite_item_init(item);
+            for (const auto& [feat, val] : features[i]) {
+                int aid = b_attrs->to_id(b_attrs, feat.c_str());
+                if (aid >= 0) {
+                    crfsuite_attribute_t attr;
+                    attr.aid   = aid;
+                    attr.value = static_cast<floatval_t>(val);
+                    crfsuite_item_append_attribute(item, &attr);
+                }
+            }
+        }
+
+        _tagger_boundary->set(_tagger_boundary, &b_inst);
+
+        std::vector<int> b_label_ids(n, 0);
+        _tagger_boundary->viterbi(_tagger_boundary, b_label_ids.data(), nullptr);
+
+        boundary_labels.resize(n);
+        for (int i = 0; i < n; ++i) {
+            const char* label_str = nullptr;
+            b_labels_dict->to_string(b_labels_dict, b_label_ids[i], &label_str);
+            if (label_str) boundary_labels[i] = label_str;
+            b_labels_dict->free(b_labels_dict, label_str);
+        }
+
+        b_attrs->release(b_attrs);
+        b_labels_dict->release(b_labels_dict);
+        crfsuite_instance_finish(&b_inst);
     } else {
         boundary_labels.assign(n, "0");
     }

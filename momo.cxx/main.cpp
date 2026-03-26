@@ -10,9 +10,14 @@ int test() {
   cfg.path_read = "basic_data_read.crfsuite";
   cfg.path_boundary = "basic_data_boundary.crfsuite";
   Predictor prd(cfg);
-  std::string input = "漢字の読みを予測します。";
-  PredictionResult res = prd.predict(input);
-  std::cout << res.kana_text << std::endl;
+
+  // 標準入力から読み取って推論する
+  std::string line;
+  while (std::getline(std::cin, line)) {
+    if (line.empty()) break;
+    PredictionResult res = prd.predict(line);
+    std::cout << res.kana_text << std::endl;
+  }
   return 0;
 }
 }  // namespace momo

@@ -8,10 +8,10 @@
 #include "features.h"
 #include "utils.h"
 
-// crfsuite C API
-extern "C" {
-#include <crfsuite.h>
-}
+#include <memory>
+
+// crfsuite C++ API の前方宣言（実装は predictor.cpp 内でのみ crfsuite.hpp をインクルード）
+namespace CRFSuite { class Tagger; }
 
 namespace momo {
 
@@ -79,16 +79,15 @@ public:
     Predictor& operator=(const Predictor&) = delete;
 
     /// メインの推論エントリポイント。UTF-8 テキストを受け取り結果を返す。
-    PredictionResult predict(const std::string& utf8_text) const;
+    PredictionResult predict(const std::string& utf8_text);
 
 private:
     PredictorConfig _config;
 
-    // crfsuite タガー
-    crfsuite_model_t*  _model_read     = nullptr;
-    crfsuite_tagger_t* _tagger_read    = nullptr;
-    crfsuite_model_t*  _model_boundary = nullptr;
-    crfsuite_tagger_t* _tagger_boundary = nullptr;
+    // CRFSuite C++ API タガー（不完全型のためunique_ptrで保持）
+    std::unique_ptr<CRFSuite::Tagger> _tagger_read;
+    std::unique_ptr<CRFSuite::Tagger> _tagger_boundary;
+    bool _has_boundary = false;
 
     // フォールバック辞書: char32_t → {on読み（UTF-8）, kun読み（UTF-8）}
     struct FallbackEntry { std::string on; std::string kun; };
@@ -98,9 +97,6 @@ private:
     DictIndex _dict_index;
 
     // --- 初期化ヘルパー ---
-    void _load_tagger(const std::string& path,
-                      crfsuite_model_t**  out_model,
-                      crfsuite_tagger_t** out_tagger) const;
     void _load_fallback_dict(const std::string& path);
     void _load_custom_dict(const std::string& path);
 
@@ -117,7 +113,7 @@ private:
     void _run_inference(const std::vector<SourceUnit>& source_seq,
                         std::vector<std::string>&       raw_labels,
                         std::vector<float>&             raw_confidences,
-                        std::vector<std::string>&       boundary_labels) const;
+                        std::vector<std::string>&       boundary_labels);
 
     struct RefineResult {
         std::vector<std::string>       labels;

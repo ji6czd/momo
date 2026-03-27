@@ -10,17 +10,17 @@ namespace momo {
 
 const char* char_type_to_str(CharType ct) {
     switch (ct) {
-        case CharType::SPACE:            return "SPACE";
-        case CharType::NUM:              return "NUM";
-        case CharType::SYMBOL:           return "SYMBOL";
-        case CharType::HIRAGANA:         return "HIRAGANA";
-        case CharType::KATAKANA:         return "KATAKANA";
-        case CharType::KANJI:            return "KANJI";
-        case CharType::JAPANESE_NUMERIC: return "JAPANESE_NUMERIC";
-        case CharType::ALPHA:            return "ALPHA";
-        case CharType::OTHER:            return "OTHER";
+        case CharType::SPACE:            return "CharType.SPACE";
+        case CharType::NUM:              return "CharType.NUM";
+        case CharType::SYMBOL:           return "CharType.SYMBOL";
+        case CharType::HIRAGANA:         return "CharType.HIRAGANA";
+        case CharType::KATAKANA:         return "CharType.KATAKANA";
+        case CharType::KANJI:            return "CharType.KANJI";
+        case CharType::JAPANESE_NUMERIC: return "CharType.JAPANESE_NUMERIC";
+        case CharType::ALPHA:            return "CharType.ALPHA";
+        case CharType::OTHER:            return "CharType.OTHER";
     }
-    return "OTHER";
+    return "CharType.OTHER";
 }
 
 // ---------------------------------------------------------------------------

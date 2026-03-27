@@ -54,8 +54,16 @@ def get_char_type(c: str) -> CharType:
 
     return get_basic_char_category(c)
 
+def convert_to_katakana(c: str) -> str:
+    """c（カナ1文字）がカタカナならそのまま、ひらがななら対応するカタカナを返す。
+    それ以外の文字はそのまま返す。
+    """
 
-def _has_vowel(char: str, vowel: str) -> bool:
+    if get_basic_char_category(c) == CharType.HIRAGANA:
+        return chr(ord(c) + 0x60)
+    return c
+
+def has_vowel(char: str, vowel: str) -> bool:
     """
     char（カナ1文字）が vowel（母音）を含むかどうかを返す。
     ひらがな・カタカナ両対応。引数は同じ種類の文字であること。
@@ -83,11 +91,6 @@ def _has_vowel(char: str, vowel: str) -> bool:
             f"char={char!r}({char_type}), vowel={vowel!r}({vowel_type})"
         )
 
-    def to_kata(c: str) -> str:
-        if get_basic_char_category(c) == CharType.HIRAGANA:
-            return chr(ord(c) + 0x60)
-        return c
-
     _VOWEL_MAP = {
         'ア': 'ア', 'イ': 'イ', 'ウ': 'ウ', 'エ': 'エ', 'オ': 'オ',
         'ァ': 'ア', 'ィ': 'イ', 'ゥ': 'ウ', 'ェ': 'エ', 'ォ': 'オ',
@@ -109,15 +112,14 @@ def _has_vowel(char: str, vowel: str) -> bool:
         'ヴ': 'ウ',
     }
 
-    char_kata  = to_kata(char)
-    vowel_kata = to_kata(vowel)
+    char_kata  = convert_to_katakana(char)
+    vowel_kata = convert_to_katakana(vowel)
 
     char_vowel = _VOWEL_MAP.get(char_kata)
     if char_vowel is None:
         return False
 
     return char_vowel == vowel_kata
-
 
 def split_on_unescaped_slash(s: str) -> List[str]:
     """バックスラッシュでエスケープされていない '/' で s を分割する。"""

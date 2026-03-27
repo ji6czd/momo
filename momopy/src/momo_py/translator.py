@@ -12,7 +12,7 @@ from sudachipy import Morpheme
 from .braille_rules_pb2 import BrailleRules
 from .braille_rules_pb2 import PartOfSpeech
 from . import pybraille
-from .features import get_basic_char_category, CharType, _has_vowel
+from .features import get_basic_char_category, CharType, has_vowel
 class Translator:
     """
     日本語テキストを点字（かな変換・分かち書き変換）に変換するクラス。
@@ -229,17 +229,17 @@ class Translator:
             for i, seg in enumerate(segmented_list):
                 seg_len = len(seg)
                 if (seg_len > 1 and seg[seg_len-1] == 'ウ' and
-                    (_has_vowel(seg[seg_len-2], 'オ')
-                    or _has_vowel(seg[seg_len-2], 'ウ')
-                    or _has_vowel(seg[seg_len-1], 'ョ')
-                    or _has_vowel(seg[seg_len-2], 'ュ'))
+                    (has_vowel(seg[seg_len-2], 'オ')
+                    or has_vowel(seg[seg_len-2], 'ウ')
+                    or has_vowel(seg[seg_len-1], 'ョ')
+                    or has_vowel(seg[seg_len-2], 'ュ'))
                 ):
                     segmented_list[i] = seg[:-1] + 'ー'
                 elif (seg_len == 1 and seg == 'ウ' and i > 0
-                    and (_has_vowel(segmented_list[i-1][0], 'オ')
-                    or _has_vowel(segmented_list[i-1][0], 'ウ')
-                    or _has_vowel(segmented_list[i-1][0], 'ョ')
-                    or _has_vowel(segmented_list[i-1][0], 'ュ')
+                    and (has_vowel(segmented_list[i-1][0], 'オ')
+                    or has_vowel(segmented_list[i-1][0], 'ウ')
+                    or has_vowel(segmented_list[i-1][0], 'ョ')
+                    or has_vowel(segmented_list[i-1][0], 'ュ')
                 )):
                     segmented_list[i] = 'ー'
 

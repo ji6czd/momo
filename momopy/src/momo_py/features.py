@@ -2,7 +2,7 @@ import re
 from typing import List, Dict, Tuple
 
 from .utils import (
-    CharType, get_basic_char_category, get_char_type, _has_vowel,
+    CharType, get_basic_char_category, get_char_type, has_vowel,
     _JAPANESE_NUMERIC_CHARS, _KURAI_CHARS,
 )
 

@@ -9,7 +9,6 @@ from typing import List, Tuple, Set, Dict, Optional
 import pycrfsuite
 
 from .features import get_units, get_char_type, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
-from .fallback_dict import FALLBACK_DICT
 from .utils import split_on_unescaped_slash
 
 
@@ -19,6 +18,25 @@ def _is_ascii_printable_block(s: str) -> bool:
     if not s or s[0] in ' \t' or s[-1] in ' \t':
         return False
     return all(0x21 <= ord(c) <= 0x7E or c in ' \t' for c in s)
+
+
+def _load_single_kanji_dict(path: str) -> Dict[str, Dict[str, str]]:
+    """フォールバック辞書TSVを読み込む。
+    フォーマット: 漢字[TAB]音読み[TAB]訓読み
+    '#' で始まる行と空行はスキップする。
+    """
+    result: Dict[str, Dict[str, str]] = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) != 3:
+                continue
+            kanji, on, kun = parts
+            result[kanji] = {"on": on, "kun": kun}
+    return result
 
 
 # 🌟 訓読みを誘発しやすい「安全な送り仮名」のリスト
@@ -47,11 +65,13 @@ class PredictorConfig:
 
     Attributes:
         model_path: モデルファイルのパス（.zip または .crfsuite）
+        single_kanji_dict_path: 単一漢字辞書TSVのパス（省略可）
         custom_dict_path: カスタム辞書ファイルのパス（学習データと同じ形式、省略可）
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
     """
     model_path: str
+    single_kanji_dict_path: Optional[str] = None
     custom_dict_path: Optional[str] = None
     confidence_threshold: float = 0.3
     numeric_confidence_threshold: float = 0.8
@@ -355,6 +375,11 @@ class Predictor:
             self.tagger_boundary = pycrfsuite.Tagger()
             self.tagger_boundary.open(path_bound)
 
+        # フォールバック辞書のロード
+        self._single_kanji_dict: Dict[str, Dict[str, str]] = {}
+        if config.single_kanji_dict_path:
+            self._single_kanji_dict = _load_single_kanji_dict(config.single_kanji_dict_path)
+
         # カスタム辞書のロードとインデックス構築
         self._dict_index: Dict[str, List[Tuple[str, List[str]]]] = {}
         if config.custom_dict_path:
@@ -523,8 +548,8 @@ class Predictor:
 
                 # 🚨 文字消失バグの救済ロジック
                 if label == LABEL_CONTINUE and (parent_idx == -1 or parent_idx in bypass_indices):
-                    if ctype == 'KANJI' and char in FALLBACK_DICT:
-                        label = FALLBACK_DICT[char]["on"]
+                    if ctype == 'KANJI' and char in self._single_kanji_dict:
+                        label = self._single_kanji_dict[char]["on"]
                     else:
                         label = char
                     confidence = 0.0
@@ -588,14 +613,14 @@ class Predictor:
         new_last_fallback = last_fallback
         decision = DecisionSource.CRF
 
-        if ctype == 'KANJI' and confidence < self._config.confidence_threshold and char in FALLBACK_DICT:
+        if ctype == 'KANJI' and confidence < self._config.confidence_threshold and char in self._single_kanji_dict:
             next_char  = source_seq[i + 1][0] if i < len(source_seq) - 1 else ""
             next_ctype = source_seq[i + 1][2] if i < len(source_seq) - 1 else ""
 
             if next_ctype == 'HIRAGANA' and next_char in SAFE_OKURIGANA:
-                replacement_reading = FALLBACK_DICT[char]["kun"]
+                replacement_reading = self._single_kanji_dict[char]["kun"]
             else:
-                replacement_reading = FALLBACK_DICT[char]["on"]
+                replacement_reading = self._single_kanji_dict[char]["on"]
 
             new_label = replacement_reading
             new_last_fallback = replacement_reading

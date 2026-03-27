@@ -117,7 +117,8 @@ def main():
     # コマンドの定義
     predict_parser = subparsers.add_parser("predict")
     predict_parser.add_argument("--model", required=True)
-    predict_parser.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
+    predict_parser.add_argument("--custom-dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
+    predict_parser.add_argument("--single-dict", dest="single_dict", help="単一漢字用辞書ファイルのパス")
     predict_parser.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
     
     translate_parser = subparsers.add_parser("translate")
@@ -154,6 +155,7 @@ def main():
         config = PredictorConfig(
             model_path=args.model,
             custom_dict_path=args.custom_dict,
+            single_kanji_dict_path=args.single_dict,
         )
         run_predict(config, show_trace=args.trace)
         

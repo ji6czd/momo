@@ -13,15 +13,15 @@ namespace momo {
 // ---------------------------------------------------------------------------
 
 enum class CharType {
-    SPACE,
-    NUM,
-    SYMBOL,
-    HIRAGANA,
-    KATAKANA,
-    KANJI,
-    JAPANESE_NUMERIC,
-    ALPHA,
-    OTHER,
+  SPACE,
+  NUM,
+  SYMBOL,
+  HIRAGANA,
+  KATAKANA,
+  KANJI,
+  JAPANESE_NUMERIC,
+  ALPHA,
+  OTHER,
 };
 
 const char* char_type_to_str(CharType ct);
@@ -66,4 +66,4 @@ char32_t convert_to_katakana(char32_t cp);
 /// 引数がカナ以外、またはひらがな/カタカナ混在の場合は std::invalid_argument を投げる。
 bool has_vowel(char32_t char_cp, char32_t vowel_cp);
 
-} // namespace momo
+}  // namespace momo

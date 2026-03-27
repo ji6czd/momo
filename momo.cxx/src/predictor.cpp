@@ -72,8 +72,8 @@ Predictor::Predictor(const PredictorConfig& config) : _config(config) {
     _has_boundary = true;
   }
 
-  if (!config.path_fallback_dict.empty()) {
-    _load_fallback_dict(config.path_fallback_dict);
+  if (!config.path_single_kanji_dict.empty()) {
+    _load_single_kanji_dict(config.path_single_kanji_dict);
   }
 
   if (!config.path_custom_dict.empty()) {
@@ -90,7 +90,7 @@ Predictor::~Predictor() {
 // 初期化ヘルパー
 // ---------------------------------------------------------------------------
 
-void Predictor::_load_fallback_dict(const std::string& path) {
+void Predictor::_load_single_kanji_dict(const std::string& path) {
   std::ifstream f(path);
   if (!f) throw std::runtime_error("フォールバック辞書を開けませんでした: " + path);
 
@@ -108,7 +108,7 @@ void Predictor::_load_fallback_dict(const std::string& path) {
     std::string kun = line.substr(t2 + 1);
 
     if (kanji.size() == 1) {
-      _fallback_dict[kanji[0]] = {on, kun};
+      _single_kanji_dict[kanji[0]] = {on, kun};
     }
   }
 }
@@ -277,6 +277,7 @@ void Predictor::_run_inference(const std::vector<SourceUnit>& source_seq, std::v
       xseq[i].push_back(CRFSuite::Attribute(feat, val));
     }
   }
+
   // 読みモデル: viterbi でラベル列、marginal で確率を取得
   {
     _tagger_read->set(xseq);
@@ -357,8 +358,8 @@ Predictor::RefineResult Predictor::_refine(const std::vector<SourceUnit>& source
 
     // 文字消失バグの救済ロジック
     if (label == LABEL_CONTINUE && (parent_idx == -1 || bypass_indices.count(parent_idx))) {
-      auto it = _fallback_dict.find(ch);
-      if (ctype == CharType::KANJI && it != _fallback_dict.end()) {
+      auto it = _single_kanji_dict.find(ch);
+      if (ctype == CharType::KANJI && it != _single_kanji_dict.end()) {
         label = it->second.on;
       } else {
         label = utf32_to_utf8(source_seq[i].text);
@@ -382,8 +383,8 @@ Predictor::RefineResult Predictor::_refine(const std::vector<SourceUnit>& source
       last_fallback.clear();
     } else {
       // KANJI フォールバック・々繰り返し
-      auto it = _fallback_dict.find(ch);
-      if (ctype == CharType::KANJI && it != _fallback_dict.end()) {
+      auto it = _single_kanji_dict.find(ch);
+      if (ctype == CharType::KANJI && it != _single_kanji_dict.end()) {
         char32_t next_ch = (i < n - 1) ? (source_seq[i + 1].text.empty() ? 0 : source_seq[i + 1].text[0]) : 0;
         CharType next_ctype = (i < n - 1) ? source_seq[i + 1].ctype : CharType::OTHER;
         if (next_ctype == CharType::HIRAGANA && is_safe_okurigana(next_ch)) {

@@ -3,6 +3,7 @@ set(SOURCES
     utils.cpp
     crf_features.cpp
     predictor.cpp
+    trainer.cpp
 )
 
 add_library(${PROJECT_NAME}-lib STATIC ${SOURCES})

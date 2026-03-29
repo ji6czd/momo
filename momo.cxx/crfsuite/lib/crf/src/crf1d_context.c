@@ -177,10 +177,22 @@ void crf1dc_exp_state(crf1d_context_t* ctx)
 
 void crf1dc_exp_transition(crf1d_context_t* ctx)
 {
+    int i;
     const int L = ctx->num_labels;
 
     veccopy(ctx->exp_trans, ctx->trans, L * L);
     vecexp(ctx->exp_trans, L * L);
+
+    /* Check once whether all transition scores are zero.
+       If so, crf1dc_viterbi() can use the O(T*L) fast path. */
+    ctx->trans_is_zero = 1;
+    for (i = 0; i < L * L; ++i) {
+        if (ctx->trans[i] != 0.0) {
+            printf("%f\n", ctx->trans[i]);
+            ctx->trans_is_zero = 1;
+            break;
+        }
+    }
 }
 
 void crf1dc_alpha_score(crf1d_context_t* ctx)
@@ -484,45 +496,72 @@ floatval_t crf1dc_viterbi(crf1d_context_t* ctx, int *labels)
         cur[j] = state[j];
     }
 
-    /* Compute the scores at (t, *). */
-    for (t = 1;t < T;++t) {
-        prev = ALPHA_SCORE(ctx, t-1);
-        cur = ALPHA_SCORE(ctx, t);
-        state = STATE_SCORE(ctx, t);
-        back = BACKWARD_EDGE_AT(ctx, t);
+    if (!ctx->trans_is_zero) {
+        /*
+         * General case: O(T * L^2)
+         * Transition scores are non-zero; use the standard Viterbi algorithm.
+         */
+        for (t = 1;t < T;++t) {
+            prev = ALPHA_SCORE(ctx, t-1);
+            cur = ALPHA_SCORE(ctx, t);
+            state = STATE_SCORE(ctx, t);
+            back = BACKWARD_EDGE_AT(ctx, t);
 
-        /* Compute the score of (t, j). */
-        for (j = 0;j < L;++j) {
+            for (j = 0;j < L;++j) {
+                max_score = -FLOAT_MAX;
+                argmax_score = -1;
+                for (i = 0;i < L;++i) {
+                    /* Transit from (t-1, i) to (t, j). */
+                    trans = TRANS_SCORE(ctx, i);
+                    score = prev[i] + trans[j];
+
+                    if (max_score < score) {
+                        max_score = score;
+                        argmax_score = i;
+                    }
+                }
+                if (argmax_score >= 0) back[j] = argmax_score;
+                cur[j] = max_score + state[j];
+            }
+        }
+    } else {
+        /*
+         * O(T * L) fast path: all transition scores are zero.
+         * argmax_i(prev[i] + 0) = argmax_i(prev[i]), independent of j.
+         * So the same argmax and max_score applies to every j at time t.
+         */
+        for (t = 1;t < T;++t) {
+            prev = ALPHA_SCORE(ctx, t-1);
+            cur = ALPHA_SCORE(ctx, t);
+            state = STATE_SCORE(ctx, t);
+            back = BACKWARD_EDGE_AT(ctx, t);
+
+            /* Find argmax over previous labels (shared by all j). */
             max_score = -FLOAT_MAX;
-            argmax_score = -1;
+            argmax_score = 0;
             for (i = 0;i < L;++i) {
-                /* Transit from (t-1, i) to (t, j). */
-                trans = TRANS_SCORE(ctx, i);
-                score = prev[i] + trans[j];
-
-                /* Store this path if it has the maximum score. */
-                if (max_score < score) {
-                    max_score = score;
+                if (max_score < prev[i]) {
+                    max_score = prev[i];
                     argmax_score = i;
                 }
             }
-            /* Backward link (#t, #j) -> (#t-1, #i). */
-            if (argmax_score >= 0) back[j] = argmax_score;
-            /* Add the state score on (t, j). */
-            cur[j] = max_score + state[j];
+
+            /* Apply to all current labels. */
+            for (j = 0;j < L;++j) {
+                back[j] = argmax_score;
+                cur[j] = max_score + state[j];
+            }
         }
     }
 
     /* Find the node (#T, #i) that reaches EOS with the maximum score. */
     max_score = -FLOAT_MAX;
     prev = ALPHA_SCORE(ctx, T-1);
-    /* Set a score for T-1 to be overwritten later. Just in case we don't
-       end up with something beating -FLOAT_MAX. */
     labels[T-1] = 0;
     for (i = 0;i < L;++i) {
         if (max_score < prev[i]) {
             max_score = prev[i];
-            labels[T-1] = i;        /* Tag the item #T. */
+            labels[T-1] = i;
         }
     }
 

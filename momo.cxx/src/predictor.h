@@ -40,6 +40,10 @@ struct PredictorConfig {
   std::string path_custom_dict;               ///< カスタム辞書TSVのパス（空文字列なら使用しない）
   float confidence_threshold = 0.3f;          ///< KANJIフォールバック発動閾値
   float numeric_confidence_threshold = 0.8f;  ///< JAPANESE_NUMERICルールベース発動閾値
+  /// 自信度を計算するかどうか。false にすると marginal をスキップして高速化できる。
+  /// ただし漢数字（JAPANESE_NUMERIC）については、助数詞との組み合わせ
+  /// （「三日」→ミッカ 等）を正しく変換するため、常に marginal を計算する。
+  bool compute_confidence = true;
 };
 
 // ---------------------------------------------------------------------------

@@ -156,6 +156,7 @@ def main():
             model_path=args.model,
             custom_dict_path=args.custom_dict,
             single_kanji_dict_path=args.single_dict,
+            compute_confidence=False,
         )
         run_predict(config, show_trace=args.trace)
         

@@ -67,12 +67,17 @@ class PredictorConfig:
         model_path: モデルファイルのパス（.zip または .crfsuite）
         single_kanji_dict_path: 単一漢字辞書TSVのパス（省略可）
         custom_dict_path: カスタム辞書ファイルのパス（学習データと同じ形式、省略可）
+        compute_confidence: 自信度を計算するかどうか（TrueならCRFのマージナル確率を使用）
+            Falseにすると marginal の計算をスキップして高速化できる。
+            ただし漢数字（JAPANESE_NUMERIC）については、助数詞との組み合わせ
+            （「三日」→ミッカ 等）を正しく変換するため、常にmarginalを計算する。
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
     """
     model_path: str
     single_kanji_dict_path: Optional[str] = None
     custom_dict_path: Optional[str] = None
+    compute_confidence: bool = True
     confidence_threshold: float = 0.3
     numeric_confidence_threshold: float = 0.8
 
@@ -465,7 +470,7 @@ class Predictor:
                 if match:
                     length, readings = match
                     for j, reading in enumerate(readings):
-                        dict_overrides[i + j] = reading  # 各文字に対応する読みをそのまま入れる
+                        dict_overrides[i + j] = reading
                     i += length
                 else:
                     i += 1
@@ -542,9 +547,13 @@ class Predictor:
                 has_split = (boundary_labels[i] == "1")
 
             else:
-                label      = raw_labels[i]
-                confidence = self.tagger_read.marginal(label, i)
-                decision   = DecisionSource.CRF
+                label    = raw_labels[i]
+                decision = DecisionSource.CRF
+
+                if self._config.compute_confidence or ctype == CharType.JAPANESE_NUMERIC:
+                    confidence = self.tagger_read.marginal(label, i)
+                else:
+                    confidence = 1.0
 
                 # 🚨 文字消失バグの救済ロジック
                 if label == LABEL_CONTINUE and (parent_idx == -1 or parent_idx in bypass_indices):

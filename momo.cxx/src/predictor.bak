@@ -1,25 +1,10 @@
 #include "predictor.h"
 
 #include <algorithm>
-#include <chrono>
-#include <crfsuite_api.hpp>
+#include <crfsuite.hpp>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
-#ifdef MOMO_BENCH
-#  include <cstdio>
-using _BenchClock = std::chrono::high_resolution_clock;
-using _BenchMs    = std::chrono::duration<double, std::milli>;
-#  define BENCH_START(name)  auto _t_##name = _BenchClock::now()
-#  define BENCH_END(name)    fprintf(stderr, "  [bench] " #name ": %.2f ms\n", \
-                                     _BenchMs(_BenchClock::now() - _t_##name).count())
-#  define BENCH_END_N(name, n) fprintf(stderr, "  [bench] " #name " (x%d): %.2f ms\n", \
-                                       (n), _BenchMs(_BenchClock::now() - _t_##name).count())
-#else
-#  define BENCH_START(name)    (void)0
-#  define BENCH_END(name)      (void)0
-#  define BENCH_END_N(name, n) (void)0
-#endif
 
 namespace momo {
 
@@ -281,7 +266,6 @@ Predictor::PreprocessResult Predictor::_preprocess(const std::u32string& text) c
 
 void Predictor::_run_inference(const std::vector<SourceUnit>& source_seq, std::vector<std::string>& raw_labels,
                                std::vector<float>& raw_confidences, std::vector<std::string>& boundary_labels) {
-  BENCH_START(feature_gen);
   auto features = compute_source_features(source_seq);
   int n = static_cast<int>(features.size());
 
@@ -293,27 +277,18 @@ void Predictor::_run_inference(const std::vector<SourceUnit>& source_seq, std::v
       xseq[i].push_back(CRFSuite::Attribute(feat, val));
     }
   }
-  BENCH_END_N(feature_gen, n);
 
   // ---------- 読みモデル ----------
   // set() を一度呼ぶだけでよい。marginal は _refine() 内で必要な文字だけ計算する。
-  BENCH_START(tagger_set);
   _tagger_read->set(xseq);
-  BENCH_END(tagger_set);
-
-  BENCH_START(viterbi);
   raw_labels = _tagger_read->viterbi();
-  BENCH_END(viterbi);
-
   // raw_confidences はここでは初期化のみ。実際の計算は _refine() 内で行う。
   raw_confidences.assign(n, 1.0f);
 
   // ---------- 境界モデル ----------
   if (_has_boundary) {
-    BENCH_START(boundary);
     _tagger_boundary->set(xseq);
     auto b_labels = _tagger_boundary->viterbi();
-    BENCH_END(boundary);
     boundary_labels.resize(n);
     for (int i = 0; i < n; ++i) {
       boundary_labels[i] = b_labels[i];
@@ -344,7 +319,6 @@ Predictor::RefineResult Predictor::_refine(const std::vector<SourceUnit>& source
   std::string last_fallback;
   int parent_idx = -1;
 
-  BENCH_START(refine_marginal);
   for (int i = 0; i < n; ++i) {
     char32_t ch = source_seq[i].text.empty() ? 0 : source_seq[i].text[0];
     CharType ctype = source_seq[i].ctype;
@@ -441,7 +415,6 @@ Predictor::RefineResult Predictor::_refine(const std::vector<SourceUnit>& source
     result.has_splits[i] = (boundary_labels[i] == "1");
     result.decision_sources[i] = decision;
   }
-  BENCH_END_N(refine_marginal, n);
 
   return result;
 }

@@ -15,12 +15,12 @@ project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMOMO_BENCH -DMOMO_NO_TRANS_FEATURES")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DMOMO_BENCH -DMOMO_NO_TRANS_FEATURES")
 if(MSVC)
     add_compile_options("/utf-8" "/W4")
 endif()
 
-add_compile_options("$<$<CXX_COMPILER_ID:GNU>:-finput-charset=UTF-8>")
 
 add_subdirectory(src)
 add_subdirectory(crfsuite)
@@ -28,4 +28,5 @@ add_subdirectory(liblbfgs)
 
 # main application
 add_executable(${APP_NAME} main.cpp)
+target_include_directories(${APP_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/CLI11/include)
 target_link_libraries(${APP_NAME} PRIVATE ${PROJECT_NAME}-lib crfsuite-lib lbfgs-lib)

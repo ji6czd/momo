@@ -1,8 +1,10 @@
 # ソースを指定してください:
 set(SOURCES
-    utils.cpp
     crf_features.cpp
+    utils.cpp
+    crfsuite_impl.cpp
     predictor.cpp
+    trainer.cpp
 )
 
 add_library(${PROJECT_NAME}-lib STATIC ${SOURCES})

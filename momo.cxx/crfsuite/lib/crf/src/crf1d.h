@@ -95,6 +95,14 @@ typedef struct {
     floatval_t log_norm;
 
     /**
+     * Flag indicating that all transition scores are zero.
+     *  Set by crf1dc_exp_transition() after loading the model.
+     *  When non-zero, crf1dc_viterbi() uses the O(T*L) fast path
+     *  instead of the standard O(T*L^2) algorithm.
+     */
+    int trans_is_zero;
+
+    /**
      * State scores.
      *  This is a [T][L] matrix whose element [t][l] presents total score
      *  of state features associating label #l at #t.

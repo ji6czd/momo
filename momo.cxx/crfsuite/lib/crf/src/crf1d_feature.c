@@ -194,7 +194,14 @@ crf1df_feature_t* crf1df_generate(
             cur = seq->labels[t];
 
             /* Transition feature: label #prev -> label #(item->yid).
-               Features with previous label #L are transition BOS. */
+               Features with previous label #L are transition BOS.
+               Disabled by MOMO_NO_TRANS_FEATURES to enable the O(T*L)
+               Viterbi fast path in crf1dc_viterbi(). When this macro is
+               defined, all transition scores remain zero and the inner
+               L-loop in Viterbi can be skipped entirely.
+               TODO: make this a runtime parameter via crfsuite_params_t. */
+#if !defined(MOMO_NO_TRANS_FEATURES)
+            printf("Transition support\n");
             if (prev != L) {
                 f.type = FT_TRANS;
                 f.src = prev;
@@ -202,6 +209,7 @@ crf1df_feature_t* crf1df_generate(
                 f.freq = seq->weight;
                 featureset_add(set, &f);
             }
+#endif /* !MOMO_NO_TRANS_FEATURES */
 
             for (c = 0;c < item->num_contents;++c) {
                 /* State feature: attribute #a -> state #(item->yid). */

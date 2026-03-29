@@ -1,7 +1,7 @@
 # ソースを指定してください:
 set(SOURCES
     utils.cpp
-    features.cpp
+    crf_features.cpp
     predictor.cpp
 )
 

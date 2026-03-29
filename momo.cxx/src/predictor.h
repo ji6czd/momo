@@ -6,7 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "features.h"
+#include "crf_features.h"
 #include "utils.h"
 
 // crfsuite C++ API の前方宣言（実装は predictor.cpp 内でのみ crfsuite.hpp をインクルード）

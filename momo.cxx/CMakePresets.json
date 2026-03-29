@@ -1,0 +1,31 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default (Native)",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "riscv64-cross",
+      "displayName": "RISC-V 64 (Cross-compile)",
+      "binaryDir": "${sourceDir}/build-riscv64",
+      "cacheVariables": {
+        "CROSS_COMPILE": "riscv64",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "arm64-cross",
+      "displayName": "ARM 64 (Cross-compile)",
+      "binaryDir": "${sourceDir}/build-arm64",
+      "cacheVariables": {
+        "CROSS_COMPILE": "arm64",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ]
+}

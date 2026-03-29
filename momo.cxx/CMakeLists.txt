@@ -20,6 +20,8 @@ if(MSVC)
     add_compile_options("/utf-8" "/W4")
 endif()
 
+add_compile_options("$<$<CXX_COMPILER_ID:GNU>:-finput-charset=UTF-8>")
+
 add_subdirectory(src)
 add_subdirectory(crfsuite)
 add_subdirectory(liblbfgs)

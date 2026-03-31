@@ -99,10 +99,19 @@ def _create_biose_rows(target_chars: str, ctype: str, r_label: str, orig_idx: in
     if target_chars in KUTOUTEN and "+S" not in r_label:
         r_label += "+S"
 
+    # ASCII文字（ALPHA/NUM）はラベルを LABEL_SKIP に統一する。
+    # 推論時はバイパス処理が行われるためCRFの予測ラベルは使われないが、
+    # 学習データのラベル集合を抑制し、隣接文字の推論に寄与する特徴量は
+    # type= 特徴量が既に担っているため、実際の単語をラベルとして持つ必要はない。
+    is_ascii_block = ctype in ('ALPHA', 'NUM')
+
     rows = []
     block_len = len(target_chars)
     for i, char in enumerate(target_chars):
-        r_val = r_label if i == 0 else LABEL_CONTINUE
+        if is_ascii_block:
+            r_val = LABEL_SKIP
+        else:
+            r_val = r_label if i == 0 else LABEL_CONTINUE
         tag = "S" if block_len == 1 else ("B" if i == 0 else ("E" if i == block_len - 1 else "I"))
         rows.append(f"{char}\t{r_val}\t{ctype}\t{tag}\t{orig_idx + i}")
     return rows

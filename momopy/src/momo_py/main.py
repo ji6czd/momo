@@ -120,6 +120,7 @@ def main():
     predict_parser.add_argument("--custom-dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
     predict_parser.add_argument("--single-dict", dest="single_dict", help="単一漢字用辞書ファイルのパス")
     predict_parser.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
+    predict_parser.add_argument("--confidence", action="store_true", help="予測結果に信頼度を含める")
     
     translate_parser = subparsers.add_parser("translate")
     translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
@@ -156,7 +157,7 @@ def main():
             model_path=args.model,
             custom_dict_path=args.custom_dict,
             single_kanji_dict_path=args.single_dict,
-            compute_confidence=False,
+            compute_confidence=args.confidence,
         )
         run_predict(config, show_trace=args.trace)
         

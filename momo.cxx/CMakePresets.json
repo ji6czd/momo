@@ -4,6 +4,7 @@
     {
       "name": "default",
       "displayName": "Default (Native)",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
@@ -12,6 +13,7 @@
     {
       "name": "riscv64-cross",
       "displayName": "RISC-V 64 (Cross-compile)",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-riscv64",
       "cacheVariables": {
         "CROSS_COMPILE": "riscv64",
@@ -21,6 +23,7 @@
     {
       "name": "arm64-cross",
       "displayName": "ARM 64 (Cross-compile)",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-arm64",
       "cacheVariables": {
         "CROSS_COMPILE": "arm64",

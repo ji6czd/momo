@@ -158,9 +158,6 @@ class Translator:
                 rule_index = index
         if rule_index < 0:
             return None
-        print(
-            f"current_rule: {rule_index}, {morpheme.surface()} {self._rules.rule[rule_index].current_pos.name}"
-        )
         return rule_index
 
     def _search_next_rule(self, morpheme: Morpheme, rule) -> Optional[int]:
@@ -172,11 +169,7 @@ class Translator:
                 max_score = score
                 next_index = index
         if next_index < 0:
-            print(f"next_rule: None, {morpheme.surface()},")
             return None
-        print(
-            f"next_rule: {next_index}, {morpheme.surface()}, {rule.next_pos[next_index].name}"
-        )
         return next_index
 
     @staticmethod

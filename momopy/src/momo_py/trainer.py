@@ -8,14 +8,14 @@ from collections import defaultdict
 
 import joblib
 import numpy as np
-from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.svm import LinearSVC
+from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
 
 from .features import (
     get_units, get_char_type, compute_source_features,
     SourceEntry, FeatureDict, LABEL_CONTINUE, LABEL_SKIP,
 )
-from .predictor import LRModelBundle
 from .utils import split_on_unescaped_slash
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
@@ -68,7 +68,7 @@ def _is_basic_suspicious(raw: str, read: str) -> bool:
 
     return False
 
-# テスト互換のエイリアス
+# 後方互換のためエイリアスを残す
 is_suspicious = _is_basic_suspicious
 
 def _validate_label_chars(r_label: str, line_num: int) -> None:
@@ -205,13 +205,7 @@ def create_data(rawdata: str, tsvdata: str) -> None:
 # ==========================================
 def _split_labels(raw_labels: List[str]) -> tuple:
     """
-    TSVの読みラベル列を読みLR用と境界LR用に分離する。
-
-    例:
-        入力: ["カン+S", "ゼン", "ニ+S", LABEL_CONTINUE]
-        出力:
-            y_read:     ["カン",  "ゼン", "ニ",  LABEL_CONTINUE]
-            y_boundary: ["1",     "0",    "1",   "0"  ]
+    TSVの読みラベル列を読みモデル用と境界モデル用に分離する。
     """
     y_read     = [label.replace("+S", "") for label in raw_labels]
     y_boundary = ["0" if label == LABEL_CONTINUE else ("1" if "+S" in label else "0")
@@ -224,19 +218,21 @@ def _split_labels(raw_labels: List[str]) -> tuple:
 # ==========================================
 def train(tsvdata: str) -> None:
     """
-    TSVから読みLRと境界LRの2モデルを学習し、1つのZIPにまとめる。
+    TSVから読みモデル（LinearSVC）と境界モデル（SGDClassifier）を学習し、
+    1つのZIPにまとめる。
+
+    モデル構成:
+        読みモデル  : LinearSVC
+            - 多クラス分類（ラベル数1000超）でも高速な推論が可能
+            - predict_proba は使えないが decision_function でスコアを取得できる
+        境界モデル  : SGDClassifier(loss='modified_huber')
+            - 2値分類（0/1）
+            - predict_proba が使える（漢数字フォールバック判定に使用）
 
     出力ファイル:
-        basename_bundle.joblib  - LRModelBundle（vectorizer + model 一式）
-        basename.zip            - 上記をまとめたパッケージ
-
-    設計:
-        - 特徴量 X は2モデルで共通（compute_source_featuresを1回だけ呼ぶ）
-        - ラベルのみ _split_labels() で分離
-        - 境界LRはラベルが2種類のみなので学習が極めて高速
-        - DictVectorizer で FeatureDict → 疎行列に変換（未知特徴量は無視）
+        basename_bundle.pkl  - モデル一式（joblib）
+        basename.zip         - 上記をまとめたパッケージ
     """
-    # --- TSVのパース ---
     sentences, current = [], []
     with open(tsvdata, 'r', encoding='utf-8') as f:
         for line in f:
@@ -251,9 +247,9 @@ def train(tsvdata: str) -> None:
     if current:
         sentences.append(current)
 
-    X_dicts:      List[FeatureDict] = []   # 全文字の特徴量（フラット）
-    Y_read:       List[str]         = []
-    Y_boundary:   List[str]         = []
+    X_dicts:    List[FeatureDict] = []
+    Y_read:     List[str]         = []
+    Y_boundary: List[str]         = []
 
     for sentence in sentences:
         source_seq: List[SourceEntry] = [
@@ -262,79 +258,80 @@ def train(tsvdata: str) -> None:
         ]
         raw_labels = [p[1] for p in sentence]
 
-        feat_seq = compute_source_features(source_seq)
-        X_dicts.extend(feat_seq)
+        features = compute_source_features(source_seq)
+        X_dicts.extend(features)
 
         y_read, y_boundary = _split_labels(raw_labels)
         Y_read.extend(y_read)
         Y_boundary.extend(y_boundary)
 
-    print(f"\n📊 学習サンプル数: {len(X_dicts)} 文字")
-    print(f"   読みラベル種類: {len(set(Y_read))}")
+    print(f"\n📊 学習サンプル数: {len(X_dicts)}")
 
-    # --- 読みモデル ---
+    # ==========================================
+    # 読みモデル: LinearSVC
+    # ==========================================
     print("\n🏋️  [読みモデル] ベクトル化中...")
-    vec_read = DictVectorizer(sparse=True)
-    X_read = vec_read.fit_transform(X_dicts)
+    vect_read = DictVectorizer(sparse=True)
+    X_read = vect_read.fit_transform(X_dicts)
+    print(f"   特徴量ベクトル次元数: {X_read.shape[1]}")
+    print(f"   読みラベル種類数: {len(set(Y_read))}")
 
-    print(f"   特徴量次元数: {X_read.shape[1]}")
-    print("🏋️  [読みモデル] 学習中...")
-    model_read = LogisticRegression(
-        solver='saga',          # 大規模疎行列に強い
-        C=1.0,                  # 正則化強さ（小さいほど強い）
-        max_iter=1000,
-        n_jobs=-1,              # 全コア使用
+    print("🏋️  [読みモデル] 学習中 (LinearSVC)...")
+    model_read = LinearSVC(
+        C=1.0,
+        max_iter=2000,
         verbose=1,
     )
     model_read.fit(X_read, Y_read)
     print("💾 [読みモデル] 学習完了")
 
-    # --- 境界モデル ---
+    # ==========================================
+    # 境界モデル: SGDClassifier
+    # ==========================================
     print("\n🏋️  [境界モデル] ベクトル化中...")
-    vec_boundary = DictVectorizer(sparse=True)
-    X_boundary = vec_boundary.fit_transform(X_dicts)
+    vect_boundary = DictVectorizer(sparse=True)
+    X_boundary = vect_boundary.fit_transform(X_dicts)
 
-    print("🏋️  [境界モデル] 学習中...")
+    print("🏋️  [境界モデル] 学習中 (SGDClassifier)...")
     model_boundary = SGDClassifier(
-        loss='log_loss',        # ロジスティック回帰相当（確率出力可）
-        alpha=0.01,             # 正則化強さ
-        max_iter=100,
-        n_jobs=-1,
+        loss='modified_huber',  # predict_proba が使える
+        max_iter=200,
         random_state=42,
-        verbose=0,
+        verbose=1,
     )
     model_boundary.fit(X_boundary, Y_boundary)
     print("💾 [境界モデル] 学習完了")
 
-    # --- バンドルとしてまとめて保存 ---
+    # ==========================================
+    # ZIPにまとめて保存
+    # ==========================================
+    from .predictor import LRModelBundle
+
     base        = tsvdata.rsplit('.', 1)[0]
-    bundle_name = os.path.basename(base) + "_bundle.joblib"
+    bundle_name = os.path.basename(base) + "_bundle.pkl"
     bundle_path = os.path.join(os.path.dirname(tsvdata), bundle_name)
     zip_path    = base + ".zip"
+
+    bundle = LRModelBundle(
+        vectorizer_read     = vect_read,
+        model_read          = model_read,
+        vectorizer_boundary = vect_boundary,
+        model_boundary      = model_boundary,
+        version_info        = {},
+    )
+    joblib.dump(bundle, bundle_path, compress=3)
+    print(f"\n💾 バンドル保存完了: {bundle_path}")
 
     version_info = {
         "trained_at":   datetime.now(timezone.utc).isoformat(),
         "model_bundle": bundle_name,
-        "n_samples":    len(X_dicts),
-        "n_read_labels": len(set(Y_read)),
-        "algorithm":    "LogisticRegression+SGDClassifier",
+        "algorithm":    "LinearSVC+SGD",
     }
-
-    bundle = LRModelBundle(
-        vectorizer_read=vec_read,
-        model_read=model_read,
-        vectorizer_boundary=vec_boundary,
-        model_boundary=model_boundary,
-        version_info=version_info,
-    )
-    joblib.dump(bundle, bundle_path, compress=3)
-    print(f"\n💾 バンドル保存: {bundle_path}")
-
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.write(bundle_path, bundle_name)
         zf.writestr("version_info.json", json.dumps(version_info, ensure_ascii=False, indent=2))
 
-    # 一時ファイルの掃除
+    # 中間ファイルを削除
     os.remove(bundle_path)
 
     print(f"\n📦 ZIPパッケージ作成完了: {zip_path}")

@@ -85,9 +85,9 @@ class Translator:
         if issues:
             print(f"Found {len(issues)} entries with hiragana in single_character_dic.json:")
             for kanji, reading in issues[:10]:
-                logger.warning(f"  '{kanji}': {repr(reading)}")
+                prin(f"  '{kanji}': {repr(reading)}")
             if len(issues) > 10:
-                logger.warning(f"  ... and {len(issues) - 10} more")
+                print(f"  ... and {len(issues) - 10} more")
 
     # --- ユーティリティ（プライベート） ---
 
@@ -158,7 +158,7 @@ class Translator:
                 rule_index = index
         if rule_index < 0:
             return None
-        logger.debug(
+        print(
             f"current_rule: {rule_index}, {morpheme.surface()} {self._rules.rule[rule_index].current_pos.name}"
         )
         return rule_index
@@ -172,9 +172,9 @@ class Translator:
                 max_score = score
                 next_index = index
         if next_index < 0:
-            logger.debug(f"next_rule: None, {morpheme.surface()},")
+            print(f"next_rule: None, {morpheme.surface()},")
             return None
-        logger.debug(
+        print(
             f"next_rule: {next_index}, {morpheme.surface()}, {rule.next_pos[next_index].name}"
         )
         return next_index

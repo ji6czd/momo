@@ -8,7 +8,8 @@ from typing import List, Tuple, Set, Dict, Optional
 
 import joblib
 import numpy as np
-from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.svm import LinearSVC
+from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
 
 from .features import get_units, get_char_type, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
@@ -69,11 +70,10 @@ class PredictorConfig:
     Attributes:
         model_path: モデルファイルのパス（.zip）
         single_kanji_dict_path: 単一漢字辞書TSVのパス（省略可）
-        custom_dict_path: カスタム辞書ファイルのパス（学習データと同じ形式、省略可）
+        custom_dict_path: カスタム辞書ファイルのパス（省略可）
         compute_confidence: 自信度を計算するかどうか
-            Falseにすると predict_proba の計算をスキップして高速化できる。
-            ただし漢数字（JAPANESE_NUMERIC）については、助数詞との組み合わせ
-            （「三日」→ミッカ 等）を正しく変換するため、常に確率を計算する。
+            LinearSVC は decision_function のスコアをsigmoidで変換して使用。
+            漢数字の JAPANESE_NUMERIC については常に計算する。
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
     """
@@ -113,10 +113,7 @@ _ANSI_RESET = "\033[0m"
 
 
 def _kurai_fallback(char: str, left_char: str, left_ctype: str, right_ctype: str) -> str:
-    """
-    位取り文字（十百千万億兆）のフォールバック変換ルール。
-    （CRF版から変更なし）
-    """
+    """位取り文字（十百千万億兆）のフォールバック変換ルール。"""
     is_numeric = CharType.JAPANESE_NUMERIC
     left_is_numeric  = (left_ctype  == is_numeric)
     right_is_numeric = (right_ctype == is_numeric)
@@ -281,7 +278,7 @@ def _confidence_bar(conf: float, width: int = 12) -> str:
 class LRModelBundle:
     """ZIPに格納するモデル一式"""
     vectorizer_read:     DictVectorizer
-    model_read:          LogisticRegression
+    model_read:          LinearSVC
     vectorizer_boundary: DictVectorizer
     model_boundary:      SGDClassifier
     version_info:        dict
@@ -297,9 +294,6 @@ class Predictor:
         self._version_info: dict | None = None
         self._tmp_dir: str | None = None
 
-        # ==========================================
-        # モデルロード（ZIPのみ対応）
-        # ==========================================
         if not model_path.endswith(".zip"):
             raise ValueError(f"❌ 未対応のモデル形式です（.zip を指定してください）: {model_path}")
 
@@ -327,6 +321,10 @@ class Predictor:
         self._vectorizer_boundary = bundle.vectorizer_boundary
         self._model_boundary      = bundle.model_boundary
 
+        # decision_function のスコア範囲をキャッシュ（sigmoid正規化用）
+        # クラスリストをソート済みndarrayとして保持
+        self._read_classes: np.ndarray = np.array(self._model_read.classes_)
+
         # フォールバック辞書のロード
         self._single_kanji_dict: Dict[str, Dict[str, str]] = {}
         if config.single_kanji_dict_path:
@@ -353,22 +351,18 @@ class Predictor:
         if not text:
             return PredictionResult("", "", [], [], [])
 
-        # 1. 前処理
         source_seq, bypass_indices, ascii_overrides, dict_overrides = self._preprocess_text(text)
         if not source_seq:
             return PredictionResult(text, "", [], [], [[] for _ in text])
 
-        # 2. 推論（LR）
-        raw_labels, boundary_labels, read_proba, boundary_proba = self._run_inference(source_seq)
+        raw_labels, boundary_labels, decision_scores, boundary_proba = self._run_inference(source_seq)
 
-        # 3. 後処理
         refined_labels, raw_confidences, has_splits, decision_sources = self._refine_predictions(
             source_seq, raw_labels, boundary_labels,
-            read_proba, boundary_proba,
+            decision_scores, boundary_proba,
             bypass_indices, ascii_overrides, dict_overrides
         )
 
-        # 4. 結果の組み立て
         return self._assemble_result(
             text, source_seq, refined_labels, raw_confidences, has_splits, bypass_indices, decision_sources
         )
@@ -415,43 +409,44 @@ class Predictor:
 
 
     # ==========================================
-    # 🌟 ステップ 2: 推論（LR版）
+    # 🌟 ステップ 2: 推論（LinearSVC版）
     # ==========================================
     def _run_inference(
         self, source_seq: List[SourceEntry]
     ) -> Tuple[List[str], List[str], np.ndarray, np.ndarray]:
         """
-        読みモデルと境界モデルをそれぞれ推論する。
+        読みモデル（LinearSVC）と境界モデル（SGDClassifier）を推論する。
 
         戻り値:
             raw_labels      : 読みラベル列
             boundary_labels : 境界ラベル列（"0" or "1"）
-            read_proba      : 読みの確率行列 shape=(n, n_classes_read)
-            boundary_proba  : 境界の確率行列 shape=(n, 2)
+            decision_scores : LinearSVC の decision_function 結果
+                              shape=(n, n_classes) — sigmoidで確信度に変換して使う
+            boundary_proba  : 境界の確率 shape=(n, 2)
         """
         src_features = compute_source_features(source_seq)
-
-        # DictVectorizer で疎行列に変換
         X_read     = self._vectorizer_read.transform(src_features)
         X_boundary = self._vectorizer_boundary.transform(src_features)
 
-        # 読みモデル
-        raw_labels   = list(self._model_read.predict(X_read))
-        read_proba   = self._model_read.predict_proba(X_read)  # shape: (n, n_classes)
+        # 読みモデル（LinearSVC）
+        raw_labels      = list(self._model_read.predict(X_read))
+        decision_scores = self._model_read.decision_function(X_read)  # shape: (n, n_classes)
 
-        # 境界モデル
+        # 境界モデル（SGDClassifier）
         boundary_raw    = list(self._model_boundary.predict(X_boundary))
         boundary_labels = [str(b) for b in boundary_raw]
         boundary_proba  = self._model_boundary.predict_proba(X_boundary)  # shape: (n, 2)
+        return raw_labels, boundary_labels, decision_scores, boundary_proba
 
-        return raw_labels, boundary_labels, read_proba, boundary_proba
-
-    def _get_read_confidence(self, read_proba: np.ndarray, label: str, i: int) -> float:
-        """読みラベルの確率を返す。ラベルがクラスリストにない場合は0.0。"""
-        classes = self._model_read.classes_
-        idx = np.searchsorted(classes, label)
-        if idx < len(classes) and classes[idx] == label:
-            return float(read_proba[i, idx])
+    def _get_read_confidence(self, decision_scores: np.ndarray, label: str, i: int) -> float:
+        """
+        LinearSVC の decision_function スコアを sigmoid で 0〜1 に変換して返す。
+        ラベルがクラスリストにない場合は 0.0 を返す。
+        """
+        idx = np.searchsorted(self._read_classes, label)
+        if idx < len(self._read_classes) and self._read_classes[idx] == label:
+            score = decision_scores[i] if decision_scores.ndim == 1 else decision_scores[i, idx]
+            return float(1.0 / (1.0 + np.exp(-score)))
         return 0.0
 
     # ==========================================
@@ -462,7 +457,7 @@ class Predictor:
         source_seq: List[SourceEntry],
         raw_labels: List[str],
         boundary_labels: List[str],
-        read_proba: np.ndarray,
+        decision_scores: np.ndarray,
         boundary_proba: np.ndarray,
         bypass_indices: Set[int],
         ascii_overrides: Dict[int, str],
@@ -500,7 +495,7 @@ class Predictor:
                 decision = DecisionSource.LR
 
                 if self._config.compute_confidence or ctype == CharType.JAPANESE_NUMERIC:
-                    confidence = self._get_read_confidence(read_proba, label, i)
+                    confidence = self._get_read_confidence(decision_scores, label, i)
                 else:
                     confidence = 1.0
 

@@ -6,12 +6,16 @@ from datetime import datetime, timezone
 from typing import List
 from collections import defaultdict
 
-import pycrfsuite
+import joblib
+import numpy as np
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.feature_extraction import DictVectorizer
 
 from .features import (
     get_units, get_char_type, compute_source_features,
     SourceEntry, FeatureDict, LABEL_CONTINUE, LABEL_SKIP,
 )
+from .predictor import LRModelBundle
 from .utils import split_on_unescaped_slash
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
@@ -27,12 +31,12 @@ def build_stats_from_tsv(tsvdata: str) -> dict:
         print("⚠️  注意: 過去のTSVファイルが見つかりません。初期辞書を作ります。")
         stats['切']['キリ'] = 1
         return stats
-        
+
     with open(tsvdata, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith('#'): continue
-            
+
             parts = line.split('\t')
             if len(parts) >= 2:
                 char, reading = parts[0], parts[1]
@@ -64,6 +68,9 @@ def _is_basic_suspicious(raw: str, read: str) -> bool:
 
     return False
 
+# テスト互換のエイリアス
+is_suspicious = _is_basic_suspicious
+
 def _validate_label_chars(r_label: str, line_num: int) -> None:
     """読みに漢字やひらがなが混入していないかチェック"""
     clean_r_label = r_label.replace("+S", "")
@@ -86,7 +93,7 @@ def _check_alignment_anomalies(target_chars: str, ctype: str, r_label: str, orig
                 print(f"⚠️  Statistical Anomaly (Line {line_num}): '{target_chars}' が過去の実績にない読み '{clean_label}' になっています。ズレていませんか？")
         else:
             print(f"⚠️ Line {line_num}: '{target_chars}' は '{clean_label}' として学習されます。")
-    
+
     if _is_basic_suspicious(target_chars, r_label):
         print(f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})")
 
@@ -99,10 +106,6 @@ def _create_biose_rows(target_chars: str, ctype: str, r_label: str, orig_idx: in
     if target_chars in KUTOUTEN and "+S" not in r_label:
         r_label += "+S"
 
-    # ASCII文字（ALPHA/NUM）はラベルを LABEL_SKIP に統一する。
-    # 推論時はバイパス処理が行われるためCRFの予測ラベルは使われないが、
-    # 学習データのラベル集合を抑制し、隣接文字の推論に寄与する特徴量は
-    # type= 特徴量が既に担っているため、実際の単語をラベルとして持つ必要はない。
     is_ascii_block = ctype in ('ALPHA', 'NUM')
 
     rows = []
@@ -136,12 +139,12 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
         print(f"⚠️  Warning (Line {line_num}): 読み部分に連続した '/' が含まれています: '{read_full}'")
     read_blocks = [b.replace(r'\/', '/').replace(r'\_', '_') for b in read_blocks_raw]
 
-    raw_units_info = get_units(raw_part)  # 戻り値: List[Tuple[str, int, str]]
+    raw_units_info = get_units(raw_part)
     tsv_rows, raw_ptr = [], 0
 
     for label_idx, r_label in enumerate(read_blocks):
         _validate_label_chars(r_label, line_num)
-        
+
         if r_label == " ":
             if tsv_rows:
                 last_parts = tsv_rows[-1].split('\t')
@@ -158,7 +161,7 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
         if raw_ptr >= len(raw_units_info):
             raise ValueError(f"(Line {line_num}): 読みラベル過多。\n -> 読みインデックス [{label_idx}] '{r_label}' に対応する原文がありません！")
 
-        target_chars, orig_idx, ctype = raw_units_info[raw_ptr]  # ctype を get_units() から受け取る
+        target_chars, orig_idx, ctype = raw_units_info[raw_ptr]
         _check_alignment_anomalies(target_chars, ctype, r_label, orig_idx, label_idx, line_num, stats)
 
         rows = _create_biose_rows(target_chars, ctype, r_label, orig_idx)
@@ -181,7 +184,7 @@ def create_data(rawdata: str, tsvdata: str) -> None:
 
     with open(rawdata, 'r', encoding='utf-8') as f:
         lines = f.readlines()
-        
+
     all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
     success = 0
     for i, line in enumerate(lines, 1):
@@ -191,7 +194,7 @@ def create_data(rawdata: str, tsvdata: str) -> None:
             all_tsv.extend(rows)
             all_tsv.append("")
             success += 1
-            
+
     with open(tsvdata, 'w', encoding='utf-8') as f:
         f.write("\n".join(all_tsv))
     print(f"✅ TSV作成完了 ({success}行): {tsvdata}")
@@ -202,18 +205,13 @@ def create_data(rawdata: str, tsvdata: str) -> None:
 # ==========================================
 def _split_labels(raw_labels: List[str]) -> tuple:
     """
-    TSVの読みラベル列を読みCRF用と境界CRF用に分離する。
+    TSVの読みラベル列を読みLR用と境界LR用に分離する。
 
     例:
         入力: ["カン+S", "ゼン", "ニ+S", LABEL_CONTINUE]
         出力:
             y_read:     ["カン",  "ゼン", "ニ",  LABEL_CONTINUE]
             y_boundary: ["1",     "0",    "1",   "0"  ]
-
-    設計上の注意:
-        LABEL_CONTINUE（BIOSEブロックの2文字目以降）は境界を持たない扱いとする。
-        境界は常にブロックの先頭文字（LABEL_CONTINUEでない行）にのみ付与されるため、
-        LABEL_CONTINUE の境界は常に "0" とする。
     """
     y_read     = [label.replace("+S", "") for label in raw_labels]
     y_boundary = ["0" if label == LABEL_CONTINUE else ("1" if "+S" in label else "0")
@@ -221,38 +219,24 @@ def _split_labels(raw_labels: List[str]) -> tuple:
     return y_read, y_boundary
 
 
-def _train_one(
-    trainer: pycrfsuite.Trainer,
-    X: List[List[FeatureDict]],
-    Y: List[List[str]],
-    model_path: str,
-    label: str,
-) -> None:
-    """1つのCRFモデルを学習して保存する共通ルーチン"""
-    print(f"\n🏋️  [{label}] 学習開始: {model_path}")
-    for xseq, yseq in zip(X, Y):
-        trainer.append(xseq, yseq)
-    trainer.train(model_path)
-    print(f"💾 [{label}] 学習完了: {model_path}")
-
-
 # ==========================================
 # 🌟 7. train()
 # ==========================================
 def train(tsvdata: str) -> None:
     """
-    TSVから読みCRFと境界CRFの2モデルを学習し、1つのZIPにまとめる。
+    TSVから読みLRと境界LRの2モデルを学習し、1つのZIPにまとめる。
 
     出力ファイル:
-        basename_read.crfsuite      - 読み予測モデル
-        basename_boundary.crfsuite  - 境界予測モデル（0/1の2ラベルのみ）
-        basename.zip                - 上記2ファイルをまとめたパッケージ
+        basename_bundle.joblib  - LRModelBundle（vectorizer + model 一式）
+        basename.zip            - 上記をまとめたパッケージ
 
     設計:
         - 特徴量 X は2モデルで共通（compute_source_featuresを1回だけ呼ぶ）
         - ラベルのみ _split_labels() で分離
-        - 境界CRFはラベルが2種類のみなので学習が極めて高速
+        - 境界LRはラベルが2種類のみなので学習が極めて高速
+        - DictVectorizer で FeatureDict → 疎行列に変換（未知特徴量は無視）
     """
+    # --- TSVのパース ---
     sentences, current = [], []
     with open(tsvdata, 'r', encoding='utf-8') as f:
         for line in f:
@@ -267,9 +251,9 @@ def train(tsvdata: str) -> None:
     if current:
         sentences.append(current)
 
-    X:            List[List[FeatureDict]] = []
-    Y_read:       List[List[str]]         = []
-    Y_boundary:   List[List[str]]         = []
+    X_dicts:      List[FeatureDict] = []   # 全文字の特徴量（フラット）
+    Y_read:       List[str]         = []
+    Y_boundary:   List[str]         = []
 
     for sentence in sentences:
         source_seq: List[SourceEntry] = [
@@ -278,44 +262,81 @@ def train(tsvdata: str) -> None:
         ]
         raw_labels = [p[1] for p in sentence]
 
-        X.append(compute_source_features(source_seq))
+        feat_seq = compute_source_features(source_seq)
+        X_dicts.extend(feat_seq)
 
         y_read, y_boundary = _split_labels(raw_labels)
-        Y_read.append(y_read)
-        Y_boundary.append(y_boundary)
+        Y_read.extend(y_read)
+        Y_boundary.extend(y_boundary)
 
-    base       = tsvdata.rsplit('.', 1)[0]
-    path_read  = base + "_read.crfsuite"
-    path_bound = base + "_boundary.crfsuite"
-    zip_path   = base + ".zip"
+    print(f"\n📊 学習サンプル数: {len(X_dicts)} 文字")
+    print(f"   読みラベル種類: {len(set(Y_read))}")
 
-    common_params = {
-        'c1': 0.1, # L1正則化の強さ（特徴選択効果）
-        'c2': 0.01, # L2正則化の強さ（過学習防止効果）
-        'max_iterations': 70, # 学習の最大反復回数
-        'feature.possible_transitions': False, # 遷移特徴量の自動生成を無効化（境界CRFは遷移特徴量が不要なため）
-        'feature.possible_states': False,  # 状態特徴量の自動生成を無効化（読みCRFは全ての状態が可能なため）
-    }
+    # --- 読みモデル ---
+    print("\n🏋️  [読みモデル] ベクトル化中...")
+    vec_read = DictVectorizer(sparse=True)
+    X_read = vec_read.fit_transform(X_dicts)
 
-    trainer_read = pycrfsuite.Trainer(verbose=True)
-    trainer_read.set_params(common_params)
-    _train_one(trainer_read, X, Y_read, path_read, "読みモデル")
+    print(f"   特徴量次元数: {X_read.shape[1]}")
+    print("🏋️  [読みモデル] 学習中...")
+    model_read = LogisticRegression(
+        solver='saga',          # 大規模疎行列に強い
+        C=1.0,                  # 正則化強さ（小さいほど強い）
+        max_iter=1000,
+        n_jobs=-1,              # 全コア使用
+        verbose=1,
+    )
+    model_read.fit(X_read, Y_read)
+    print("💾 [読みモデル] 学習完了")
 
-    trainer_bound = pycrfsuite.Trainer(verbose=False)
-    trainer_bound.set_params(common_params)
-    _train_one(trainer_bound, X, Y_boundary, path_bound, "境界モデル")
+    # --- 境界モデル ---
+    print("\n🏋️  [境界モデル] ベクトル化中...")
+    vec_boundary = DictVectorizer(sparse=True)
+    X_boundary = vec_boundary.fit_transform(X_dicts)
+
+    print("🏋️  [境界モデル] 学習中...")
+    model_boundary = SGDClassifier(
+        loss='log_loss',        # ロジスティック回帰相当（確率出力可）
+        alpha=0.01,             # 正則化強さ
+        max_iter=100,
+        n_jobs=-1,
+        random_state=42,
+        verbose=0,
+    )
+    model_boundary.fit(X_boundary, Y_boundary)
+    print("💾 [境界モデル] 学習完了")
+
+    # --- バンドルとしてまとめて保存 ---
+    base        = tsvdata.rsplit('.', 1)[0]
+    bundle_name = os.path.basename(base) + "_bundle.joblib"
+    bundle_path = os.path.join(os.path.dirname(tsvdata), bundle_name)
+    zip_path    = base + ".zip"
 
     version_info = {
-        "trained_at": datetime.now(timezone.utc).isoformat(),
-        "model_read":     os.path.basename(path_read),
-        "model_boundary": os.path.basename(path_bound),
+        "trained_at":   datetime.now(timezone.utc).isoformat(),
+        "model_bundle": bundle_name,
+        "n_samples":    len(X_dicts),
+        "n_read_labels": len(set(Y_read)),
+        "algorithm":    "LogisticRegression+SGDClassifier",
     }
+
+    bundle = LRModelBundle(
+        vectorizer_read=vec_read,
+        model_read=model_read,
+        vectorizer_boundary=vec_boundary,
+        model_boundary=model_boundary,
+        version_info=version_info,
+    )
+    joblib.dump(bundle, bundle_path, compress=3)
+    print(f"\n💾 バンドル保存: {bundle_path}")
+
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(path_read,  os.path.basename(path_read))
-        zf.write(path_bound, os.path.basename(path_bound))
+        zf.write(bundle_path, bundle_name)
         zf.writestr("version_info.json", json.dumps(version_info, ensure_ascii=False, indent=2))
 
+    # 一時ファイルの掃除
+    os.remove(bundle_path)
+
     print(f"\n📦 ZIPパッケージ作成完了: {zip_path}")
-    print(f"   ├ {os.path.basename(path_read)}")
-    print(f"   ├ {os.path.basename(path_bound)}")
+    print(f"   ├ {bundle_name}")
     print(f"   └ version_info.json")

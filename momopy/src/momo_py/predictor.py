@@ -6,7 +6,10 @@ import zipfile
 from dataclasses import dataclass, field
 from typing import List, Tuple, Set, Dict, Optional
 
-import pycrfsuite
+import joblib
+import numpy as np
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.feature_extraction import DictVectorizer
 
 from .features import get_units, get_char_type, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
 from .utils import split_on_unescaped_slash
@@ -64,13 +67,13 @@ class PredictorConfig:
     """Predictorの設定をまとめた構造体。
 
     Attributes:
-        model_path: モデルファイルのパス（.zip または .crfsuite）
+        model_path: モデルファイルのパス（.zip）
         single_kanji_dict_path: 単一漢字辞書TSVのパス（省略可）
         custom_dict_path: カスタム辞書ファイルのパス（学習データと同じ形式、省略可）
-        compute_confidence: 自信度を計算するかどうか（TrueならCRFのマージナル確率を使用）
-            Falseにすると marginal の計算をスキップして高速化できる。
+        compute_confidence: 自信度を計算するかどうか
+            Falseにすると predict_proba の計算をスキップして高速化できる。
             ただし漢数字（JAPANESE_NUMERIC）については、助数詞との組み合わせ
-            （「三日」→ミッカ 等）を正しく変換するため、常にmarginalを計算する。
+            （「三日」→ミッカ 等）を正しく変換するため、常に確率を計算する。
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
     """
@@ -86,8 +89,8 @@ class PredictorConfig:
 # 🌟 決定根拠タグ
 # ==========================================
 class DecisionSource:
-    CRF              = "CRF"            # CRFの予測をそのまま採用
-    CRF_LOW          = "CRF_LOW"        # 自信度は低いがCRFを採用
+    LR               = "LR"             # LRの予測をそのまま採用
+    LR_LOW           = "LR_LOW"         # 自信度は低いがLRを採用
     FALLBACK_KANJI   = "FALLBACK_KANJI" # KANJI低自信度フォールバック辞書
     FALLBACK_NUMERIC = "FALLBACK_NUM"   # JAPANESE_NUMERICルールベース変換
     FALLBACK_ORPHAN  = "FALLBACK_ORPH"  # 文字消失バグ救済ロジック
@@ -97,8 +100,8 @@ class DecisionSource:
 
 # ターミナル表示用ANSIカラー
 _ANSI = {
-    DecisionSource.CRF:              "\033[32m",   # 緑
-    DecisionSource.CRF_LOW:          "\033[33m",   # 黄
+    DecisionSource.LR:               "\033[32m",   # 緑
+    DecisionSource.LR_LOW:           "\033[33m",   # 黄
     DecisionSource.FALLBACK_KANJI:   "\033[35m",   # マゼンタ
     DecisionSource.FALLBACK_NUMERIC: "\033[36m",   # シアン
     DecisionSource.FALLBACK_ORPHAN:  "\033[31m",   # 赤
@@ -112,26 +115,7 @@ _ANSI_RESET = "\033[0m"
 def _kurai_fallback(char: str, left_char: str, left_ctype: str, right_ctype: str) -> str:
     """
     位取り文字（十百千万億兆）のフォールバック変換ルール。
-
-    十のルール:
-        左が JAPANESE_NUMERIC かつ右が JAPANESE_NUMERIC → _
-        左が JAPANESE_NUMERIC かつ右が JAPANESE_NUMERIC でない → 0
-        左が JAPANESE_NUMERIC でない かつ右が JAPANESE_NUMERIC → 1
-        左も右も JAPANESE_NUMERIC でない → 10
-
-    百のルール:
-        左が JAPANESE_NUMERIC かつ右が JAPANESE_NUMERIC → 0
-        左が JAPANESE_NUMERIC かつ右が JAPANESE_NUMERIC でない → 00
-        左が JAPANESE_NUMERIC でない かつ右が JAPANESE_NUMERIC → 1
-        左も右も JAPANESE_NUMERIC でない → 100
-
-    千のルール:
-        右が JAPANESE_NUMERIC → 0
-        右が JAPANESE_NUMERIC でない かつ左が 三 → ゼン
-        右が JAPANESE_NUMERIC でない かつ左が 三 以外 → セン
-
-    万億兆のルール:
-        常に読み（マン／オク／チョー）
+    （CRF版から変更なし）
     """
     is_numeric = CharType.JAPANESE_NUMERIC
     left_is_numeric  = (left_ctype  == is_numeric)
@@ -153,7 +137,6 @@ def _kurai_fallback(char: str, left_char: str, left_ctype: str, right_ctype: str
         if right_is_numeric: return "0"
         return "ゼン" if left_char == "三" else "セン"
 
-    # 万億兆: 常に読み
     return _KURAI_READING.get(char, char)
 
 
@@ -161,19 +144,6 @@ def _kurai_fallback(char: str, left_char: str, left_ctype: str, right_ctype: str
 # 🌟 カスタム辞書のロードとインデックス構築
 # ==========================================
 def load_custom_dict(path: str) -> Dict[str, List[str]]:
-    """
-    カスタム辞書ファイル（学習データと同じ形式）をロードして
-    { 表層形: [読みラベル, ...] } の辞書を返す。
-
-    入力形式（例）:
-        切明\tキリ/アケ
-        三日\tミッ/カ
-
-    出力形式（例）:
-        { "切明": ["キリ", "アケ"], "三日": ["ミッ", "カ"] }
-
-    '#' で始まる行と空行はスキップする。
-    """
     result: Dict[str, List[str]] = {}
     with open(path, encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
@@ -183,8 +153,7 @@ def load_custom_dict(path: str) -> Dict[str, List[str]]:
             parts = line.split("\t")
             if len(parts) != 2:
                 raise ValueError(
-                    f"カスタム辞書 {path} の {lineno} 行目の形式が不正です "
-                    f"（タブ区切りで表層形と読みが必要）: {line!r}"
+                    f"カスタム辞書 {path} の {lineno} 行目の形式が不正です: {line!r}"
                 )
             surface, reading_str = parts
             readings = [b.replace(r"\/", "/") for b in split_on_unescaped_slash(reading_str)]
@@ -199,13 +168,6 @@ def load_custom_dict(path: str) -> Dict[str, List[str]]:
 
 
 def build_dict_index(custom_dict: Dict[str, List[str]]) -> Dict[str, List[Tuple[str, List[str]]]]:
-    """
-    最長一致検索のため、先頭文字をキーにしたインデックスを構築する。
-    同じ先頭文字を持つエントリは長い順に並べておく（最長一致のため）。
-
-    出力形式:
-        { "切": [("切明", ["キリ", "アケ"]), ...], ... }
-    """
     index: Dict[str, List[Tuple[str, List[str]]]] = {}
     for surface, readings in custom_dict.items():
         key = surface[0]
@@ -220,25 +182,16 @@ def find_longest_match(
     source_seq: List[SourceEntry],
     pos: int,
 ) -> Optional[Tuple[int, List[str]]]:
-    """
-    source_seq の pos 番目から始まる最長一致エントリを探す。
-
-    戻り値:
-        マッチした場合: (マッチした文字数, 読みラベルのリスト)
-        マッチしなかった場合: None
-    """
     char = source_seq[pos][0]
     candidates = index.get(char)
     if not candidates:
         return None
-
     for surface, readings in candidates:
         length = len(surface)
         if pos + length > len(source_seq):
             continue
         if all(source_seq[pos + j][0] == surface[j] for j in range(length)):
             return length, readings
-
     return None
 
 
@@ -272,15 +225,6 @@ class PredictionResult:
         )
 
     def format_terminal(self, use_color: bool = True) -> str:
-        """
-        各ソース文字ごとに決定根拠・読み・自信度をターミナル向けに整形して返す。
-
-        例:
-          切  →  キリ   [DICT        ] ████████████ 1.000
-          明  →  アケ   [DICT        ] ████████████ 1.000
-          の  →  の     [BYPASS      ]
-          山  →  サン   [CRF_LOW     ] ███░░░░░░░░░ 0.241
-        """
         src_len = len(self.source_text)
 
         src_kana: Dict[int, List[str]]   = {i: [] for i in range(src_len)}
@@ -326,9 +270,21 @@ class PredictionResult:
 
 
 def _confidence_bar(conf: float, width: int = 12) -> str:
-    """自信度を簡易バーグラフで表現する。"""
     filled = round(conf * width)
     return "█" * filled + "░" * (width - filled)
+
+
+# ==========================================
+# 🌟 LRモデルのバンドル（読み＋境界）
+# ==========================================
+@dataclass
+class LRModelBundle:
+    """ZIPに格納するモデル一式"""
+    vectorizer_read:     DictVectorizer
+    model_read:          LogisticRegression
+    vectorizer_boundary: DictVectorizer
+    model_boundary:      SGDClassifier
+    version_info:        dict
 
 
 class Predictor:
@@ -341,44 +297,35 @@ class Predictor:
         self._version_info: dict | None = None
         self._tmp_dir: str | None = None
 
-        if model_path.endswith(".zip"):
-            with zipfile.ZipFile(model_path, "r") as zf:
-                namelist = zf.namelist()
+        # ==========================================
+        # モデルロード（ZIPのみ対応）
+        # ==========================================
+        if not model_path.endswith(".zip"):
+            raise ValueError(f"❌ 未対応のモデル形式です（.zip を指定してください）: {model_path}")
 
-                if "version_info.json" not in namelist:
-                    raise ValueError(f"❌ ZIPファイル内に version_info.json が見つかりません: {model_path}")
+        with zipfile.ZipFile(model_path, "r") as zf:
+            namelist = zf.namelist()
 
-                self._version_info = json.loads(zf.read("version_info.json").decode("utf-8"))
+            if "version_info.json" not in namelist:
+                raise ValueError(f"❌ ZIPファイル内に version_info.json が見つかりません: {model_path}")
 
-                if "model_read" not in self._version_info or "model_boundary" not in self._version_info:
-                    raise ValueError(f"❌ version_info.json に model_read / model_boundary キーがありません: {model_path}")
+            self._version_info = json.loads(zf.read("version_info.json").decode("utf-8"))
 
-                read_name  = self._version_info["model_read"]
-                bound_name = self._version_info["model_boundary"]
-                for name in (read_name, bound_name):
-                    if name not in namelist:
-                        raise ValueError(f"❌ ZIPファイル内に {name} が見つかりません: {model_path}")
+            bundle_name = self._version_info.get("model_bundle")
+            if bundle_name is None:
+                raise ValueError(f"❌ version_info.json に model_bundle キーがありません: {model_path}")
+            if bundle_name not in namelist:
+                raise ValueError(f"❌ ZIPファイル内に {bundle_name} が見つかりません: {model_path}")
 
-                self._tmp_dir = tempfile.mkdtemp()
-                zf.extract(read_name,  self._tmp_dir)
-                zf.extract(bound_name, self._tmp_dir)
-                path_read  = os.path.join(self._tmp_dir, read_name)
-                path_bound = os.path.join(self._tmp_dir, bound_name)
+            self._tmp_dir = tempfile.mkdtemp()
+            zf.extract(bundle_name, self._tmp_dir)
+            bundle_path = os.path.join(self._tmp_dir, bundle_name)
 
-        elif model_path.endswith(".crfsuite"):
-            path_read  = model_path
-            path_bound = None
-
-        else:
-            raise ValueError(f"❌ 未対応のモデル形式です（.zip または .crfsuite を指定してください）: {model_path}")
-
-        self.tagger_read = pycrfsuite.Tagger()
-        self.tagger_read.open(path_read)
-
-        self.tagger_boundary: pycrfsuite.Tagger | None = None
-        if path_bound:
-            self.tagger_boundary = pycrfsuite.Tagger()
-            self.tagger_boundary.open(path_bound)
+        bundle: LRModelBundle = joblib.load(bundle_path)
+        self._vectorizer_read     = bundle.vectorizer_read
+        self._model_read          = bundle.model_read
+        self._vectorizer_boundary = bundle.vectorizer_boundary
+        self._model_boundary      = bundle.model_boundary
 
         # フォールバック辞書のロード
         self._single_kanji_dict: Dict[str, Dict[str, str]] = {}
@@ -403,24 +350,25 @@ class Predictor:
     # 🌟 推論パイプライン（The Conductor）
     # ==========================================
     def predict(self, text: str) -> PredictionResult:
-        """メインの推論フロー。各ステップをパイプラインとして呼び出す。"""
         if not text:
             return PredictionResult("", "", [], [], [])
 
-        # 1. 前処理（単位分割・バイパス判定・辞書マッチ）
+        # 1. 前処理
         source_seq, bypass_indices, ascii_overrides, dict_overrides = self._preprocess_text(text)
         if not source_seq:
             return PredictionResult(text, "", [], [], [[] for _ in text])
 
-        # 2. 推論（CRFによる生のラベル予測）
-        raw_labels, boundary_labels = self._run_inference(source_seq)
+        # 2. 推論（LR）
+        raw_labels, boundary_labels, read_proba, boundary_proba = self._run_inference(source_seq)
 
-        # 3. 後処理（バイパス・辞書・フォールバック・自信度の確定）
+        # 3. 後処理
         refined_labels, raw_confidences, has_splits, decision_sources = self._refine_predictions(
-            source_seq, raw_labels, boundary_labels, bypass_indices, ascii_overrides, dict_overrides
+            source_seq, raw_labels, boundary_labels,
+            read_proba, boundary_proba,
+            bypass_indices, ascii_overrides, dict_overrides
         )
 
-        # 4. 結果の組み立て（文字列とインデックスの最終マッピング）
+        # 4. 結果の組み立て
         return self._assemble_result(
             text, source_seq, refined_labels, raw_confidences, has_splits, bypass_indices, decision_sources
         )
@@ -432,17 +380,6 @@ class Predictor:
     def _preprocess_text(
         self, text: str
     ) -> Tuple[List[SourceEntry], Set[int], Dict[int, str], Dict[int, str]]:
-        """
-        テキストをソース文字系列に展開し、各種オーバーライドを準備する。
-
-        戻り値:
-            source_seq     : ソース文字系列
-            bypass_indices : ASCIIバイパス対象のインデックス集合
-            ascii_overrides: ASCIIバイパス用ラベル辞書
-            dict_overrides : カスタム辞書マッチ用ラベル辞書
-                             先頭文字インデックス → 読みラベル
-                             2文字目以降 → LABEL_CONTINUE
-        """
         units_info = get_units(text)
         source_seq: List[SourceEntry] = []
         bypass_indices: Set[int] = set()
@@ -458,7 +395,6 @@ class Predictor:
                     ascii_overrides[char_idx] = val if i == 0 else LABEL_CONTINUE
                 char_idx += 1
 
-        # カスタム辞書の最長一致スキャン（ASCIIバイパス済みの文字はスキップ）
         dict_overrides: Dict[int, str] = {}
         if self._dict_index:
             i = 0
@@ -479,40 +415,55 @@ class Predictor:
 
 
     # ==========================================
-    # 🌟 ステップ 2: 推論
+    # 🌟 ステップ 2: 推論（LR版）
     # ==========================================
-    def _run_inference(self, source_seq: List[SourceEntry]) -> Tuple[List[str], List[str]]:
+    def _run_inference(
+        self, source_seq: List[SourceEntry]
+    ) -> Tuple[List[str], List[str], np.ndarray, np.ndarray]:
         """
         読みモデルと境界モデルをそれぞれ推論する。
 
         戻り値:
-            raw_labels      : 読みラベル列（例: ["カン", "ゼン", "ニ", ...]）
-            boundary_labels : 境界ラベル列（例: ["1", "0", "1", ...]）
-                              .crfsuite 直接指定（tagger_boundary が None）の場合は
-                              すべて "0" を返す（分かち書きなし）。
+            raw_labels      : 読みラベル列
+            boundary_labels : 境界ラベル列（"0" or "1"）
+            read_proba      : 読みの確率行列 shape=(n, n_classes_read)
+            boundary_proba  : 境界の確率行列 shape=(n, 2)
         """
         src_features = compute_source_features(source_seq)
 
-        self.tagger_read.set(src_features)
-        raw_labels = list(self.tagger_read.tag())
+        # DictVectorizer で疎行列に変換
+        X_read     = self._vectorizer_read.transform(src_features)
+        X_boundary = self._vectorizer_boundary.transform(src_features)
 
-        if self.tagger_boundary is not None:
-            self.tagger_boundary.set(src_features)
-            boundary_labels = list(self.tagger_boundary.tag())
-        else:
-            boundary_labels = ["0"] * len(raw_labels)
+        # 読みモデル
+        raw_labels   = list(self._model_read.predict(X_read))
+        read_proba   = self._model_read.predict_proba(X_read)  # shape: (n, n_classes)
 
-        return raw_labels, boundary_labels
+        # 境界モデル
+        boundary_raw    = list(self._model_boundary.predict(X_boundary))
+        boundary_labels = [str(b) for b in boundary_raw]
+        boundary_proba  = self._model_boundary.predict_proba(X_boundary)  # shape: (n, 2)
 
+        return raw_labels, boundary_labels, read_proba, boundary_proba
+
+    def _get_read_confidence(self, read_proba: np.ndarray, label: str, i: int) -> float:
+        """読みラベルの確率を返す。ラベルがクラスリストにない場合は0.0。"""
+        classes = self._model_read.classes_
+        idx = np.searchsorted(classes, label)
+        if idx < len(classes) and classes[idx] == label:
+            return float(read_proba[i, idx])
+        return 0.0
 
     # ==========================================
-    # 🌟 ステップ 3: 後処理（バイパス・辞書・フォールバック）
+    # 🌟 ステップ 3: 後処理
     # ==========================================
     def _refine_predictions(
         self,
         source_seq: List[SourceEntry],
         raw_labels: List[str],
         boundary_labels: List[str],
+        read_proba: np.ndarray,
+        boundary_proba: np.ndarray,
         bypass_indices: Set[int],
         ascii_overrides: Dict[int, str],
         dict_overrides: Dict[int, str],
@@ -531,7 +482,6 @@ class Predictor:
                 parent_idx = i
 
             if i in bypass_indices:
-                # ASCIIバイパス（最優先）
                 clean_label = ascii_overrides[i]
                 confidence  = 1.0
                 decision    = DecisionSource.BYPASS
@@ -539,7 +489,6 @@ class Predictor:
                 has_split = False
 
             elif i in dict_overrides:
-                # カスタム辞書による強制置換
                 clean_label = dict_overrides[i]
                 confidence  = 1.0
                 decision    = DecisionSource.DICT
@@ -548,14 +497,14 @@ class Predictor:
 
             else:
                 label    = raw_labels[i]
-                decision = DecisionSource.CRF
+                decision = DecisionSource.LR
 
                 if self._config.compute_confidence or ctype == CharType.JAPANESE_NUMERIC:
-                    confidence = self.tagger_read.marginal(label, i)
+                    confidence = self._get_read_confidence(read_proba, label, i)
                 else:
                     confidence = 1.0
 
-                # 🚨 文字消失バグの救済ロジック
+                # 文字消失バグの救済ロジック
                 if label == LABEL_CONTINUE and (parent_idx == -1 or parent_idx in bypass_indices):
                     if ctype == 'KANJI' and char in self._single_kanji_dict:
                         label = self._single_kanji_dict[char]["on"]
@@ -572,9 +521,9 @@ class Predictor:
                     label, last_fallback_reading, _, decision = self._apply_kanji_fallback(
                         i, char, ctype, label, confidence, source_seq, last_fallback_reading
                     )
-                    if decision == DecisionSource.CRF:
+                    if decision == DecisionSource.LR:
                         if confidence < self._config.confidence_threshold and ctype == 'KANJI':
-                            decision = DecisionSource.CRF_LOW
+                            decision = DecisionSource.LR_LOW
 
                 clean_label = label
                 has_split = (boundary_labels[i] == "1")
@@ -595,13 +544,8 @@ class Predictor:
         source_seq: List[SourceEntry],
         last_fallback: str,
     ) -> Tuple[str, str, float, str]:
-        """
-        JAPANESE_NUMERIC 文字の変換。
-        自信度が閾値以上であれば CRF の出力をそのまま使う。
-        閾値を下回る場合はルールベース変換にフォールバックする。
-        """
         if confidence >= self._config.numeric_confidence_threshold:
-            return label, "", confidence, DecisionSource.CRF
+            return label, "", confidence, DecisionSource.LR
 
         left_char   = source_seq[i - 1][0] if i > 0 else ""
         left_ctype  = source_seq[i - 1][2] if i > 0 else ""
@@ -616,11 +560,10 @@ class Predictor:
         self, i: int, char: str, ctype: str, label: str, confidence: float,
         source_seq: List[SourceEntry], last_fallback: str
     ) -> Tuple[str, str, bool, str]:
-        """KANJI の低自信度処理と々の繰り返し処理。"""
         is_applied = False
         new_label = label
         new_last_fallback = last_fallback
-        decision = DecisionSource.CRF
+        decision = DecisionSource.LR
 
         if ctype == 'KANJI' and confidence < self._config.confidence_threshold and char in self._single_kanji_dict:
             next_char  = source_seq[i + 1][0] if i < len(source_seq) - 1 else ""

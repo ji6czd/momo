@@ -4,7 +4,6 @@ from typing import Optional, List
 from google.protobuf import text_format
 from importlib import resources
 
-from loguru import logger
 import sys
 from sudachipy import tokenizer
 from sudachipy import dictionary
@@ -20,8 +19,6 @@ class Translator:
     """
 
     def __init__(self):
-        logger.debug("Starting MOMO!")
-        logger.remove()
         self._mode = tokenizer.Tokenizer.SplitMode.B
         self._dic_obj = dictionary.Dictionary()
         self._tokenizer_obj = self._dic_obj.create(self._mode)
@@ -36,7 +33,6 @@ class Translator:
             with resources.open_text(
                 "momo_py", "proto/braille_rules.textproto", encoding="utf-8"
             ) as f:
-                logger.debug("Loading braille rules from file.")
                 text_format.Parse(f.read(), self._rules)
         except FileNotFoundError:
             print(
@@ -56,7 +52,6 @@ class Translator:
             with resources.open_text(
                 "momo_py", "single_character_dic.json", encoding="utf-8"
             ) as f:
-                logger.debug("Loading single character dictionary from file.")
                 dic = json.load(f)
                 # ひらがなを含むエントリーをチェック
                 self._check_hiragana_in_dic(dic)
@@ -88,7 +83,7 @@ class Translator:
                         break
         
         if issues:
-            logger.warning(f"Found {len(issues)} entries with hiragana in single_character_dic.json:")
+            print(f"Found {len(issues)} entries with hiragana in single_character_dic.json:")
             for kanji, reading in issues[:10]:
                 logger.warning(f"  '{kanji}': {repr(reading)}")
             if len(issues) > 10:

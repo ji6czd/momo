@@ -8,9 +8,9 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "loguru",
     "protobuf",
     "python-crfsuite>=0.9.12",
+    "scikit-learn>=1.8.0",
     "sudachidict-core",
     "sudachipy",
 ]

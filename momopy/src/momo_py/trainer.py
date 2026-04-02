@@ -105,9 +105,6 @@ def _check_alignment_anomalies(target_chars: str, ctype: str, r_label: str, orig
 # ==========================================
 def _create_biose_rows(target_chars: str, ctype: str, r_label: str, orig_idx: int) -> List[str]:
     """1ブロック分の文字列とラベルから、BIOSEタグ付きのTSV行リストを生成する"""
-    if target_chars in KUTOUTEN and "+S" not in r_label:
-        r_label += "+S"
-
     is_ascii_block = ctype in ('ALPHA', 'NUM')
 
     rows = []

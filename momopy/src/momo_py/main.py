@@ -30,7 +30,7 @@ def run_translate(opt_segment: bool = False):
     except KeyboardInterrupt:
         print("\n🛑 翻訳モード終了。")
 
-def run_predict(config: PredictorConfig, show_trace: bool = False) -> None:
+def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile: bool = False) -> None:
     """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード。
     show_trace が True の場合、各文字の決定根拠をターミナルにも表示する。
     """
@@ -41,7 +41,9 @@ def run_predict(config: PredictorConfig, show_trace: bool = False) -> None:
             text = line.strip()
             if not text: continue
 
+            t1 = time.perf_counter() if show_profile else 0.0
             result = predictor.predict(text)
+            print(f"予測時間: {(time.perf_counter() - t1)*1000:.2f} ms") if show_profile else None
             print(result.to_json())
 
             if show_trace:
@@ -108,6 +110,7 @@ def main():
     predict_parser.add_argument("--single-dict", dest="single_dict", help="単一漢字用辞書ファイルのパス")
     predict_parser.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
     predict_parser.add_argument("--confidence", action="store_true", help="予測結果に信頼度を含める")
+    predict_parser.add_argument("--profile", action="store_true", help="予測の実行時間を表示する")
     
     translate_parser = subparsers.add_parser("translate")
     translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
@@ -146,7 +149,7 @@ def main():
             single_kanji_dict_path=args.single_dict,
             compute_confidence=args.confidence,
         )
-        run_predict(config, show_trace=args.trace)
+        run_predict(config, show_trace=args.trace, show_profile=args.profile)
         
     elif args.command == "translate":
         run_translate(args.segment)

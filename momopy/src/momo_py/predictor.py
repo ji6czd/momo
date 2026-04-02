@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from typing import List, Tuple, Set, Dict, Optional
+from typing import List, Tuple, Set, Dict, Optional, Any
 
 import joblib
 import numpy as np
@@ -278,11 +278,12 @@ def _confidence_bar(conf: float, width: int = 12) -> str:
 class LRModelBundle:
     """ZIPに格納するモデル一式"""
     vectorizer_read:     DictVectorizer
-    model_read:          LinearSVC
+    coef_read_sparse:    Any
+    intercept_read:      Any
+    read_classes:        Any
     vectorizer_boundary: DictVectorizer
     model_boundary:      SGDClassifier
     version_info:        dict
-
 
 class Predictor:
     def __init__(self, config: PredictorConfig):
@@ -317,13 +318,11 @@ class Predictor:
 
         bundle: LRModelBundle = joblib.load(bundle_path)
         self._vectorizer_read     = bundle.vectorizer_read
-        self._model_read          = bundle.model_read
+        self._coef_read_sparse    = bundle.coef_read_sparse
+        self._intercept_read      = bundle.intercept_read
+        self._read_classes        = bundle.read_classes
         self._vectorizer_boundary = bundle.vectorizer_boundary
         self._model_boundary      = bundle.model_boundary
-
-        # decision_function のスコア範囲をキャッシュ（sigmoid正規化用）
-        # クラスリストをソート済みndarrayとして保持
-        self._read_classes: np.ndarray = np.array(self._model_read.classes_)
 
         # フォールバック辞書のロード
         self._single_kanji_dict: Dict[str, Dict[str, str]] = {}
@@ -429,8 +428,9 @@ class Predictor:
         X_boundary = self._vectorizer_boundary.transform(src_features)
 
         # 読みモデル（LinearSVC）
-        raw_labels      = list(self._model_read.predict(X_read))
-        decision_scores = self._model_read.decision_function(X_read)  # shape: (n, n_classes)
+        decision_scores = (self._coef_read_sparse @ X_read.T).toarray().T + self._intercept_read
+        predicted_indices = np.argmax(decision_scores, axis=1)
+        raw_labels = list(self._read_classes[predicted_indices])
 
         # 境界モデル（SGDClassifier）
         boundary_raw    = list(self._model_boundary.predict(X_boundary))

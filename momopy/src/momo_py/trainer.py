@@ -11,12 +11,14 @@ import numpy as np
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
+from scipy.sparse import csr_matrix
 
 from .features import (
     get_units, get_char_type, compute_source_features,
     SourceEntry, FeatureDict, LABEL_CONTINUE, LABEL_SKIP,
 )
 from .utils import split_on_unescaped_slash
+from .predictor import LRModelBundle
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
 
@@ -280,9 +282,17 @@ def train(tsvdata: str) -> None:
     model_read = LinearSVC(
         C=1.0,
         max_iter=2000,
-        verbose=1,
+        verbose=0,
     )
     model_read.fit(X_read, Y_read)
+    model_read.coef_ = model_read.coef_.astype(np.float32)
+    model_read.intercept_ = model_read.intercept_.astype(np.float32)
+    # 枝刈り→sparse化
+    coef = model_read.coef_.copy()
+    coef[np.abs(coef) < 0.01] = 0.0
+    coef_sparse = csr_matrix(coef)
+    print(f"疎性: {(coef == 0).sum() / coef.size:.1%}")
+    print(f"推定サイズ: {coef_sparse.data.nbytes / 1024**2:.1f}MB")
     print("💾 [読みモデル] 学習完了")
 
     # ==========================================
@@ -297,15 +307,16 @@ def train(tsvdata: str) -> None:
         loss='modified_huber',  # predict_proba が使える
         max_iter=200,
         random_state=42,
-        verbose=1,
+        verbose=0,
     )
     model_boundary.fit(X_boundary, Y_boundary)
+    model_boundary.coef_ = model_boundary.coef_.astype(np.float32)
+    model_boundary.intercept_ = model_boundary.intercept_.astype(np.float32)
     print("💾 [境界モデル] 学習完了")
 
     # ==========================================
     # ZIPにまとめて保存
     # ==========================================
-    from .predictor import LRModelBundle
 
     base        = tsvdata.rsplit('.', 1)[0]
     bundle_name = os.path.basename(base) + "_bundle.pkl"
@@ -314,7 +325,9 @@ def train(tsvdata: str) -> None:
 
     bundle = LRModelBundle(
         vectorizer_read     = vect_read,
-        model_read          = model_read,
+        coef_read_sparse    = coef_sparse,
+        intercept_read      = model_read.intercept_.astype(np.float32),
+        read_classes        = np.array(model_read.classes_),
         vectorizer_boundary = vect_boundary,
         model_boundary      = model_boundary,
         version_info        = {},

@@ -82,7 +82,7 @@ class PredictorConfig:
     custom_dict_path: Optional[str] = None
     compute_confidence: bool = True
     confidence_threshold: float = 0.3
-    numeric_confidence_threshold: float = 0.8
+    numeric_confidence_threshold: float = 0.5
 
 
 # ==========================================

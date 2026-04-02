@@ -1,7 +1,7 @@
 import sys
 from enum import Enum
-from .features import CharType
-from .translator import Translator
+from momo_py.features import CharType
+from momo_py.translator import Translator
 
 def lookup(c: str):
     t = Translator()

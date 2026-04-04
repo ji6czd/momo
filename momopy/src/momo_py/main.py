@@ -109,6 +109,8 @@ def main():
     predict_parser.add_argument("--custom-dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
     predict_parser.add_argument("--single-dict", dest="single_dict", help="単一漢字用辞書ファイルのパス")
     predict_parser.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
+    predict_parser.add_argument("--explain", type=int, default=8, metavar="N",
+                                help="--trace時に表示する特徴量寄与度の上位件数（デフォルト: 8、0で無効）")
     predict_parser.add_argument("--confidence", action="store_true", help="予測結果に信頼度を含める")
     predict_parser.add_argument("--profile", action="store_true", help="予測の実行時間を表示する")
     
@@ -143,11 +145,14 @@ def main():
         train(args.tsv)
         
     elif args.command == "predict":
+        # --trace なしのときは explain_top_n=0 にして計算を省略
+        explain_top_n = args.explain if args.trace else 0
         config = PredictorConfig(
             model_path=args.model,
             custom_dict_path=args.custom_dict,
             single_kanji_dict_path=args.single_dict,
             compute_confidence=args.confidence,
+            explain_top_n=explain_top_n,
         )
         run_predict(config, show_trace=args.trace, show_profile=args.profile)
         

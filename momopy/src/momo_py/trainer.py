@@ -17,10 +17,21 @@ from .features import (
     get_units, get_char_type, compute_source_features,
     SourceEntry, FeatureDict, LABEL_CONTINUE, LABEL_SKIP,
 )
-from .utils import split_on_unescaped_slash
+from .utils import split_on_unescaped_slash, CharType
 from .predictor import LRModelBundle
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
+
+# ラベルを '_'（LABEL_SKIP）にして素通しする文字種
+_SKIP_CTYPES = frozenset({
+    CharType.ALPHA,
+    CharType.NUM,
+    CharType.SYMBOL,
+    CharType.SYMBOL_CLOSE,
+    CharType.SYMBOL_OPEN,
+    CharType.SYMBOL_STOP,
+    CharType.SYMBOL_PAUSE,
+})
 
 
 # ==========================================
@@ -105,12 +116,12 @@ def _check_alignment_anomalies(target_chars: str, ctype: str, r_label: str, orig
 # ==========================================
 def _create_biose_rows(target_chars: str, ctype: str, r_label: str, orig_idx: int) -> List[str]:
     """1ブロック分の文字列とラベルから、BIOSEタグ付きのTSV行リストを生成する"""
-    is_ascii_block = ctype in ('ALPHA', 'NUM')
+    is_skip_block = ctype in _SKIP_CTYPES
 
     rows = []
     block_len = len(target_chars)
     for i, char in enumerate(target_chars):
-        if is_ascii_block:
+        if is_skip_block:
             r_val = LABEL_SKIP
         else:
             r_val = r_label if i == 0 else LABEL_CONTINUE

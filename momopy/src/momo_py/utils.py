@@ -6,13 +6,17 @@ from typing import List
 class CharType(str, Enum):
     """文字種列挙型"""
     SPACE            = 'SPACE'
-    NUM              = 'NUM'
+    ALPHA            = 'ALPHA'
+    NUMERIC              = 'NUM'
     SYMBOL           = 'SYMBOL'
+    SYMBOL_CLOSE     = 'SYMBOL_CLOSE'   # 閉じ括弧類: 」』）】〕｝〉》 など
+    SYMBOL_OPEN      = 'SYMBOL_OPEN'    # 開き括弧類: 「『（【〔｛〈《 など
+    SYMBOL_STOP      = 'SYMBOL_STOP'    # 文末記号類: 。！？.!? など
+    SYMBOL_PAUSE     = 'SYMBOL_PAUSE'   # 読点・中点類: 、・, など
     HIRAGANA         = 'HIRAGANA'
     KATAKANA         = 'KATAKANA'
     KANJI            = 'KANJI'
     JAPANESE_NUMERIC = 'JAPANESE_NUMERIC'
-    ALPHA            = 'ALPHA'
     OTHER            = 'OTHER'
 
 
@@ -22,11 +26,16 @@ _JAPANESE_NUMERIC_CHARS = frozenset("〇一二三四五六七八九")
 # 隣接文脈次第で JAPANESE_NUMERIC に昇格する位取り文字
 _KURAI_CHARS = frozenset("十百千万億兆")
 
+# 記号サブカテゴリ
+_CLOSE_SYMBOLS = frozenset('」』）】〕｝〉》"\'')
+_OPEN_SYMBOLS  = frozenset('「『（【〔｛〈《')
+_STOP_SYMBOLS  = frozenset('。！？.!?')
+_PAUSE_SYMBOLS = frozenset('、・,')
 
 def get_basic_char_category(c: str) -> CharType:
     """
     1文字を受け取り、基本カテゴリ（かな/漢字/英字/その他）を返す。
-    SPACE / NUM / SYMBOL の判定は行わない（get_char_type() が担当）。
+    SPACE / NUM / SYMBOL 系の判定は行わない（get_char_type() が担当）。
     """
     cp = ord(c)
     if 0x3040 <= cp <= 0x309F: return CharType.HIRAGANA
@@ -43,25 +52,38 @@ def get_char_type(c: str) -> CharType:
     """
     文字種を判定する。
 
+    記号は内容に応じてサブカテゴリに分類する:
+        SYMBOL_CLOSE  : 閉じ括弧類
+        SYMBOL_OPEN   : 開き括弧類
+        SYMBOL_STOP   : 文末記号類
+        SYMBOL_PAUSE  : 読点・中点類
+        SYMBOL        : その他の記号
+
     位取り文字（十百千万億兆）の JAPANESE_NUMERIC への昇格は
     get_units() の文脈判定で行われるため、この関数では KANJI を返す。
     """
     if not c or c.isspace(): return CharType.SPACE
-    if c.isdigit() or ('0' <= c <= '9'): return CharType.NUM
+    if c.isdigit() or ('0' <= c <= '9'): return CharType.NUMERIC
 
     cat = unicodedata.category(c)
-    if cat.startswith('P') or cat.startswith('S'): return CharType.SYMBOL
+    if cat.startswith('P') or cat.startswith('S'):
+        if c in _CLOSE_SYMBOLS: return CharType.SYMBOL_CLOSE
+        if c in _OPEN_SYMBOLS:  return CharType.SYMBOL_OPEN
+        if c in _STOP_SYMBOLS:  return CharType.SYMBOL_STOP
+        if c in _PAUSE_SYMBOLS: return CharType.SYMBOL_PAUSE
+        return CharType.SYMBOL
 
     return get_basic_char_category(c)
+
 
 def convert_to_katakana(c: str) -> str:
     """c（カナ1文字）がカタカナならそのまま、ひらがななら対応するカタカナを返す。
     それ以外の文字はそのまま返す。
     """
-
     if get_basic_char_category(c) == CharType.HIRAGANA:
         return chr(ord(c) + 0x60)
     return c
+
 
 def has_vowel(char: str, vowel: str) -> bool:
     """
@@ -120,6 +142,7 @@ def has_vowel(char: str, vowel: str) -> bool:
         return False
 
     return char_vowel == vowel_kata
+
 
 def split_on_unescaped_slash(s: str) -> List[str]:
     """バックスラッシュでエスケープされていない '/' で s を分割する。"""

@@ -13,7 +13,7 @@ from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
 
 from .features import get_units, get_char_type, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
-from .utils import split_on_unescaped_slash
+from .utils import split_on_unescaped_slash, CharType
 
 
 def _is_ascii_printable_block(s: str) -> bool:
@@ -22,6 +22,16 @@ def _is_ascii_printable_block(s: str) -> bool:
     if not s or s[0] in ' \t' or s[-1] in ' \t':
         return False
     return all(0x21 <= ord(c) <= 0x7E or c in ' \t' for c in s)
+
+
+# bypass（素通し）扱いにする文字種
+_BYPASS_CTYPES = frozenset({
+    CharType.SYMBOL,
+    CharType.SYMBOL_CLOSE,
+    CharType.SYMBOL_OPEN,
+    CharType.SYMBOL_STOP,
+    CharType.SYMBOL_PAUSE,
+})
 
 
 def _load_single_kanji_dict(path: str) -> Dict[str, Dict[str, str]]:
@@ -380,12 +390,18 @@ class Predictor:
 
         char_idx = 0
         for val, orig_idx, ctype in units_info:
+            # 英数字ブロック、または記号類は bypass 扱い
             is_ascii_bypass = (ctype == 'ALPHA' or ctype == 'NUM') and _is_ascii_printable_block(val)
+            is_symbol_bypass = ctype in _BYPASS_CTYPES
+
             for i, c in enumerate(val):
                 source_seq.append((c, orig_idx + i, ctype))
                 if is_ascii_bypass:
                     bypass_indices.add(char_idx)
                     ascii_overrides[char_idx] = val if i == 0 else LABEL_CONTINUE
+                elif is_symbol_bypass:
+                    bypass_indices.add(char_idx)
+                    ascii_overrides[char_idx] = c  # 記号は1文字ずつそのまま
                 char_idx += 1
 
         dict_overrides: Dict[int, str] = {}
@@ -580,7 +596,7 @@ class Predictor:
             is_applied = True
             decision = DecisionSource.FALLBACK_REPEAT
 
-        if not is_applied and ctype != 'SYMBOL':
+        if not is_applied and not ctype.startswith('SYMBOL'):
             new_last_fallback = ""
 
         return new_label, new_last_fallback, is_applied, decision

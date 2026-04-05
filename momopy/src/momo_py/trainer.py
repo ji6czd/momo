@@ -25,7 +25,7 @@ KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
 # ラベルを '_'（LABEL_SKIP）にして素通しする文字種
 _SKIP_CTYPES = frozenset({
     CharType.ALPHA,
-    CharType.NUM,
+    CharType.NUMERIC,
     CharType.SYMBOL,
     CharType.SYMBOL_CLOSE,
     CharType.SYMBOL_OPEN,
@@ -114,19 +114,17 @@ def _check_alignment_anomalies(target_chars: str, ctype: str, r_label: str, orig
 # ==========================================
 # 🌟 3. TSV行の生成（フォーマッタ）
 # ==========================================
-def _create_biose_rows(target_chars: str, ctype: str, r_label: str, orig_idx: int) -> List[str]:
-    """1ブロック分の文字列とラベルから、BIOSEタグ付きのTSV行リストを生成する"""
+def _create_tsv_rows(target_chars: str, ctype: str, r_label: str, orig_idx: int) -> List[str]:
+    """1ブロック分の文字列とラベルから、TSV行リストを生成する"""
     is_skip_block = ctype in _SKIP_CTYPES
 
     rows = []
-    block_len = len(target_chars)
     for i, char in enumerate(target_chars):
         if is_skip_block:
             r_val = LABEL_SKIP
         else:
             r_val = r_label if i == 0 else LABEL_CONTINUE
-        tag = "S" if block_len == 1 else ("B" if i == 0 else ("E" if i == block_len - 1 else "I"))
-        rows.append(f"{char}\t{r_val}\t{ctype}\t{tag}\t{orig_idx + i}")
+        rows.append(f"{char}\t{r_val}\t{ctype}\t{orig_idx + i}")
     return rows
 
 
@@ -174,7 +172,7 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
         target_chars, orig_idx, ctype = raw_units_info[raw_ptr]
         _check_alignment_anomalies(target_chars, ctype, r_label, orig_idx, label_idx, line_num, stats)
 
-        rows = _create_biose_rows(target_chars, ctype, r_label, orig_idx)
+        rows = _create_tsv_rows(target_chars, ctype, r_label, orig_idx)
         tsv_rows.extend(rows)
         raw_ptr += 1
 
@@ -195,7 +193,7 @@ def create_data(rawdata: str, tsvdata: str) -> None:
     with open(rawdata, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    all_tsv = ["#原文\t読み\t文字種\tタグ\tOrigIdx"]
+    all_tsv = ["#原文\t読み\t文字種\tOrigIdx"]
     success = 0
     for i, line in enumerate(lines, 1):
         if not line.strip() or line.startswith('#'): continue
@@ -263,7 +261,7 @@ def train(tsvdata: str) -> None:
 
     for sentence in sentences:
         source_seq: List[SourceEntry] = [
-            (p[0], int(p[4]) if len(p) > 4 and p[4].lstrip('-').isdigit() else idx, p[2])
+            (p[0], int(p[3]) if len(p) > 3 and p[3].lstrip('-').isdigit() else idx, p[2])
             for idx, p in enumerate(sentence)
         ]
         raw_labels = [p[1] for p in sentence]

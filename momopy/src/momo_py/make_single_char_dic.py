@@ -39,6 +39,12 @@ def makedic(tsv_file: str, dic_file: str) -> None:
     except IOError as e:
         print(f"Error: An I/O error occurred while writing to '{dic_file}': {e}")
 
-if __name__ == "__main__":
+def main():
+    if len(sys.argv) != 3:
+        print("Usage: python make_single_char_dic.py <input_tsv_file> <output_json_file>")
+        sys.exit(1)
     makedic(sys.argv[1], sys.argv[2])
-    
+
+
+if __name__ == "__main__":
+    main()

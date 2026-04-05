@@ -27,8 +27,8 @@ _JAPANESE_NUMERIC_CHARS = frozenset("〇一二三四五六七八九")
 _KURAI_CHARS = frozenset("十百千万億兆")
 
 # 記号サブカテゴリ
-_CLOSE_SYMBOLS = frozenset('」』）】〕｝〉》"\'')
-_OPEN_SYMBOLS  = frozenset('「『（【〔｛〈《')
+_CLOSE_SYMBOLS = frozenset('」』)）】〕}｝〉》"\'')
+_OPEN_SYMBOLS  = frozenset('「『(（【〔{｛〈《')
 _STOP_SYMBOLS  = frozenset('。！？.!?')
 _PAUSE_SYMBOLS = frozenset('、・,')
 

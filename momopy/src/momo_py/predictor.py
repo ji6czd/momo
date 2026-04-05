@@ -15,14 +15,6 @@ from .features import get_units, compute_source_features, SourceEntry, LABEL_CON
 from .utils import split_on_unescaped_slash, CharType
 
 
-def _is_ascii_printable_block(s: str) -> bool:
-    """ASCII印字文字（0x21-0x7E）とスペース/タブのみで構成され、
-    先頭・末尾がスペース/タブでないか判定する。"""
-    if not s or s[0] in ' \t' or s[-1] in ' \t':
-        return False
-    return all(0x21 <= ord(c) <= 0x7E or c in ' \t' for c in s)
-
-
 # bypass（素通し）扱いにする文字種
 _BYPASS_CTYPES = frozenset({
     CharType.SYMBOL,
@@ -466,7 +458,7 @@ class Predictor:
         char_idx = 0
         for val, orig_idx, ctype in units_info:
             # 英数字ブロック、または記号類は bypass 扱い
-            is_ascii_bypass = (ctype == 'ALPHA' or ctype == 'NUM') and _is_ascii_printable_block(val)
+            is_ascii_bypass = (ctype == 'ALPHA')
             is_symbol_bypass = ctype in _BYPASS_CTYPES
 
             for i, c in enumerate(val):
@@ -614,6 +606,13 @@ class Predictor:
                             decision = DecisionSource.LR_LOW
 
                 clean_label = label
+
+                # NUMERIC型がSKIP/CONTINUEになった場合、元の文字を素通し
+                if clean_label in (LABEL_SKIP, LABEL_CONTINUE) and ctype == CharType.NUMERIC:
+                    clean_label = char
+                    confidence = 0.0
+                    decision = DecisionSource.FALLBACK_ORPHAN
+
                 has_split = (boundary_labels[i] == "1")
 
             refined_labels.append(clean_label)

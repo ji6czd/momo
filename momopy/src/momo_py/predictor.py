@@ -8,11 +8,10 @@ from typing import List, Tuple, Set, Dict, Optional, Any
 
 import joblib
 import numpy as np
-from sklearn.svm import LinearSVC
 from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
 
-from .features import get_units, get_char_type, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
+from .features import get_units, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
 from .utils import split_on_unescaped_slash, CharType
 
 
@@ -86,6 +85,7 @@ class PredictorConfig:
             漢数字の JAPANESE_NUMERIC については常に計算する。
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
+        explain_top_n: トレース時に表示する特徴量寄与度の上位件数（0=無効）
     """
     model_path: str
     single_kanji_dict_path: Optional[str] = None
@@ -93,6 +93,7 @@ class PredictorConfig:
     compute_confidence: bool = True
     confidence_threshold: float = 0.3
     numeric_confidence_threshold: float = 0.5
+    explain_top_n: int = 8
 
 
 # ==========================================
@@ -120,6 +121,7 @@ _ANSI = {
     DecisionSource.BYPASS:           "\033[90m",   # グレー
 }
 _ANSI_RESET = "\033[0m"
+_ANSI_DIM   = "\033[2m"
 
 
 def _kurai_fallback(char: str, left_char: str, left_ctype: str, right_ctype: str) -> str:
@@ -210,6 +212,9 @@ class PredictionResult:
     kana_to_src_index: List[int]
     src_to_kana_index: List[List[int]]
     decision_sources: List[str] = field(default_factory=list)
+    # 各ソース文字位置に対する特徴量寄与度リスト [(特徴量名, 寄与度), ...]
+    # explain_top_n=0 のときは空リスト
+    feature_contributions: List[List[Tuple[str, float]]] = field(default_factory=list)
 
     def to_json(self) -> str:
         text_safe = json.dumps(self.source_text, ensure_ascii=False)
@@ -273,8 +278,17 @@ class PredictionResult:
 
             rows.append(line)
 
-        return "\n".join(rows)
+            # 特徴量寄与度の表示
+            if self.feature_contributions and src_i < len(self.feature_contributions):
+                contribs = self.feature_contributions[src_i]
+                if contribs:
+                    for feat, score in contribs:
+                        contrib_line = f"      {feat:<38s} {score:+.4f}"
+                        if use_color:
+                            contrib_line = _ANSI_DIM + contrib_line + _ANSI_RESET
+                        rows.append(contrib_line)
 
+        return "\n".join(rows)
 
 def _confidence_bar(conf: float, width: int = 12) -> str:
     filled = round(conf * width)
@@ -334,6 +348,11 @@ class Predictor:
         self._vectorizer_boundary = bundle.vectorizer_boundary
         self._model_boundary      = bundle.model_boundary
 
+        # 逆引き辞書をキャッシュ（explain用）
+        self._vocab_inv: Dict[int, str] = {
+            v: k for k, v in self._vectorizer_read.vocabulary_.items()
+        }
+
         # フォールバック辞書のロード
         self._single_kanji_dict: Dict[str, Dict[str, str]] = {}
         if config.single_kanji_dict_path:
@@ -352,6 +371,47 @@ class Predictor:
     def get_version_info(self) -> dict | None:
         return self._version_info
 
+    # ==========================================
+    # 🌟 特徴量寄与度の計算
+    # ==========================================
+    def _explain_position(
+        self,
+        src_features: List[dict],
+        i: int,
+        label: str,
+    ) -> List[Tuple[str, float]]:
+        """i番目の文字について、予測ラベルへの特徴量寄与度上位を返す。
+
+        寄与度 = 特徴量の値 × そのラベルに対応する重み係数
+        正の値はそのラベルを支持し、負の値は抑制することを意味する。
+        """
+        top_n = self._config.explain_top_n
+        if top_n <= 0:
+            return []
+
+        idx = np.searchsorted(self._read_classes, label)
+        if idx >= len(self._read_classes) or self._read_classes[idx] != label:
+            return []
+
+        X = self._vectorizer_read.transform([src_features[i]])
+        # そのラベルの重みベクトルを取得
+        coef_for_label = np.asarray(
+            self._coef_read_sparse[idx].todense()
+        ).flatten()
+
+        # 寄与度 = 特徴量値 × 重み（特徴量値は0/1なので実質的に重みそのもの）
+        contrib = X.toarray().flatten() * coef_for_label
+
+        # 上位top_n件（寄与度の絶対値が大きい順）
+        nonzero_idx = np.nonzero(contrib)[0]
+        if len(nonzero_idx) == 0:
+            return []
+
+        sorted_idx = nonzero_idx[np.argsort(contrib[nonzero_idx])[::-1]][:top_n]
+        return [
+            (self._vocab_inv.get(j, f"feat_{j}"), float(contrib[j]))
+            for j in sorted_idx
+        ]
 
     # ==========================================
     # 🌟 推論パイプライン（The Conductor）
@@ -364,7 +424,8 @@ class Predictor:
         if not source_seq:
             return PredictionResult(text, "", [], [], [[] for _ in text])
 
-        raw_labels, boundary_labels, decision_scores, boundary_proba = self._run_inference(source_seq)
+        raw_labels, boundary_labels, decision_scores, boundary_proba, src_features = \
+            self._run_inference(source_seq)
 
         refined_labels, raw_confidences, has_splits, decision_sources = self._refine_predictions(
             source_seq, raw_labels, boundary_labels,
@@ -372,9 +433,23 @@ class Predictor:
             bypass_indices, ascii_overrides, dict_overrides
         )
 
-        return self._assemble_result(
-            text, source_seq, refined_labels, raw_confidences, has_splits, bypass_indices, decision_sources
+        # 特徴量寄与度の計算（explain_top_n > 0 のときのみ）
+        feature_contributions: List[List[Tuple[str, float]]] = []
+        if self._config.explain_top_n > 0:
+            for i, label in enumerate(refined_labels):
+                if i in bypass_indices or label in (LABEL_CONTINUE, LABEL_SKIP):
+                    feature_contributions.append([])
+                else:
+                    feature_contributions.append(
+                        self._explain_position(src_features, i, label)
+                    )
+
+        result = self._assemble_result(
+            text, source_seq, refined_labels, raw_confidences, has_splits,
+            bypass_indices, decision_sources,
         )
+        result.feature_contributions = feature_contributions
+        return result
 
 
     # ==========================================
@@ -428,7 +503,7 @@ class Predictor:
     # ==========================================
     def _run_inference(
         self, source_seq: List[SourceEntry]
-    ) -> Tuple[List[str], List[str], np.ndarray, np.ndarray]:
+    ) -> Tuple[List[str], List[str], np.ndarray, np.ndarray, List[dict]]:
         """
         読みモデル（LinearSVC）と境界モデル（SGDClassifier）を推論する。
 
@@ -438,6 +513,7 @@ class Predictor:
             decision_scores : LinearSVC の decision_function 結果
                               shape=(n, n_classes) — sigmoidで確信度に変換して使う
             boundary_proba  : 境界の確率 shape=(n, 2)
+            src_features    : 特徴量辞書リスト（explain用）
         """
         src_features = compute_source_features(source_seq)
         X_read     = self._vectorizer_read.transform(src_features)
@@ -451,8 +527,9 @@ class Predictor:
         # 境界モデル（SGDClassifier）
         boundary_raw    = list(self._model_boundary.predict(X_boundary))
         boundary_labels = [str(b) for b in boundary_raw]
-        boundary_proba  = self._model_boundary.predict_proba(X_boundary)  # shape: (n, 2)
-        return raw_labels, boundary_labels, decision_scores, boundary_proba
+        boundary_proba  = self._model_boundary.predict_proba(X_boundary)
+
+        return raw_labels, boundary_labels, decision_scores, boundary_proba, src_features
 
     def _get_read_confidence(self, decision_scores: np.ndarray, label: str, i: int) -> float:
         """

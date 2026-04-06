@@ -99,7 +99,9 @@ class FT:
 
     TYPE_TRANSITION               = 0x60   # CharType×2
 
-    TYPE_TRI                      = 0x70   # CharType×3
+    TYPE_TRI_PREV2_PREV1_SELF     = 0x70   # CharType×3  (前2-前1-対象)
+    TYPE_TRI_PREV1_SELF_NEXT1     = 0x71   # CharType×3  (前1-対象-後1)
+    TYPE_TRI_SELF_NEXT1_NEXT2     = 0x72   # CharType×3  (対象-後1-後2)
 
     CHAR_SELF                     = 0x90   # char32_t×1
     CHAR_PREV1                    = 0x91
@@ -112,7 +114,9 @@ class FT:
     BIGRAM_SELF_NEXT1             = 0xA2
     BIGRAM_NEXT1_NEXT2            = 0xA3
 
-    TRIGRAM                       = 0xB0   # char32_t×3
+    TRIGRAM_PREV2_PREV1_SELF      = 0xB0   # char32_t×3  (前2-前1-対象)
+    TRIGRAM_PREV1_SELF_NEXT1      = 0xB1   # char32_t×3  (前1-対象-後1)
+    TRIGRAM_SELF_NEXT1_NEXT2      = 0xB2   # char32_t×3  (対象-後1-後2)
 
     KANJI_RUN_LEN                 = 0xC0   # uint8
     JAPANESE_NUMERIC_RUN_LEN      = 0xC1
@@ -177,14 +181,20 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
         return FT.PREV_JAPANESE_NUMERIC_RUN_LEN, [], [], _RUN_LEN_MAP[m.group(1)]
 
     # --- type_tri （CharType×3）---
-    m = re.fullmatch(r'type_tri=(.+)->(.+)->(.+)', key)
-    if m:
-        # Python のキー形式は "type_tri=T-T-T"（'-' 区切り）
-        pass
-    m = re.fullmatch(r'type_tri=(.+)-(.+)-(.+)', key)
+    m = re.fullmatch(r'type_tri_p2p1s=(.+)-(.+)-(.+)', key)
     if m:
         cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
-        return FT.TYPE_TRI, cts, [], None
+        return FT.TYPE_TRI_PREV2_PREV1_SELF, cts, [], None
+
+    m = re.fullmatch(r'type_tri_p1sn1=(.+)-(.+)-(.+)', key)
+    if m:
+        cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
+        return FT.TYPE_TRI_PREV1_SELF_NEXT1, cts, [], None
+
+    m = re.fullmatch(r'type_tri_sn1n2=(.+)-(.+)-(.+)', key)
+    if m:
+        cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
+        return FT.TYPE_TRI_SELF_NEXT1_NEXT2, cts, [], None
 
     # --- type_transition （CharType×2）---
     m = re.fullmatch(r'type_transition=(.+)->(.+)', key)
@@ -210,10 +220,20 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
         return FT.TYPE_NEXT2, [CHARTYPE_TO_INT[m.group(1)]], [], None
 
     # --- trigram（char32_t×3）---
-    m = re.fullmatch(r'tri=(.)(.)(.)', key)
+    m = re.fullmatch(r'tri_p2p1s=(.)(.)(.)', key)
     if m:
         cps = [ord(m.group(i)) for i in (1, 2, 3)]
-        return FT.TRIGRAM, [], cps, None
+        return FT.TRIGRAM_PREV2_PREV1_SELF, [], cps, None
+
+    m = re.fullmatch(r'tri_p1sn1=(.)(.)(.)', key)
+    if m:
+        cps = [ord(m.group(i)) for i in (1, 2, 3)]
+        return FT.TRIGRAM_PREV1_SELF_NEXT1, [], cps, None
+
+    m = re.fullmatch(r'tri_sn1n2=(.)(.)(.)', key)
+    if m:
+        cps = [ord(m.group(i)) for i in (1, 2, 3)]
+        return FT.TRIGRAM_SELF_NEXT1_NEXT2, [], cps, None
 
     # --- bigram（char32_t×2）---
     m = re.fullmatch(r'-1:bi=(.)(.)', key)

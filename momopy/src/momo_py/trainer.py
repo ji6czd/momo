@@ -224,7 +224,7 @@ def _split_labels(raw_labels: List[str]) -> tuple:
 # ==========================================
 # 🌟 7. train()
 # ==========================================
-def train(tsvdata: str) -> None:
+def train(tsvdata: str, window: int = 5) -> None:
     """
     TSVから読みモデル（LinearSVC）と境界モデル（SGDClassifier）を学習し、
     1つのZIPにまとめる。
@@ -266,7 +266,7 @@ def train(tsvdata: str) -> None:
         ]
         raw_labels = [p[1] for p in sentence]
 
-        features = compute_source_features(source_seq)
+        features = compute_source_features(source_seq, window=window)
         X_dicts.extend(features)
 
         y_read, y_boundary = _split_labels(raw_labels)
@@ -346,6 +346,7 @@ def train(tsvdata: str) -> None:
         "trained_at":   datetime.now(timezone.utc).isoformat(),
         "model_bundle": bundle_name,
         "algorithm":    "LinearSVC+SGD",
+        "window_size":  window,
     }
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.write(bundle_path, bundle_name)

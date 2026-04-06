@@ -126,7 +126,8 @@ def main():
     
     trainer_parser = subparsers.add_parser("train")
     trainer_parser.add_argument("--tsv", required=True)
-    
+    trainer_parser.add_argument("--window", type=int, default=5, choices=[3, 5],
+                            help="特徴量ウィンドウサイズ（3または5、デフォルト: 5）")
     args = parser.parse_args()
 
     if args.command is None:
@@ -142,7 +143,7 @@ def main():
             sys.exit(1)
             
     elif args.command == "train":
-        train(args.tsv)
+        train(tsvdata=args.tsv, window=args.window)
         
     elif args.command == "predict":
         # --trace なしのときは explain_top_n=0 にして計算を省略

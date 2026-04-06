@@ -7,7 +7,6 @@
 // ============================================================
 
 static bool is_kurai_char(char32_t cp) {
-    // 十百千万億兆
     static const char32_t kurai[] = {
         U'十', U'百', U'千', U'万', U'億', U'兆',
     };
@@ -19,14 +18,11 @@ static bool is_kurai_char(char32_t cp) {
 
 // ============================================================
 // テキスト → SourceEntry 列
-// Python側の get_units()（推論時パス）+ _preprocess_text() と対応
-// 推論時は英数字ブロックをまとめず1文字ずつ処理する
 // ============================================================
 
 std::vector<SourceEntry> to_source_seq(const std::vector<char32_t>& text) {
     const int n = static_cast<int>(text.size());
 
-    // まず全文字の基本 ctype を確定
     std::vector<CharType> ctypes(n);
     for (int i = 0; i < n; ++i) {
         ctypes[i] = get_char_type(text[i]);
@@ -39,7 +35,7 @@ std::vector<SourceEntry> to_source_seq(const std::vector<char32_t>& text) {
             ctypes[i] = CharType::JAPANESE_NUMERIC;
         }
     }
-    // 右→左パス（「十一」の「十」など）
+    // 右→左パス
     for (int i = n - 2; i >= 0; --i) {
         if (is_kurai_char(text[i])
             && ctypes[i + 1] == CharType::JAPANESE_NUMERIC) {
@@ -47,8 +43,6 @@ std::vector<SourceEntry> to_source_seq(const std::vector<char32_t>& text) {
         }
     }
 
-    // SourceEntry 列を構築
-    // orig_idx はコードポイント列中のインデックス（バイト位置ではない）
     std::vector<SourceEntry> seq;
     seq.reserve(n);
     for (int i = 0; i < n; ++i) {
@@ -59,10 +53,8 @@ std::vector<SourceEntry> to_source_seq(const std::vector<char32_t>& text) {
 
 // ============================================================
 // 特徴量計算
-// Python側の compute_source_features() と対応
 // ============================================================
 
-// 漢字連続長を計算するヘルパー
 static int kanji_run_length(const std::vector<SourceEntry>& seq, int i) {
     const int n = static_cast<int>(seq.size());
     int run = 1;
@@ -71,7 +63,6 @@ static int kanji_run_length(const std::vector<SourceEntry>& seq, int i) {
     return run;
 }
 
-// 漢数字連続長を計算するヘルパー
 static int numeric_run_length(const std::vector<SourceEntry>& seq, int i) {
     const int n = static_cast<int>(seq.size());
     int run = 1;
@@ -80,97 +71,71 @@ static int numeric_run_length(const std::vector<SourceEntry>& seq, int i) {
     return run;
 }
 
-// run_len を 1〜4 または 5（5+相当）にクランプ
 static uint8_t clamp_run(int run) {
     return static_cast<uint8_t>(run <= 4 ? run : 5);
 }
 
-// FeatureKey を生成するヘルパー群
-static FeatureKey make_bias()   { return {FeatureType::BIAS}; }
-static FeatureKey make_bos()    { return {FeatureType::BOS}; }
-static FeatureKey make_eos()    { return {FeatureType::EOS}; }
+static FeatureKey make_bias()            { return {FeatureType::BIAS}; }
+static FeatureKey make_bos()             { return {FeatureType::BOS}; }
+static FeatureKey make_eos()             { return {FeatureType::EOS}; }
 static FeatureKey make_kanji_pos_first() { return {FeatureType::KANJI_POS_FIRST}; }
 
 static FeatureKey make_type(FeatureType ft, CharType ct) {
-    FeatureKey k;
-    k.type  = ft;
-    k.ct[0] = ct;
-    return k;
+    FeatureKey k; k.type = ft; k.ct[0] = ct; return k;
 }
 
 static FeatureKey make_type_transition(CharType prev, CharType cur) {
     FeatureKey k;
     k.type  = FeatureType::TYPE_TRANSITION;
-    k.ct[0] = prev;
-    k.ct[1] = cur;
+    k.ct[0] = prev; k.ct[1] = cur;
     return k;
 }
 
-static FeatureKey make_type_tri(CharType p, CharType c, CharType n) {
+static FeatureKey make_type_tri(FeatureType ft, CharType a, CharType b, CharType c) {
     FeatureKey k;
-    k.type  = FeatureType::TYPE_TRI;
-    k.ct[0] = p;
-    k.ct[1] = c;
-    k.ct[2] = n;
+    k.type  = ft;
+    k.ct[0] = a; k.ct[1] = b; k.ct[2] = c;
     return k;
 }
 
 static FeatureKey make_char(FeatureType ft, char32_t cp) {
-    FeatureKey k;
-    k.type  = ft;
-    k.cp[0] = cp;
-    return k;
+    FeatureKey k; k.type = ft; k.cp[0] = cp; return k;
 }
 
 static FeatureKey make_bigram(FeatureType ft, char32_t a, char32_t b) {
-    FeatureKey k;
-    k.type  = ft;
-    k.cp[0] = a;
-    k.cp[1] = b;
-    return k;
+    FeatureKey k; k.type = ft; k.cp[0] = a; k.cp[1] = b; return k;
 }
 
-static FeatureKey make_trigram(char32_t a, char32_t b, char32_t c) {
-    FeatureKey k;
-    k.type  = FeatureType::TRIGRAM;
-    k.cp[0] = a;
-    k.cp[1] = b;
-    k.cp[2] = c;
-    return k;
+static FeatureKey make_trigram(FeatureType ft, char32_t a, char32_t b, char32_t c) {
+    FeatureKey k; k.type = ft; k.cp[0] = a; k.cp[1] = b; k.cp[2] = c; return k;
 }
 
 static FeatureKey make_run(FeatureType ft, uint8_t run) {
-    FeatureKey k;
-    k.type  = ft;
-    k.u8val = run;
-    return k;
+    FeatureKey k; k.type = ft; k.u8val = run; return k;
 }
 
-// 本体
 std::vector<std::vector<FeatureKey>>
 compute_source_features(const std::vector<SourceEntry>& seq) {
     const int n = static_cast<int>(seq.size());
     std::vector<std::vector<FeatureKey>> result(n);
 
     for (int i = 0; i < n; ++i) {
-        const char32_t  c     = seq[i].cp;
-        const CharType  ctype = seq[i].ctype;
+        const char32_t c     = seq[i].cp;
+        const CharType ctype = seq[i].ctype;
 
-        const char32_t  prev_c     = (i > 0)     ? seq[i-1].cp    : 0;
-        const CharType  prev_ctype = (i > 0)     ? seq[i-1].ctype : CharType::OTHER;
-        const char32_t  prev2_c    = (i > 1)     ? seq[i-2].cp    : 0;
-        const CharType  prev2_ctype= (i > 1)     ? seq[i-2].ctype : CharType::OTHER;
-        const char32_t  next_c     = (i < n-1)   ? seq[i+1].cp    : 0;
-        const CharType  next_ctype = (i < n-1)   ? seq[i+1].ctype : CharType::OTHER;
-        const char32_t  next2_c    = (i < n-2)   ? seq[i+2].cp    : 0;
-        const CharType  next2_ctype= (i < n-2)   ? seq[i+2].ctype : CharType::OTHER;
+        const char32_t  prev_c      = (i > 0)   ? seq[i-1].cp    : 0;
+        const CharType  prev_ctype  = (i > 0)   ? seq[i-1].ctype : CharType::OTHER;
+        const char32_t  prev2_c     = (i > 1)   ? seq[i-2].cp    : 0;
+        const CharType  prev2_ctype = (i > 1)   ? seq[i-2].ctype : CharType::OTHER;
+        const char32_t  next_c      = (i < n-1) ? seq[i+1].cp    : 0;
+        const CharType  next_ctype  = (i < n-1) ? seq[i+1].ctype : CharType::OTHER;
+        const char32_t  next2_c     = (i < n-2) ? seq[i+2].cp    : 0;
+        const CharType  next2_ctype = (i < n-2) ? seq[i+2].ctype : CharType::OTHER;
 
         auto& feats = result[i];
 
-        // bias
+        // bias, char=X, type=T
         feats.push_back(make_bias());
-
-        // char=X, type=T
         feats.push_back(make_char(FeatureType::CHAR_SELF, c));
         feats.push_back(make_type(FeatureType::TYPE_SELF, ctype));
 
@@ -178,13 +143,17 @@ compute_source_features(const std::vector<SourceEntry>& seq) {
             feats.push_back(make_char(FeatureType::CHAR_PREV1, prev_c));
             feats.push_back(make_type(FeatureType::TYPE_PREV1, prev_ctype));
             feats.push_back(make_bigram(FeatureType::BIGRAM_PREV1_SELF, prev_c, c));
-
             feats.push_back(make_type_transition(prev_ctype, ctype));
 
             if (i > 1) {
                 feats.push_back(make_char(FeatureType::CHAR_PREV2, prev2_c));
                 feats.push_back(make_type(FeatureType::TYPE_PREV2, prev2_ctype));
                 feats.push_back(make_bigram(FeatureType::BIGRAM_PREV2_PREV1, prev2_c, prev_c));
+                // trigram: 前2-前1-対象
+                feats.push_back(make_trigram(FeatureType::TRIGRAM_PREV2_PREV1_SELF,
+                                             prev2_c, prev_c, c));
+                feats.push_back(make_type_tri(FeatureType::TYPE_TRI_PREV2_PREV1_SELF,
+                                              prev2_ctype, prev_ctype, ctype));
             }
         } else {
             feats.push_back(make_bos());
@@ -199,15 +168,22 @@ compute_source_features(const std::vector<SourceEntry>& seq) {
                 feats.push_back(make_char(FeatureType::CHAR_NEXT2, next2_c));
                 feats.push_back(make_type(FeatureType::TYPE_NEXT2, next2_ctype));
                 feats.push_back(make_bigram(FeatureType::BIGRAM_NEXT1_NEXT2, next_c, next2_c));
+                // trigram: 対象-後1-後2
+                feats.push_back(make_trigram(FeatureType::TRIGRAM_SELF_NEXT1_NEXT2,
+                                             c, next_c, next2_c));
+                feats.push_back(make_type_tri(FeatureType::TYPE_TRI_SELF_NEXT1_NEXT2,
+                                              ctype, next_ctype, next2_ctype));
             }
         } else {
             feats.push_back(make_eos());
         }
 
-        // trigram, type_tri（前後1文字がある場合のみ）
+        // trigram: 前1-対象-後1
         if (i > 0 && i < n - 1) {
-            feats.push_back(make_trigram(prev_c, c, next_c));
-            feats.push_back(make_type_tri(prev_ctype, ctype, next_ctype));
+            feats.push_back(make_trigram(FeatureType::TRIGRAM_PREV1_SELF_NEXT1,
+                                         prev_c, c, next_c));
+            feats.push_back(make_type_tri(FeatureType::TYPE_TRI_PREV1_SELF_NEXT1,
+                                          prev_ctype, ctype, next_ctype));
         }
 
         // 漢字連続長
@@ -215,19 +191,17 @@ compute_source_features(const std::vector<SourceEntry>& seq) {
             const int run = kanji_run_length(seq, i);
             feats.push_back(make_run(FeatureType::KANJI_RUN_LEN, clamp_run(run)));
 
-            // 漢字ランの先頭
             if (i == 0 || seq[i-1].ctype != CharType::KANJI) {
                 feats.push_back(make_kanji_pos_first());
             }
 
-            // 直前の漢数字連続長
             if (i > 0 && seq[i-1].ctype == CharType::JAPANESE_NUMERIC) {
                 int num_run = 0;
                 for (int j = i - 1; j >= 0 && seq[j].ctype == CharType::JAPANESE_NUMERIC; --j) {
                     ++num_run;
                 }
-                feats.push_back(make_run(
-                    FeatureType::PREV_JAPANESE_NUMERIC_RUN_LEN, clamp_run(num_run)));
+                feats.push_back(make_run(FeatureType::PREV_JAPANESE_NUMERIC_RUN_LEN,
+                                         clamp_run(num_run)));
             }
         }
 

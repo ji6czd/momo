@@ -21,12 +21,9 @@ if(MSVC)
     add_compile_options("/utf-8" "/W4")
 endif()
 
-
 add_subdirectory(src)
-add_subdirectory(crfsuite)
-add_subdirectory(liblbfgs)
 
 # main application
 add_executable(${APP_NAME} main.cpp)
 target_include_directories(${APP_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/CLI11/include)
-target_link_libraries(${APP_NAME} PRIVATE ${PROJECT_NAME}-lib crfsuite-lib lbfgs-lib)
+target_link_libraries(${APP_NAME} PRIVATE ${PROJECT_NAME}-lib)

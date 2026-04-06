@@ -19,7 +19,7 @@ from .features import (
 )
 from .utils import split_on_unescaped_slash, CharType
 from .predictor import LRModelBundle
-
+from .exporter import export
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
 
 # ラベルを '_'（LABEL_SKIP）にして素通しする文字種
@@ -328,6 +328,7 @@ def train(tsvdata: str) -> None:
     bundle_name = os.path.basename(base) + "_bundle.pkl"
     bundle_path = os.path.join(os.path.dirname(tsvdata), bundle_name)
     zip_path    = base + ".zip"
+    mbm_path    = base + ".mbm"
 
     bundle = LRModelBundle(
         vectorizer_read     = vect_read,
@@ -356,3 +357,5 @@ def train(tsvdata: str) -> None:
     print(f"\n📦 ZIPパッケージ作成完了: {zip_path}")
     print(f"   ├ {bundle_name}")
     print(f"   └ version_info.json")
+    export(zip_path, mbm_path)
+    print(f"量子化モデル (MBM) エクスポート完了: {mbm_path}")

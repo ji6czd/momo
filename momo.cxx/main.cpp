@@ -2,37 +2,41 @@
 #include <string>
 
 #include "CLI/CLI.hpp"
-#include "predictor.h"
-#include "trainer.h"
-#include "utils.h"
+#include "loader.hpp"
+#include "predictor.hpp"
 
 namespace momo {
 
 int predict(const std::string& model_file_prefix, bool compute_confidence = false) {
-  PredictorConfig cfg;
-  cfg.path_read       = model_file_prefix + "_read.crfsuite";
-  cfg.path_boundary   = model_file_prefix + "_boundary.crfsuite";
-  cfg.compute_confidence = compute_confidence;
-  Predictor prd(cfg);
+  // モデル読み込み
+  MomoModel model;
+  try {
+    model = load_model(model_file_prefix + ".mbm");
+  } catch (const std::exception& e) {
+    std::cerr << "モデル読み込みエラー: " << e.what() << "\n";
+    return 1;
+  }
 
+  std::cerr << "モデル読み込み完了: " << model.n_classes << " クラス, " << model.n_features << " 特徴量\n";
+
+  // 予測器を構築
+  Predictor predictor(std::move(model));
+
+  // 標準入力から1行ずつ処理
   std::string line;
   while (std::getline(std::cin, line)) {
-    if (line.empty()) continue;
-    PredictionResult res = prd.predict(line);
-    std::cout << res.kana_text << std::endl;
-    if (compute_confidence) {
-      for (auto c : res.confidences) {
-        std::cout << c << ", ";
-      }
-      std::cout << std::endl;
+    if (line.empty()) {
+      std::cout << "\n";
+      continue;
+    }
+    try {
+      const PredictionResult result = predictor.predict(line);
+      std::cout << result.kana_text << "\n";
+    } catch (const std::exception& e) {
+      std::cerr << "予測エラー: " << e.what() << "\n";
     }
   }
-  return 0;
-}
 
-int train(const std::string& tsv_file, bool transitions = false) {
-  Trainer trainer;
-  trainer.train(tsv_file, transitions);
   return 0;
 }
 
@@ -40,25 +44,10 @@ int train(const std::string& tsv_file, bool transitions = false) {
 
 int main(int argc, char* argv[]) {
   CLI::App app{"Momo - Japanese Braille Predictor"};
-  app.require_subcommand(1);
-
-  // --- predict サブコマンド ---
-  CLI::App* predict_cmd = app.add_subcommand("predict", "Run the predictor on standard input");
   std::string model_file_prefix;
-  predict_cmd->add_option("--model", model_file_prefix, "Path prefix for model files")
-      ->default_val("basic_data");
+  app.add_option("--model", model_file_prefix, "Path prefix for model files")->default_val("basic_data");
   bool compute_confidence = false;
-  predict_cmd->add_flag("--confidence", compute_confidence,
-                        "Compute confidence scores (marginal probabilities)");
-
-  // --- train サブコマンド ---
-  CLI::App* train_cmd = app.add_subcommand("train", "Train a new model from TSV data");
-  std::string tsv_file;
-  train_cmd->add_option("--tsv", tsv_file, "Path to training data in TSV format")
-      ->default_val("basic_data.tsv");
-  bool transitions = false;
-  train_cmd->add_flag("--transitions", transitions,
-                      "Use transition features (slower inference, potentially higher accuracy)");
+  app.add_flag("--confidence", compute_confidence, "Compute confidence scores (marginal probabilities)");
 
   try {
     app.parse(argc, argv);
@@ -66,11 +55,6 @@ int main(int argc, char* argv[]) {
     return app.exit(e);
   }
 
-  if (predict_cmd->parsed()) {
-    return momo::predict(model_file_prefix, compute_confidence);
-  } else if (train_cmd->parsed()) {
-    return momo::train(tsv_file, transitions);
-  }
-
+  return momo::predict(model_file_prefix, compute_confidence);
   return 0;
 }

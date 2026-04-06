@@ -19,6 +19,9 @@ class CharType(str, Enum):
     JAPANESE_NUMERIC = 'JAPANESE_NUMERIC'
     OTHER            = 'OTHER'
 
+    def __str__(self) -> str:
+        return self.value
+
 
 # 常に JAPANESE_NUMERIC となる漢数字
 _JAPANESE_NUMERIC_CHARS = frozenset("〇一二三四五六七八九")

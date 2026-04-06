@@ -63,7 +63,7 @@ class TestGetUnits:
         assert "きゃ" in chars
 
     def test_alphanumeric_block(self):
-        # 英数字の連続は1ブロックにまとめる
+        # 英数字の連続は1ブロックにまとめる（学習データ作成時の省略記法サポート）
         units = get_units("abc123")
         assert len(units) == 1
         assert units[0] == ("abc123", 0)

@@ -38,7 +38,9 @@ enum class FeatureType : uint8_t {
     TYPE_TRANSITION               = 0x60,   // type_transition=T->T  (前1→対象)
 
     // 0b01'11'xxxx  CharType×3
-    TYPE_TRI                      = 0x70,   // type_tri=T-T-T  (前1-対象-後1)
+    TYPE_TRI_PREV2_PREV1_SELF     = 0x70,   // type_tri=T-T-T  (前2-前1-対象)
+    TYPE_TRI_PREV1_SELF_NEXT1     = 0x71,   // type_tri=T-T-T  (前1-対象-後1)
+    TYPE_TRI_SELF_NEXT1_NEXT2     = 0x72,   // type_tri=T-T-T  (対象-後1-後2)
 
     // 0b10'01'xxxx  char32_t×1
     CHAR_SELF                     = 0x90,   // char=X
@@ -54,7 +56,9 @@ enum class FeatureType : uint8_t {
     BIGRAM_NEXT1_NEXT2            = 0xA3,   // +1:+2:bi=XY
 
     // 0b10'11'xxxx  char32_t×3
-    TRIGRAM                       = 0xB0,   // tri=XYZ  (前1-対象-後1)
+    TRIGRAM_PREV2_PREV1_SELF      = 0xB0,   // tri=XYZ  (前2-前1-対象)
+    TRIGRAM_PREV1_SELF_NEXT1      = 0xB1,   // tri=XYZ  (前1-対象-後1)
+    TRIGRAM_SELF_NEXT1_NEXT2      = 0xB2,   // tri=XYZ  (対象-後1-後2)
 
     // 0b11'00'xxxx  uint8×1
     KANJI_RUN_LEN                 = 0xC0,   // kanji_run_len=N
@@ -65,18 +69,18 @@ enum class FeatureType : uint8_t {
 // ペイロードの CharType 個数
 inline int feature_chartype_count(FeatureType ft) {
     const uint8_t v = static_cast<uint8_t>(ft);
-    if ((v & 0xC0) != 0x40) return 0;   // bit7-6 が 01 でなければ 0
-    return (v >> 4) & 0x03;              // bit5-4 が個数
+    if ((v & 0xC0) != 0x40) return 0;
+    return (v >> 4) & 0x03;
 }
 
 // ペイロードの char32_t 個数
 inline int feature_char32_count(FeatureType ft) {
     const uint8_t v = static_cast<uint8_t>(ft);
-    if ((v & 0xC0) != 0x80) return 0;   // bit7-6 が 10 でなければ 0
-    return (v >> 4) & 0x03;              // bit5-4 が個数
+    if ((v & 0xC0) != 0x80) return 0;
+    return (v >> 4) & 0x03;
 }
 
 // ペイロードが uint8×1 かどうか
 inline bool feature_is_uint8_payload(FeatureType ft) {
-    return (static_cast<uint8_t>(ft) & 0xC0) == 0xC0;  // bit7-6 が 11
+    return (static_cast<uint8_t>(ft) & 0xC0) == 0xC0;
 }

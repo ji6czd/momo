@@ -15,7 +15,7 @@ top_page = f"""
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neomomo</title>
+    <title>Momo - Japanese braille translator</title>
 </head>
 <body>
     <h1>自動点訳システムMomo</h1>
@@ -39,7 +39,7 @@ predict_page = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neomomo - 点訳結果</title>
+    <title>Momo - 点訳結果</title>
 </head>
 <body>
     <h1>点訳結果</h1>
@@ -65,7 +65,7 @@ translate_page = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neomomo - 点訳結果</title>
+    <title>Momo - 点訳結果</title>
 </head>
 <body>
     <h1>点訳結果</h1>
@@ -88,6 +88,9 @@ translate_page = """<!DOCTYPE html>
 model_file = "./dataset/basic_data.zip"
 custom_dic_file = "./dataset/custom_dictionary.tsv"
 def make_characters_table(res: PredictionResult) -> str:
+    '''
+    点訳結果の詳細を表示する。
+    '''
     characters_table = "<table border='1'><tr><th>元の文字</th>"
 
     for i, idx in enumerate(res.kana_to_src_index):
@@ -148,7 +151,6 @@ def shutdown_handler(signal_int: int, frame: FrameType) -> None:
 
 
 if __name__ == "__main__":
-    # Running application locally, outside of a Google Cloud Environment
 
     # handles Ctrl-C termination
     signal.signal(signal.SIGINT, shutdown_handler)

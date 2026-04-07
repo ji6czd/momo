@@ -31,10 +31,11 @@ public:
 private:
     MomoModel model_;
 
-    // 特徴量ID列 → 各クラスのスコアに加算（CSC形式でアクセス）
+    // 特徴量ID列 → 各クラスの生整数スコアに加算（CSC形式でアクセス）
+    // scale・intercept の適用は呼び出し側で行う
     void compute_read_scores(
         const std::vector<uint32_t>& feat_ids,
-        std::vector<float>&          scores) const;
+        std::vector<int32_t>&        scores) const;
 
     // 特徴量ID列 → 境界スコア（sigmoid変換前）
     float compute_boundary_score(

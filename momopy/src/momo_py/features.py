@@ -76,10 +76,17 @@ def get_units(text: str) -> List[Tuple[str, int, str]]:
     return units
 
 
-def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
+def compute_source_features(
+    source_seq: List[SourceEntry],
+    window: int = 5,
+) -> List[FeatureDict]:
     """
     ソース文字系列全体に対して、各文字の文脈特徴量を一括計算する。
     pycrfsuiteネイティブの { "feature_name=value": 1.0 } 形式で出力する。
+
+    window: 前後に参照する文字数。3 または 5 を指定する。
+      5 (デフォルト): 前後2文字まで参照（bigram×4, trigram×3）
+      3             : 前後1文字のみ参照（bigram×2, trigram×1）
     """
     result: List[FeatureDict] = []
     n = len(source_seq)
@@ -104,7 +111,7 @@ def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
             features[f'-1:char={prev_char}'] = 1.0
             features[f'-1:type={prev_ctype}'] = 1.0
             features[f'-1:bi={prev_char}{char}'] = 1.0
-            if i > 1:
+            if window >= 5 and i > 1:
                 features[f'-2:char={prev2_char}'] = 1.0
                 features[f'-2:type={prev2_ctype}'] = 1.0
                 features[f'-2:-1:bi={prev2_char}{prev_char}'] = 1.0
@@ -115,7 +122,7 @@ def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
             features[f'+1:char={next_char}'] = 1.0
             features[f'+1:type={next_ctype}'] = 1.0
             features[f'+1:bi={char}{next_char}'] = 1.0
-            if i < n - 2:
+            if window >= 5 and i < n - 2:
                 features[f'+2:char={next2_char}'] = 1.0
                 features[f'+2:type={next2_ctype}'] = 1.0
                 features[f'+1:+2:bi={next_char}{next2_char}'] = 1.0
@@ -125,11 +132,20 @@ def compute_source_features(source_seq: List[SourceEntry]) -> List[FeatureDict]:
         if i > 0:
             features[f'type_transition={prev_ctype}->{ctype}'] = 1.0
 
-        if i > 0 and i < n - 1:
-            features[f'tri={prev_char}{char}{next_char}'] = 1.0
+        # trigram: 前2-前1-対象（window=5 のみ）
+        if window >= 5 and i > 1:
+            features[f'tri_p2p1s={prev2_char}{prev_char}{char}'] = 1.0
+            features[f'type_tri_p2p1s={prev2_ctype}-{prev_ctype}-{ctype}'] = 1.0
 
+        # trigram: 前1-対象-後1
         if i > 0 and i < n - 1:
-            features[f'type_tri={prev_ctype}-{ctype}-{next_ctype}'] = 1.0
+            features[f'tri_p1sn1={prev_char}{char}{next_char}'] = 1.0
+            features[f'type_tri_p1sn1={prev_ctype}-{ctype}-{next_ctype}'] = 1.0
+
+        # trigram: 対象-後1-後2（window=5 のみ）
+        if window >= 5 and i < n - 2:
+            features[f'tri_sn1n2={char}{next_char}{next2_char}'] = 1.0
+            features[f'type_tri_sn1n2={ctype}-{next_ctype}-{next2_ctype}'] = 1.0
 
         if ctype == 'KANJI':
             run = 1

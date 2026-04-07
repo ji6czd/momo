@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 // ============================================================
 // バイナリ読み込みユーティリティ
@@ -21,8 +22,6 @@ static float    read_f32(std::FILE* fp) { float    v; read_exact(fp, &v, 4, "f32
 
 // ============================================================
 // CSR → CSC 変換
-// 入力: n_classes × n_features の CSR
-// 出力: n_features × n_classes の CSC（colptr, rowind, data）
 // ============================================================
 
 static void csr_to_csc(
@@ -37,21 +36,18 @@ static void csr_to_csc(
 {
     const uint32_t n_nonzero = static_cast<uint32_t>(csr_data.size());
 
-    // 各列（feature_id）の非ゼロ数を数える
     csc_colptr.assign(n_features + 1, 0);
     for (uint32_t idx = 0; idx < n_nonzero; ++idx) {
         ++csc_colptr[csr_indices[idx] + 1];
     }
-    // 累積和
     for (uint32_t f = 1; f <= n_features; ++f) {
         csc_colptr[f] += csc_colptr[f - 1];
     }
 
-    // rowind と data を埋める
     csc_rowind.resize(n_nonzero);
     csc_data.resize(n_nonzero);
 
-    std::vector<uint32_t> pos(csc_colptr.begin(), csc_colptr.end());  // 書き込み位置
+    std::vector<uint32_t> pos(csc_colptr.begin(), csc_colptr.end());
 
     for (uint32_t cls = 0; cls < n_classes; ++cls) {
         for (uint32_t j = csr_indptr[cls]; j < csr_indptr[cls + 1]; ++j) {
@@ -117,13 +113,17 @@ MomoModel load_model(const std::string& path) {
     model.n_classes  = read_u32(fp);
     model.n_features = read_u32(fp);
 
-    // --- 語彙テーブル ---
-    model.vocab.reserve(model.n_features);
+    // --- 語彙テーブル（ソート済み配列として構築）---
+    model.vocab.resize(model.n_features);
     for (uint32_t i = 0; i < model.n_features; ++i) {
-        FeatureKey     key        = read_feature_key(fp);
-        const uint32_t feature_id = read_u32(fp);
-        model.vocab.emplace(key, feature_id);
+        model.vocab[i].first  = read_feature_key(fp);
+        model.vocab[i].second = read_u32(fp);
     }
+    // FeatureKey の < 演算子でソート
+    std::sort(model.vocab.begin(), model.vocab.end(),
+              [](const VocabEntry& a, const VocabEntry& b) {
+                  return a.first < b.first;
+              });
 
     // --- 読みラベルテーブル ---
     model.read_classes.resize(model.n_classes);
@@ -150,7 +150,6 @@ MomoModel load_model(const std::string& path) {
     read_exact(fp, csr_data.data(),
                n_nonzero * sizeof(int8_t), "csr_data");
 
-    // CSR → CSC 変換（csr_* はここで解放）
     csr_to_csc(model.n_classes, model.n_features,
                csr_indptr, csr_indices, csr_data,
                model.csc_colptr, model.csc_rowind, model.csc_data);

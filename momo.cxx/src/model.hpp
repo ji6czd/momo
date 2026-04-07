@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <vector>
 #include <string>
-#include <unordered_map>
 #include "feature_type.hpp"
 #include "char_type.hpp"
 
@@ -25,42 +24,51 @@ struct FeatureKey {
         }
         return true;
     }
-};
 
-struct FeatureKeyHash {
-    std::size_t operator()(const FeatureKey& k) const noexcept {
-        std::size_t h = 2166136261u;
-        auto mix = [&](std::size_t v) {
-            h ^= v;
-            h *= 16777619u;
-        };
-        mix(static_cast<uint8_t>(k.type));
-        mix(k.u8val);
+    bool operator<(const FeatureKey& o) const noexcept {
+        if (type  != o.type)  return type  < o.type;
+        if (u8val != o.u8val) return u8val < o.u8val;
         for (int i = 0; i < 3; ++i) {
-            mix(static_cast<uint8_t>(k.ct[i]));
-            mix(static_cast<std::size_t>(k.cp[i]));
+            if (ct[i] != o.ct[i]) return ct[i] < o.ct[i];
+            if (cp[i] != o.cp[i]) return cp[i] < o.cp[i];
         }
-        return h;
+        return false;  // 等しい
     }
 };
 
-using VocabMap = std::unordered_map<FeatureKey, uint32_t, FeatureKeyHash>;
+// ソート済み配列によるルックアップ
+// unordered_map の代わりに使用することでメモリ使用量を削減する
+using VocabEntry = std::pair<FeatureKey, uint32_t>;
+using VocabVec   = std::vector<VocabEntry>;
+
+// 語彙テーブルから feature_id を検索する（バイナリサーチ）
+// 見つからない場合は n_features を返す
+inline uint32_t vocab_find(const VocabVec& vocab, const FeatureKey& key) {
+    const VocabEntry target{key, 0};
+    auto it = std::lower_bound(
+        vocab.begin(), vocab.end(), target,
+        [](const VocabEntry& a, const VocabEntry& b) {
+            return a.first < b.first;
+        });
+    if (it != vocab.end() && it->first == key) {
+        return it->second;
+    }
+    return UINT32_MAX;  // 見つからない
+}
 
 // ============================================================
 // モデルデータ
 // ============================================================
 
 struct MomoModel {
-    // --- 語彙テーブル ---
-    VocabMap vocab;
+    // --- 語彙テーブル（ソート済み配列）---
+    VocabVec vocab;
 
     // --- 読みラベルテーブル ---
     std::vector<std::string> read_classes;  // [class_id] = ラベル文字列（UTF-8）
 
     // --- 読みモデル重み（CSC・int8量子化）---
-    // CSCは列優先: feature_id をインデックスとして対応クラスと重みを直接引ける
-    // score[cls] += csc_data[j] * read_scale  (j は feature_id 列の非ゼロ要素)
-    float                read_scale = 1.0f;
+    float                 read_scale = 1.0f;
     std::vector<uint32_t> csc_colptr;   // size: n_features + 1
     std::vector<uint32_t> csc_rowind;   // size: n_nonzero  （クラスID）
     std::vector<int8_t>   csc_data;     // size: n_nonzero

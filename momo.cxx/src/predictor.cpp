@@ -50,17 +50,17 @@ float Predictor::read_confidence(
     return sigmoid(scores[class_id]);
 }
 
-// 特徴量キーをモデルの語彙マップで引いて feature_id のリストを作る
+// 特徴量キーをモデルの語彙テーブルで引いて feature_id のリストを作る
 static std::vector<uint32_t> lookup_feature_ids(
     const std::vector<FeatureKey>& keys,
-    const VocabMap&                vocab)
+    const VocabVec&                vocab)
 {
     std::vector<uint32_t> ids;
     ids.reserve(keys.size());
     for (const auto& k : keys) {
-        auto it = vocab.find(k);
-        if (it != vocab.end()) {
-            ids.push_back(it->second);
+        const uint32_t id = vocab_find(vocab, k);
+        if (id != UINT32_MAX) {
+            ids.push_back(id);
         }
     }
     return ids;

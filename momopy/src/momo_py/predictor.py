@@ -15,6 +15,9 @@ from .features import get_units, compute_source_features, SourceEntry, LABEL_CON
 from .utils import split_on_unescaped_slash, CharType
 
 
+# 小書き仮名（拗音・促音など）。直前の文字に吸収されるべき文字。
+_SMALL_KANA = frozenset("ぁぃぅぇぉゃゅょっゎァィゥェォャュョッヮ")
+
 # bypass（素通し）扱いにする文字種
 _BYPASS_CTYPES = frozenset({
     CharType.SYMBOL,
@@ -548,10 +551,10 @@ class Predictor:
         ascii_overrides: Dict[int, str],
         dict_overrides: Dict[int, str],
     ) -> Tuple[List[str], List[float], List[bool], List[str]]:
-        refined_labels = []
-        confidences = []
-        has_splits = []
-        decision_sources = []
+        refined_labels: List[str] = []
+        confidences: List[float] = []
+        has_splits: List[bool] = []
+        decision_sources: List[str] = []
         last_fallback_reading = ""
         parent_idx = -1
 
@@ -612,6 +615,20 @@ class Predictor:
                     clean_label = char
                     confidence = 0.0
                     decision = DecisionSource.FALLBACK_ORPHAN
+
+                # 小書き仮名がCONTINUEになった場合の救済：
+                # 本来は親ラベルに小書き仮名が含まれているはずだが、
+                # モデルの誤推論で含まれていない場合は親ラベルに追記する
+                # （SKIPは意図的なので救済しない）
+                elif clean_label == LABEL_CONTINUE and char in _SMALL_KANA:
+                    if (parent_idx >= 0
+                            and _SMALL_KANA.isdisjoint(refined_labels[parent_idx])):
+                        kana_char = chr(ord(char) + 0x60) if "ぁ" <= char <= "ん" else char
+                        refined_labels[parent_idx] += kana_char
+                        decision_sources[parent_idx] = DecisionSource.FALLBACK_ORPHAN
+                        clean_label = LABEL_CONTINUE
+                        confidence = 0.0
+                        decision = DecisionSource.FALLBACK_ORPHAN
 
                 has_split = (boundary_labels[i] == "1")
 

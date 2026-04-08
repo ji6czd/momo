@@ -19,6 +19,32 @@
 // bypass（素通し）扱いにする文字種
 // ============================================================
 
+// 小書き仮名セット（Python の _SMALL_KANA と対応）
+static const char32_t SMALL_KANA_LIST[] = {
+  // 小書きひらがな
+  U'\u3041', U'\u3043', U'\u3045', U'\u3047', U'\u3049',  // ぁぃぅぇぉ
+  U'\u3063',                                               // っ
+  U'\u3083', U'\u3085', U'\u3087',                         // ゃゅょ
+  // 小書きカタカナ
+  U'\u30A1', U'\u30A3', U'\u30A5', U'\u30A7', U'\u30A9',  // ァィゥェォ
+  U'\u30C3',                                               // ッ
+  U'\u30E3', U'\u30E5', U'\u30E7',                         // ャュョ
+};
+
+static bool is_small_kana(char32_t cp) {
+  for (auto c : SMALL_KANA_LIST) {
+    if (cp == c) return true;
+  }
+  return false;
+}
+
+// 小書きひらがな → 対応するカタカナ（+0x60）、カタカナはそのまま
+// Python: chr(ord(char) + 0x60) if "ぁ" <= char <= "ん" else char
+static char32_t small_kana_to_kana(char32_t cp) {
+  if (cp >= U'\u3041' && cp <= U'\u3093') return cp + 0x60;
+  return cp;
+}
+
 static bool is_bypass(CharType ct) {
   switch (ct) {
     case CharType::ALPHA:
@@ -145,13 +171,26 @@ PredictionResult Predictor::predict(const std::string& text) const {
   std::vector<int32_t> int_scores(n_cls);
   std::vector<float> scores(n_cls);
 
+  // 救済ロジック用の親追跡（Python の parent_idx 相当）
+  int parent_src_idx = -1;            // source_seq 上の親インデックス（-1 = なし）
+  bool parent_is_bypass = false;      // 親が bypass 文字か
+  bool parent_has_small_kana = false; // 親ラベルに小書き仮名を追記済みか
+  size_t parent_kana_char_end = 0;    // 親ラベル出力後の kana_to_src_index サイズ
+  size_t parent_kana_byte_end = 0;    // 親ラベル出力後の kana_text バイトサイズ
+
   for (int i = 0; i < n; ++i) {
     const auto& entry = source_seq[i];
 
     if (is_bypass(entry.ctype)) {
-      result.kana_text += char32_to_utf8(entry.cp);
+      const std::string ch_utf8 = char32_to_utf8(entry.cp);
+      result.kana_text += ch_utf8;
       result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
       result.confidences.push_back(1.0f);
+      parent_src_idx = i;
+      parent_is_bypass = true;
+      parent_has_small_kana = false;
+      parent_kana_char_end = result.kana_to_src_index.size();
+      parent_kana_byte_end = result.kana_text.size();
       continue;
     }
 
@@ -195,7 +234,90 @@ PredictionResult Predictor::predict(const std::string& text) const {
     }
 #endif
 
-    if (label == "---" || label == "_") continue;
+    // --------------------------------------------------------
+    // 救済ロジック（Python の _refine_predictions と対応）
+    // --------------------------------------------------------
+
+    if (label == "_") {  // LABEL_CONTINUE
+      // 1. 孤立 CONTINUE 救済：有効な親がない場合は文字そのままを出力
+      //    Python: label == LABEL_CONTINUE and (parent_idx == -1 or parent_idx in bypass_indices)
+      if (parent_src_idx < 0 || parent_is_bypass) {
+        const std::string ch_utf8 = char32_to_utf8(entry.cp);
+        result.kana_text += ch_utf8;
+        for (size_t j = 0; j < ch_utf8.size(); ++j) {
+          result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
+          result.confidences.push_back(conf);
+        }
+        parent_src_idx = i;
+        parent_is_bypass = false;
+        parent_has_small_kana = false;
+        parent_kana_char_end = result.kana_to_src_index.size();
+        parent_kana_byte_end = result.kana_text.size();
+#ifdef MOMO_TRACE
+        _t0 = TRACE_NOW();
+#endif
+        const bool has_split_rescue = sigmoid(compute_boundary_score(all_feat_ids[i])) >= 0.5f;
+#ifdef MOMO_TRACE
+        { auto _t1 = TRACE_NOW(); tr_boundary += TRACE_US(_t0, _t1); }
+#endif
+        if (has_split_rescue) {
+          result.kana_text += ' ';
+          result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
+          result.confidences.push_back(conf);
+        }
+        continue;
+      }
+
+      // 2. NUMERIC + CONTINUE 救済：文字そのままを出力
+      //    Python: if clean_label in (LABEL_SKIP, LABEL_CONTINUE) and ctype == CharType.NUMERIC
+      if (entry.ctype == CharType::NUMERIC) {
+        const std::string ch_utf8 = char32_to_utf8(entry.cp);
+        result.kana_text += ch_utf8;
+        for (size_t j = 0; j < ch_utf8.size(); ++j) {
+          result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
+          result.confidences.push_back(conf);
+        }
+        continue;
+      }
+
+      // 3. 小書き仮名 + CONTINUE 救済：親ラベルに追記
+      //    Python: elif clean_label == LABEL_CONTINUE and char in _SMALL_KANA
+      //            if parent_idx >= 0 and _SMALL_KANA.isdisjoint(refined_labels[parent_idx])
+      if (is_small_kana(entry.cp) && !parent_has_small_kana) {
+        const char32_t kana_char = small_kana_to_kana(entry.cp);
+        const std::string kana_utf8 = char32_to_utf8(kana_char);
+        result.kana_text.insert(parent_kana_byte_end, kana_utf8);
+        result.kana_to_src_index.insert(
+          result.kana_to_src_index.begin() + static_cast<std::ptrdiff_t>(parent_kana_char_end),
+          static_cast<int>(source_seq[parent_src_idx].orig_idx));
+        result.confidences.insert(
+          result.confidences.begin() + static_cast<std::ptrdiff_t>(parent_kana_char_end),
+          conf);
+        parent_kana_char_end++;
+        parent_kana_byte_end += kana_utf8.size();
+        parent_has_small_kana = true;
+      }
+      // それ以外の CONTINUE はスキップ（処理済みとして親情報は更新しない）
+      continue;
+    }
+
+    if (label == "---") {  // LABEL_SKIP
+      // NUMERIC + SKIP 救済：文字そのままを出力
+      //    Python: if clean_label in (LABEL_SKIP, LABEL_CONTINUE) and ctype == CharType.NUMERIC
+      if (entry.ctype == CharType::NUMERIC) {
+        const std::string ch_utf8 = char32_to_utf8(entry.cp);
+        result.kana_text += ch_utf8;
+        for (size_t j = 0; j < ch_utf8.size(); ++j) {
+          result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
+          result.confidences.push_back(conf);
+        }
+      }
+      continue;
+    }
+
+    // --------------------------------------------------------
+    // 通常ラベル出力
+    // --------------------------------------------------------
 
     // 境界判定
     const bool has_split = sigmoid(compute_boundary_score(all_feat_ids[i])) >= 0.5f;
@@ -213,6 +335,13 @@ PredictionResult Predictor::predict(const std::string& text) const {
       result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
       result.confidences.push_back(conf);
     }
+
+    // 親情報を更新（境界スペース前）
+    parent_src_idx = i;
+    parent_is_bypass = false;
+    parent_has_small_kana = false;
+    parent_kana_char_end = result.kana_to_src_index.size();
+    parent_kana_byte_end = result.kana_text.size();
 
     if (has_split) {
       result.kana_text += ' ';

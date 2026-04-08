@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+
 #include "model.hpp"
 
 // .mbm ファイルを読み込んで MomoModel を返す。

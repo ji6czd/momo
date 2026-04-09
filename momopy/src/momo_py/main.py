@@ -111,7 +111,6 @@ def main():
     predict_parser.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
     predict_parser.add_argument("--explain", type=int, default=8, metavar="N",
                                 help="--trace時に表示する特徴量寄与度の上位件数（デフォルト: 8、0で無効）")
-    predict_parser.add_argument("--confidence", action="store_true", help="予測結果に信頼度を含める")
     predict_parser.add_argument("--profile", action="store_true", help="予測の実行時間を表示する")
     
     translate_parser = subparsers.add_parser("translate")
@@ -152,7 +151,6 @@ def main():
             model_path=args.model,
             custom_dict_path=args.custom_dict,
             single_kanji_dict_path=args.single_dict,
-            compute_confidence=args.confidence,
             explain_top_n=explain_top_n,
         )
         run_predict(config, show_trace=args.trace, show_profile=args.profile)

@@ -56,6 +56,7 @@ SAFE_OKURIGANA = set(
 _DIGIT_TABLE = {
     "〇": "0", "一": "1", "二": "2", "三": "3", "四": "4",
     "五": "5", "六": "6", "七": "7", "八": "8", "九": "9",
+    "壱": "1", "弐": "2", "参": "3",
 }
 
 # 🌟 位取り文字の読みテーブル（数字展開しない場合）
@@ -75,9 +76,6 @@ class PredictorConfig:
         model_path: モデルファイルのパス（.zip）
         single_kanji_dict_path: 単一漢字辞書TSVのパス（省略可）
         custom_dict_path: カスタム辞書ファイルのパス（省略可）
-        compute_confidence: 自信度を計算するかどうか
-            LinearSVC は decision_function のスコアをsigmoidで変換して使用。
-            漢数字の JAPANESE_NUMERIC については常に計算する。
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
         explain_top_n: トレース時に表示する特徴量寄与度の上位件数（0=無効）
@@ -85,7 +83,6 @@ class PredictorConfig:
     model_path: str
     single_kanji_dict_path: Optional[str] = None
     custom_dict_path: Optional[str] = None
-    compute_confidence: bool = True
     confidence_threshold: float = 0.3
     numeric_confidence_threshold: float = 0.5
     explain_top_n: int = 8
@@ -582,10 +579,7 @@ class Predictor:
                 label    = raw_labels[i]
                 decision = DecisionSource.LR
 
-                if self._config.compute_confidence or ctype == CharType.JAPANESE_NUMERIC:
-                    confidence = self._get_read_confidence(decision_scores, label, i)
-                else:
-                    confidence = 1.0
+                confidence = self._get_read_confidence(decision_scores, label, i)
 
                 # 文字消失バグの救済ロジック
                 if label == LABEL_CONTINUE and (parent_idx == -1 or parent_idx in bypass_indices):

@@ -7,7 +7,23 @@
 
 namespace momo {
 
-int predict(const std::string& model_file_prefix, bool compute_confidence = false) {
+/**
+ * @param c 判定する文字
+ * @return cがUTF-8の先頭バイトであればtrue、そうでなければfalse
+ * UTF-8の先頭バイトかどうかを判定する関数
+ * UTF-8の先頭バイトは、0xxxxxxx（ASCII）または110xxxxx、1110xxxx、11110xxxのいずれかの形式を持ちます。
+ * つまり、先頭バイトは0x00～0x7F、0xC0～0xDF、0xE0～0xEF、0xF0～0xF7の範囲にあります。
+ * 続きバイトは0x80～0xBFの範囲にあるため、先頭バイトは0x80以上で0xC0未満の値を持ちません。
+ */
+bool is_utf8_firstbyte(unsigned char c) { return (c & 0xC0) != 0x80; }
+
+/**
+ * @brief モデルを読み込み、標準入力からテキストを受け取って予測を行う関数
+ * @param model_file_prefix モデルファイルのパスプレフィックス（例: "basic_data" なら "basic_data.mbm" を読み込む）
+ * @param compute_confidence 自信度スコアを計算するかどうかのフラグ
+ * @return 終了コード（0は成功、1はエラー）
+ */
+int predict(const std::string& model_file_prefix, bool compute_confidence) {
   // モデル読み込み
   MomoModel model;
   try {
@@ -32,6 +48,14 @@ int predict(const std::string& model_file_prefix, bool compute_confidence = fals
     try {
       const PredictionResult result = predictor.predict(line);
       std::cout << result.kana_text << "\n";
+      if (compute_confidence) {
+        for (size_t i = 0; i < result.confidences.size(); ++i) {
+          if (is_utf8_firstbyte(static_cast<unsigned char>(result.kana_text[i]))) {
+            std::cout << result.confidences[i] << " ";
+          }
+        }
+        std::cout << "\n";
+      }
     } catch (const std::exception& e) {
       std::cerr << "予測エラー: " << e.what() << "\n";
     }

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+
 #include "model.hpp"
 
 // ============================================================
@@ -9,10 +10,10 @@
 // ============================================================
 
 struct PredictionResult {
-    std::string              source_text;       // 入力テキスト（UTF-8）
-    std::string              kana_text;         // 出力かな（UTF-8）
-    std::vector<float>       confidences;       // 各かな文字の自信度
-    std::vector<int>         kana_to_src_index; // かな位置 → 原文コードポイント位置
+  std::string source_text;             // 入力テキスト（UTF-8）
+  std::string kana_text;               // 出力かな（UTF-8）
+  std::vector<float> confidences;      // 各かな文字の自信度
+  std::vector<int> kana_to_src_index;  // かな位置 → 原文コードポイント位置
 };
 
 // ============================================================
@@ -20,28 +21,25 @@ struct PredictionResult {
 // ============================================================
 
 class Predictor {
-public:
-    explicit Predictor(MomoModel model);
+ public:
+  explicit Predictor(MomoModel model);
 
-    PredictionResult predict(const std::string& text) const;
+  PredictionResult predict(const std::string& text) const;
 
-    float confidence_threshold         = 0.3f;
-    float numeric_confidence_threshold = 0.5f;
+  float confidence_threshold = 0.3f;
+  float numeric_confidence_threshold = 0.5f;
 
-private:
-    MomoModel model_;
+ private:
+  MomoModel model_;
 
-    // 特徴量ID列 → 各クラスの生整数スコアに加算（CSC形式でアクセス）
-    // scale・intercept の適用は呼び出し側で行う
-    void compute_read_scores(
-        const std::vector<uint32_t>& feat_ids,
-        std::vector<int32_t>&        scores) const;
+  // 特徴量ID列 → 各クラスの生整数スコアに加算（CSC形式でアクセス）
+  // scale・intercept の適用は呼び出し側で行う
+  void compute_read_scores(const std::vector<uint32_t>& feat_ids, std::vector<int32_t>& scores) const;
 
-    // 特徴量ID列 → 境界スコア（sigmoid変換前）
-    float compute_boundary_score(
-        const std::vector<uint32_t>& feat_ids) const;
+  // 特徴量ID列 → 境界スコア（sigmoid変換前）
+  float compute_boundary_score(const std::vector<uint32_t>& feat_ids) const;
 
-    static float sigmoid(float x);
+  static float sigmoid(float x);
 
-    float read_confidence(const std::vector<float>& scores, int class_id) const;
+  float read_confidence(const std::vector<float>& scores, int class_id) const;
 };

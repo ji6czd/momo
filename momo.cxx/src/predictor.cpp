@@ -21,14 +21,26 @@
 
 // 小書き仮名セット（Python の _SMALL_KANA と対応）
 static const char32_t SMALL_KANA_LIST[] = {
-  // 小書きひらがな
-  U'\u3041', U'\u3043', U'\u3045', U'\u3047', U'\u3049',  // ぁぃぅぇぉ
-  U'\u3063',                                               // っ
-  U'\u3083', U'\u3085', U'\u3087',                         // ゃゅょ
-  // 小書きカタカナ
-  U'\u30A1', U'\u30A3', U'\u30A5', U'\u30A7', U'\u30A9',  // ァィゥェォ
-  U'\u30C3',                                               // ッ
-  U'\u30E3', U'\u30E5', U'\u30E7',                         // ャュョ
+    // 小書きひらがな
+    U'\u3041',
+    U'\u3043',
+    U'\u3045',
+    U'\u3047',
+    U'\u3049',  // ぁぃぅぇぉ
+    U'\u3063',  // っ
+    U'\u3083',
+    U'\u3085',
+    U'\u3087',  // ゃゅょ
+    // 小書きカタカナ
+    U'\u30A1',
+    U'\u30A3',
+    U'\u30A5',
+    U'\u30A7',
+    U'\u30A9',  // ァィゥェォ
+    U'\u30C3',  // ッ
+    U'\u30E3',
+    U'\u30E5',
+    U'\u30E7',  // ャュョ
 };
 
 static bool is_small_kana(char32_t cp) {
@@ -57,6 +69,99 @@ static bool is_bypass(CharType ct) {
     default:
       return false;
   }
+}
+
+// ============================================================
+// 漢数字フォールバック変換
+// Python側の _DIGIT_TABLE / _kurai_fallback() / _KURAI_READING と対応
+// ============================================================
+
+// 漢数字（〇一二三…壱弐参）→ ASCII数字1文字
+// 該当しない場合は '\0' を返す
+static char digit_table(char32_t cp) {
+  switch (cp) {
+    case U'〇':
+      return '0';
+    case U'一':
+      return '1';
+    case U'二':
+      return '2';
+    case U'三':
+      return '3';
+    case U'四':
+      return '4';
+    case U'五':
+      return '5';
+    case U'六':
+      return '6';
+    case U'七':
+      return '7';
+    case U'八':
+      return '8';
+    case U'九':
+      return '9';
+    case U'壱':
+      return '1';
+    case U'弐':
+      return '2';
+    case U'参':
+      return '3';
+    default:
+      return '\0';
+  }
+}
+
+// 位取り文字（十百千万億兆）のフォールバック変換
+// Python側の _kurai_fallback() と対応
+// 戻り値 "_" は LABEL_SKIP（呼び出し側でスキップ処理）
+static std::string kurai_fallback(char32_t cp, char32_t left_cp, CharType left_ctype, CharType right_ctype) {
+  const bool left_is_numeric = (left_ctype == CharType::JAPANESE_NUMERIC);
+  const bool right_is_numeric = (right_ctype == CharType::JAPANESE_NUMERIC);
+
+  if (cp == U'十') {
+    if (left_is_numeric && right_is_numeric) return "_";  // LABEL_SKIP
+    if (left_is_numeric && !right_is_numeric) return "0";
+    if (!left_is_numeric && right_is_numeric) return "1";
+    return "10";
+  }
+  if (cp == U'百') {
+    if (left_is_numeric && right_is_numeric) return "0";
+    if (left_is_numeric && !right_is_numeric) return "00";
+    if (!left_is_numeric && right_is_numeric) return "1";
+    return "100";
+  }
+  if (cp == U'千') {
+    if (right_is_numeric) return "0";
+    // 「三千」の「千」→「ゼン」、単独の「千」→「セン」
+    if (left_cp == U'三') return "ゼン";
+    return "セン";
+  }
+  if (cp == U'万') return "マン";
+  if (cp == U'億') return "オク";
+  if (cp == U'兆') return "チョー";
+
+  // 上記以外（到達しないはずだが念のため元の文字を返す）
+  return char32_to_utf8(cp);
+}
+
+// JAPANESE_NUMERIC フォールバック変換の統合エントリポイント
+// Python側の _convert_japanese_numeric() と対応
+// 戻り値: 変換後のUTF-8文字列。"_" は LABEL_SKIP（スキップ）を意味する。
+static std::string convert_japanese_numeric(int i, const std::vector<SourceEntry>& source_seq) {
+  const char32_t cp = source_seq[i].cp;
+  const int n = static_cast<int>(source_seq.size());
+  const char32_t left_cp = (i > 0) ? source_seq[i - 1].cp : U'\0';
+  const CharType left_ctype = (i > 0) ? source_seq[i - 1].ctype : CharType::OTHER;
+  const CharType right_ctype = (i < n - 1) ? source_seq[i + 1].ctype : CharType::OTHER;
+
+  // _DIGIT_TABLE: 〇一二三四五六七八九 / 壱弐参 → ASCII数字
+  const char d = digit_table(cp);
+  if (d != '\0') {
+    return std::string(1, d);
+  }
+
+  // 位取り文字（十百千万億兆）のフォールバック
+  return kurai_fallback(cp, left_cp, left_ctype, right_ctype);
 }
 
 // ============================================================
@@ -172,11 +277,11 @@ PredictionResult Predictor::predict(const std::string& text) const {
   std::vector<float> scores(n_cls);
 
   // 救済ロジック用の親追跡（Python の parent_idx 相当）
-  int parent_src_idx = -1;            // source_seq 上の親インデックス（-1 = なし）
-  bool parent_is_bypass = false;      // 親が bypass 文字か
-  bool parent_has_small_kana = false; // 親ラベルに小書き仮名を追記済みか
-  size_t parent_kana_char_end = 0;    // 親ラベル出力後の kana_to_src_index サイズ
-  size_t parent_kana_byte_end = 0;    // 親ラベル出力後の kana_text バイトサイズ
+  int parent_src_idx = -1;             // source_seq 上の親インデックス（-1 = なし）
+  bool parent_is_bypass = false;       // 親が bypass 文字か
+  bool parent_has_small_kana = false;  // 親ラベルに小書き仮名を追記済みか
+  size_t parent_kana_char_end = 0;     // 親ラベル出力後の kana_to_src_index サイズ
+  size_t parent_kana_byte_end = 0;     // 親ラベル出力後の kana_text バイトサイズ
 
   for (int i = 0; i < n; ++i) {
     const auto& entry = source_seq[i];
@@ -235,6 +340,51 @@ PredictionResult Predictor::predict(const std::string& text) const {
 #endif
 
     // --------------------------------------------------------
+    // JAPANESE_NUMERIC フォールバック
+    // Python: elif ctype == CharType.JAPANESE_NUMERIC:
+    //             label, ... = self._convert_japanese_numeric(
+    //                 i, char, label, confidence, source_seq, ...)
+    //         → confidence < numeric_confidence_threshold のときにルールベース変換
+    // --------------------------------------------------------
+    if (entry.ctype == CharType::JAPANESE_NUMERIC && conf < numeric_confidence_threshold) {
+      const std::string fallback = convert_japanese_numeric(i, source_seq);
+
+      if (fallback == "_") {
+        // LABEL_SKIP 扱い：出力しない（例：「三百二十」の「十」が左右とも数字のとき）
+        continue;
+      }
+
+#ifdef MOMO_TRACE
+      _t0 = TRACE_NOW();
+#endif
+      const bool has_split_num = sigmoid(compute_boundary_score(all_feat_ids[i])) >= 0.5f;
+#ifdef MOMO_TRACE
+      {
+        auto _t1 = TRACE_NOW();
+        tr_boundary += TRACE_US(_t0, _t1);
+        _t0 = _t1;
+      }
+#endif
+
+      for (const char c : fallback) result.kana_text += c;
+      for (std::size_t j = 0; j < fallback.size(); ++j) {
+        result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
+        result.confidences.push_back(conf);
+      }
+      parent_src_idx = i;
+      parent_is_bypass = false;
+      parent_has_small_kana = false;
+      parent_kana_char_end = result.kana_to_src_index.size();
+      parent_kana_byte_end = result.kana_text.size();
+      if (has_split_num) {
+        result.kana_text += ' ';
+        result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
+        result.confidences.push_back(conf);
+      }
+      continue;
+    }
+
+    // --------------------------------------------------------
     // 救済ロジック（Python の _refine_predictions と対応）
     // --------------------------------------------------------
 
@@ -258,7 +408,10 @@ PredictionResult Predictor::predict(const std::string& text) const {
 #endif
         const bool has_split_rescue = sigmoid(compute_boundary_score(all_feat_ids[i])) >= 0.5f;
 #ifdef MOMO_TRACE
-        { auto _t1 = TRACE_NOW(); tr_boundary += TRACE_US(_t0, _t1); }
+        {
+          auto _t1 = TRACE_NOW();
+          tr_boundary += TRACE_US(_t0, _t1);
+        }
 #endif
         if (has_split_rescue) {
           result.kana_text += ' ';
@@ -288,11 +441,9 @@ PredictionResult Predictor::predict(const std::string& text) const {
         const std::string kana_utf8 = char32_to_utf8(kana_char);
         result.kana_text.insert(parent_kana_byte_end, kana_utf8);
         result.kana_to_src_index.insert(
-          result.kana_to_src_index.begin() + static_cast<std::ptrdiff_t>(parent_kana_char_end),
-          static_cast<int>(source_seq[parent_src_idx].orig_idx));
-        result.confidences.insert(
-          result.confidences.begin() + static_cast<std::ptrdiff_t>(parent_kana_char_end),
-          conf);
+            result.kana_to_src_index.begin() + static_cast<std::ptrdiff_t>(parent_kana_char_end),
+            static_cast<int>(source_seq[parent_src_idx].orig_idx));
+        result.confidences.insert(result.confidences.begin() + static_cast<std::ptrdiff_t>(parent_kana_char_end), conf);
         parent_kana_char_end++;
         parent_kana_byte_end += kana_utf8.size();
         parent_has_small_kana = true;
@@ -320,6 +471,9 @@ PredictionResult Predictor::predict(const std::string& text) const {
     // --------------------------------------------------------
 
     // 境界判定
+#ifdef MOMO_TRACE
+    _t0 = TRACE_NOW();
+#endif
     const bool has_split = sigmoid(compute_boundary_score(all_feat_ids[i])) >= 0.5f;
 #ifdef MOMO_TRACE
     {

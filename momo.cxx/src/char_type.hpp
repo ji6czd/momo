@@ -16,40 +16,32 @@
 // ============================================================
 
 enum class CharType : uint8_t {
-    SPACE            = 0x00,
+  SPACE = 0x00,
 
-    ALPHA            = 0x10,
-    NUMERIC          = 0x11,
+  ALPHA = 0x10,
+  NUMERIC = 0x11,
 
-    RESERVED         = 0x20,  // 将来拡張用
+  RESERVED = 0x20,  // 将来拡張用
 
-    SYMBOL           = 0x30,
-    SYMBOL_CLOSE     = 0x31,
-    SYMBOL_OPEN      = 0x32,
-    SYMBOL_STOP      = 0x33,
-    SYMBOL_PAUSE     = 0x34,
+  SYMBOL = 0x30,
+  SYMBOL_CLOSE = 0x31,
+  SYMBOL_OPEN = 0x32,
+  SYMBOL_STOP = 0x33,
+  SYMBOL_PAUSE = 0x34,
 
-    HIRAGANA         = 0x40,
-    KATAKANA         = 0x41,
-    KANJI            = 0x42,
-    JAPANESE_NUMERIC = 0x43,
+  HIRAGANA = 0x40,
+  KATAKANA = 0x41,
+  KANJI = 0x42,
+  JAPANESE_NUMERIC = 0x43,
 
-    OTHER            = 0xFF,
+  OTHER = 0xFF,
 };
 
 // カテゴリ取得（上位ニブル）
-inline uint8_t chartype_category(CharType ct) {
-    return static_cast<uint8_t>(ct) & 0xF0;
-}
+inline uint8_t chartype_category(CharType ct) { return static_cast<uint8_t>(ct) & 0xF0; }
 
-inline bool is_japanese(CharType ct) {
-    return chartype_category(ct) == 0x40;
-}
+inline bool is_japanese(CharType ct) { return chartype_category(ct) == 0x40; }
 
-inline bool is_symbol(CharType ct) {
-    return chartype_category(ct) == 0x30;
-}
+inline bool is_symbol(CharType ct) { return chartype_category(ct) == 0x30; }
 
-inline bool is_latin(CharType ct) {
-    return chartype_category(ct) == 0x10;
-}
+inline bool is_latin(CharType ct) { return chartype_category(ct) == 0x10; }

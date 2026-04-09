@@ -44,10 +44,12 @@ using VocabVec = std::vector<VocabEntry>;
 
 // 語彙テーブルから feature_id を検索する（バイナリサーチ）
 // 見つからない場合は n_features を返す
+struct VocabEntryLess {
+  bool operator()(const VocabEntry& a, const VocabEntry& b) const { return a.first < b.first; }
+};
 inline uint32_t vocab_find(const VocabVec& vocab, const FeatureKey& key) {
   const VocabEntry target{key, 0};
-  auto it = std::lower_bound(vocab.begin(), vocab.end(), target,
-                             [](const VocabEntry& a, const VocabEntry& b) { return a.first < b.first; });
+  auto it = std::lower_bound(vocab.begin(), vocab.end(), target, VocabEntryLess{});
   if (it != vocab.end() && it->first == key) {
     return it->second;
   }

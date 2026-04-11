@@ -221,7 +221,7 @@ wheels = [
 [[package]]
 name = "momo-py"
 version = "0.4.0"
-source = { git = "https://github.com/ji6czd/momo?subdirectory=momopy&branch=LR_feature#96fc3c5e27fa201a74f01c1666e15df4e3936445" }
+source = { git = "https://github.com/ji6czd/momo?subdirectory=momopy&branch=LR_feature#f717fe34ec182e0c3fe5d49ab8da00c758e8ddf2" }
 dependencies = [
     { name = "protobuf" },
     { name = "python-crfsuite" },

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "loader.hpp"
 #include "momo_features.hpp"
 #include "utf8.hpp"
 #ifdef MOMO_TRACE
@@ -168,7 +169,9 @@ static std::string convert_japanese_numeric(int i, const std::vector<SourceEntry
 // Predictor
 // ============================================================
 
-Predictor::Predictor(MomoModel model) : model_(std::move(model)) {}
+Predictor::Predictor(PredictorConfig config) : config_(std::move(config)) {}
+
+void Predictor::load() { model_ = ::load_model(config_.model_path()); }
 
 float Predictor::sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 
@@ -346,7 +349,7 @@ PredictionResult Predictor::predict(const std::string& text) const {
     //                 i, char, label, confidence, source_seq, ...)
     //         → confidence < numeric_confidence_threshold のときにルールベース変換
     // --------------------------------------------------------
-    if (entry.ctype == CharType::JAPANESE_NUMERIC && conf < numeric_confidence_threshold) {
+    if (entry.ctype == CharType::JAPANESE_NUMERIC && conf < config_.numeric_confidence_threshold()) {
       const std::string fallback = convert_japanese_numeric(i, source_seq);
 
       if (fallback == "_") {
@@ -501,6 +504,18 @@ PredictionResult Predictor::predict(const std::string& text) const {
       result.kana_text += ' ';
       result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
       result.confidences.push_back(conf);
+    }
+  }
+
+  // src_to_kana_index を構築（kana_to_src_index から逆引き）
+  {
+    const int src_size = static_cast<int>(text32.size());
+    result.src_to_kana_index.resize(src_size);
+    for (int j = 0; j < static_cast<int>(result.kana_to_src_index.size()); ++j) {
+      const int src_pos = result.kana_to_src_index[j];
+      if (src_pos >= 0 && src_pos < src_size) {
+        result.src_to_kana_index[src_pos].push_back(j);
+      }
     }
   }
 

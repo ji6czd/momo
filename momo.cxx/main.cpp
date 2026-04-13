@@ -2,7 +2,6 @@
 #include <string>
 
 #include "CLI/CLI.hpp"
-#include "loader.hpp"
 #include "predictor.hpp"
 
 namespace momo {
@@ -19,24 +18,18 @@ bool is_utf8_firstbyte(unsigned char c) { return (c & 0xC0) != 0x80; }
 
 /**
  * @brief モデルを読み込み、標準入力からテキストを受け取って予測を行う関数
- * @param model_file_prefix モデルファイルのパスプレフィックス（例: "basic_data" なら "basic_data.mbm" を読み込む）
+ * @param config 予測設定（model_path を含む）
  * @param compute_confidence 自信度スコアを計算するかどうかのフラグ
  * @return 終了コード（0は成功、1はエラー）
  */
-int predict(const std::string& model_file_prefix, bool compute_confidence) {
-  // モデル読み込み
-  MomoModel model;
+int predict(const PredictorConfig& config, bool compute_confidence) {
+  Predictor predictor(config);
   try {
-    model = load_model(model_file_prefix + ".mbm");
+    predictor.load();
   } catch (const std::exception& e) {
     std::cerr << "モデル読み込みエラー: " << e.what() << "\n";
     return 1;
   }
-
-  std::cerr << "モデル読み込み完了: " << model.n_classes << " クラス, " << model.n_features << " 特徴量\n";
-
-  // 予測器を構築
-  Predictor predictor(std::move(model));
 
   // 標準入力から1行ずつ処理
   std::string line;
@@ -48,6 +41,7 @@ int predict(const std::string& model_file_prefix, bool compute_confidence) {
     try {
       const PredictionResult result = predictor.predict(line);
       std::cout << result.kana_text << "\n";
+      predictor.config().model_path();  // ダミー呼び出し（config_へのアクセスを行うことで、予測結果の出力前にモデルのロードが完了していることを保証）
       if (compute_confidence) {
         for (size_t i = 0; i < result.confidences.size(); ++i) {
           if (is_utf8_firstbyte(static_cast<unsigned char>(result.kana_text[i]))) {
@@ -68,10 +62,15 @@ int predict(const std::string& model_file_prefix, bool compute_confidence) {
 
 int main(int argc, char* argv[]) {
   CLI::App app{"Momo - Japanese Braille Predictor"};
-  std::string model_file_prefix;
-  app.add_option("--model", model_file_prefix, "Path prefix for model files")->default_val("basic_data");
+  std::string model_path = "basic_data.mbm";
+  float confidence_threshold = 0.3f;
+  float numeric_confidence_threshold = 0.5f;
   bool compute_confidence = false;
+  app.add_option("--model", model_path, "Path to model file (.mbm)")->default_val("basic_data.mbm");
   app.add_flag("--confidence", compute_confidence, "Compute confidence scores (marginal probabilities)");
+  app.add_option("--confidence-threshold", confidence_threshold, "KANJI fallback threshold (default: 0.3)");
+  app.add_option("--numeric-confidence-threshold", numeric_confidence_threshold,
+                 "JAPANESE_NUMERIC rule-based conversion threshold (default: 0.5)");
 
   try {
     app.parse(argc, argv);
@@ -79,6 +78,9 @@ int main(int argc, char* argv[]) {
     return app.exit(e);
   }
 
-  return momo::predict(model_file_prefix, compute_confidence);
-  return 0;
+  PredictorConfig config(model_path);
+  config.set_confidence_threshold(confidence_threshold);
+  config.set_numeric_confidence_threshold(numeric_confidence_threshold);
+
+  return momo::predict(config, compute_confidence);
 }

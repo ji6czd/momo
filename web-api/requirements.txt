@@ -10,7 +10,7 @@ itsdangerous==2.2.0
 jinja2==3.1.6
 joblib==1.5.3
 markupsafe==3.0.3
-momo-py @ git+https://github.com/ji6czd/momo@f717fe34ec182e0c3fe5d49ab8da00c758e8ddf2#subdirectory=momopy
+momo-py @ git+https://github.com/ji6czd/momo@c95269979d6645b3ce28aecc4721f7968a78cd7b#subdirectory=momopy
 numpy==2.4.4
 packaging==26.0
 protobuf==7.34.1
@@ -19,7 +19,7 @@ requests==2.33.1
 scikit-learn==1.8.0
 scipy==1.17.1
 sudachidict-core==20260116
-sudachipy==0.6.10
+sudachipy==0.6.11
 threadpoolctl==3.6.0
 urllib3==2.6.3
 werkzeug==3.1.8

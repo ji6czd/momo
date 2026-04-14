@@ -208,6 +208,31 @@ class PredictionResult:
     # explain_top_n=0 のときは空リスト
     feature_contributions: List[List[Tuple[str, float]]] = field(default_factory=list)
 
+    def format_segmented(self) -> str:
+        """各ソース文字に対応するカタカナ部分を'/'で区切って返す。
+
+        例: "とても良い天気" → "ト/テ/モ/ /ヨ/イ/テン/キ/"
+        境界予測による空白も独立したセグメントとして扱う。
+        """
+        segments: List[str] = []
+        for i in range(len(self.source_text)):
+            kana_positions = self.src_to_kana_index[i]
+            if not kana_positions:
+                continue
+            current = ""
+            for p in kana_positions:
+                ch = self.kana_text[p]
+                if ch == " ":
+                    if current:
+                        segments.append(current)
+                        current = ""
+                    segments.append(" ")
+                else:
+                    current += ch
+            if current:
+                segments.append(current)
+        return "/".join(segments) + "/"
+
     def to_json(self) -> str:
         text_safe = json.dumps(self.source_text, ensure_ascii=False)
         kana_safe = json.dumps(self.kana_text, ensure_ascii=False)

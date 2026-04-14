@@ -115,9 +115,6 @@ def compute_source_features(
                 features[f'-2:char={prev2_char}'] = 1.0
                 features[f'-2:type={prev2_ctype}'] = 1.0
                 features[f'-2:-1:bi={prev2_char}{prev_char}'] = 1.0
-        else:
-            features['BOS'] = 1.0
-
         if i < n - 1:
             features[f'+1:char={next_char}'] = 1.0
             features[f'+1:type={next_ctype}'] = 1.0
@@ -126,9 +123,6 @@ def compute_source_features(
                 features[f'+2:char={next2_char}'] = 1.0
                 features[f'+2:type={next2_ctype}'] = 1.0
                 features[f'+1:+2:bi={next_char}{next2_char}'] = 1.0
-        else:
-            features['EOS'] = 1.0
-
         if i > 0:
             features[f'type_transition={prev_ctype}->{ctype}'] = 1.0
 

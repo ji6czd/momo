@@ -224,7 +224,7 @@ def _split_labels(raw_labels: List[str]) -> tuple:
 # ==========================================
 # 🌟 7. train()
 # ==========================================
-def train(tsvdata: str, window: int = 5) -> None:
+def train(tsvdata: str, window: int = 5, dry_run: bool = False) -> None:
     """
     TSVから読みモデル（LinearSVC）と境界モデル（SGDClassifier）を学習し、
     1つのZIPにまとめる。
@@ -283,16 +283,22 @@ def train(tsvdata: str, window: int = 5) -> None:
     X_read = vect_read.fit_transform(X_dicts)
     print(f"   特徴量ベクトル次元数: {X_read.shape[1]}")
     print(f"   読みラベル種類数: {len(set(Y_read))}")
+    if dry_run:
+        print("⚠️  dry_run=True のため、ここまでで終了します。")
+        return
 
     print("🏋️  [読みモデル] 学習中 (LinearSVC)...")
-    model_read = LinearSVC(
-        C=1.0,
-        max_iter=2000,
-        verbose=0,
-    )
+    # windowに応じてパラメータだけ切り替え
+    params = {
+        5: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
+        3: dict(C=0.1, max_iter=2000, tol=1e-2, verbose=0),
+    }
+
+    model_read = LinearSVC(**params[window])
     model_read.fit(X_read, Y_read)
     model_read.coef_ = model_read.coef_.astype(np.float32)
     model_read.intercept_ = model_read.intercept_.astype(np.float32)
+
     # 枝刈り→sparse化
     coef = model_read.coef_.copy()
     coef[np.abs(coef) < 0.01] = 0.0

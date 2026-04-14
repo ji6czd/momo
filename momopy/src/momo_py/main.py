@@ -7,7 +7,7 @@ from importlib.metadata import version
 from .trainer import create_data, train
 from .predictor import Predictor, PredictorConfig
 
-from .pybraille import to_jp_braille, to_braille
+from .pybraille import to_jp_braille
 from .translator import Translator
 
 def run_translate(opt_segment: bool = False):
@@ -30,7 +30,7 @@ def run_translate(opt_segment: bool = False):
     except KeyboardInterrupt:
         print("\n🛑 翻訳モード終了。")
 
-def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile: bool = False) -> None:
+def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile: bool = False, segmented_output: bool = False) -> None:
     """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード。
     show_trace が True の場合、各文字の決定根拠をターミナルにも表示する。
     """
@@ -44,7 +44,14 @@ def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile:
             t1 = time.perf_counter() if show_profile else 0.0
             result = predictor.predict(text)
             print(f"予測時間: {(time.perf_counter() - t1)*1000:.2f} ms") if show_profile else None
-            print(result.to_json())
+            if show_trace:
+                print(result.to_json())
+            if segmented_output:
+                print(result.source_text)
+                print(result.format_segmented())
+                print(to_jp_braille(result.kana_text))
+            else:
+                print(result.kana_text)
 
             if show_trace:
                 print("─" * 48, file=sys.stderr)
@@ -112,6 +119,7 @@ def main():
     predict_parser.add_argument("--explain", type=int, default=8, metavar="N",
                                 help="--trace時に表示する特徴量寄与度の上位件数（デフォルト: 8、0で無効）")
     predict_parser.add_argument("--profile", action="store_true", help="予測の実行時間を表示する")
+    predict_parser.add_argument("--segment", action="store_true", help="予測結果を文字ごとに分割して出力する")
     
     translate_parser = subparsers.add_parser("translate")
     translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
@@ -127,6 +135,7 @@ def main():
     trainer_parser.add_argument("--tsv", required=True)
     trainer_parser.add_argument("--window", type=int, default=5, choices=[3, 5],
                             help="特徴量ウィンドウサイズ（3または5、デフォルト: 5）")
+    trainer_parser.add_argument("--dry-run", action="store_true", help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する")
     args = parser.parse_args()
 
     if args.command is None:
@@ -142,7 +151,7 @@ def main():
             sys.exit(1)
             
     elif args.command == "train":
-        train(tsvdata=args.tsv, window=args.window)
+        train(tsvdata=args.tsv, window=args.window, dry_run=args.dry_run)
         
     elif args.command == "predict":
         # --trace なしのときは explain_top_n=0 にして計算を省略
@@ -153,7 +162,7 @@ def main():
             single_kanji_dict_path=args.single_dict,
             explain_top_n=explain_top_n,
         )
-        run_predict(config, show_trace=args.trace, show_profile=args.profile)
+        run_predict(config, show_trace=args.trace, show_profile=args.profile, segmented_output=args.segment)
         
     elif args.command == "translate":
         run_translate(args.segment)

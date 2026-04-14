@@ -74,8 +74,6 @@ static int numeric_run_length(const std::vector<SourceEntry>& seq, int i) {
 static uint8_t clamp_run(int run) { return static_cast<uint8_t>(run <= 4 ? run : 5); }
 
 static FeatureKey make_bias() { return {FeatureType::BIAS}; }
-static FeatureKey make_bos() { return {FeatureType::BOS}; }
-static FeatureKey make_eos() { return {FeatureType::EOS}; }
 static FeatureKey make_kanji_pos_first() { return {FeatureType::KANJI_POS_FIRST}; }
 
 static FeatureKey make_type(FeatureType ft, CharType ct) {
@@ -171,8 +169,6 @@ std::vector<std::vector<FeatureKey>> compute_source_features(const std::vector<S
         feats.push_back(make_trigram(FeatureType::TRIGRAM_PREV2_PREV1_SELF, prev2_c, prev_c, c));
         feats.push_back(make_type_tri(FeatureType::TYPE_TRI_PREV2_PREV1_SELF, prev2_ctype, prev_ctype, ctype));
       }
-    } else {
-      feats.push_back(make_bos());
     }
 
     if (i < n - 1) {
@@ -188,8 +184,6 @@ std::vector<std::vector<FeatureKey>> compute_source_features(const std::vector<S
         feats.push_back(make_trigram(FeatureType::TRIGRAM_SELF_NEXT1_NEXT2, c, next_c, next2_c));
         feats.push_back(make_type_tri(FeatureType::TYPE_TRI_SELF_NEXT1_NEXT2, ctype, next_ctype, next2_ctype));
       }
-    } else {
-      feats.push_back(make_eos());
     }
 
     // trigram: 前1-対象-後1

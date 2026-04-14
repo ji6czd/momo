@@ -87,9 +87,7 @@ CHARTYPE_TO_INT: dict[str, int] = {
 # =====================================================================
 class FT:
     BIAS                          = 0x00
-    BOS                           = 0x01
-    EOS                           = 0x02
-    KANJI_POS_FIRST               = 0x03
+    KANJI_POS_FIRST               = 0x01
 
     TYPE_SELF                     = 0x50   # CharType×1
     TYPE_PREV1                    = 0x51
@@ -160,10 +158,6 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
     # --- ペイロードなし系 ---
     if key == "bias":
         return FT.BIAS, [], [], None
-    if key == "BOS":
-        return FT.BOS, [], [], None
-    if key == "EOS":
-        return FT.EOS, [], [], None
     if key == "kanji_pos_first":
         return FT.KANJI_POS_FIRST, [], [], None
 

@@ -24,9 +24,7 @@
 enum class FeatureType : uint8_t {
   // 0b00'00'xxxx  ペイロードなし
   BIAS = 0x00,
-  BOS = 0x01,
-  EOS = 0x02,
-  KANJI_POS_FIRST = 0x03,
+  KANJI_POS_FIRST = 0x01,
 
   // 0b01'01'xxxx  CharType×1
   TYPE_SELF = 0x50,   // type=T

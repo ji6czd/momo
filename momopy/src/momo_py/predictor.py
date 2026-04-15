@@ -83,7 +83,7 @@ class PredictorConfig:
     model_path: str
     single_kanji_dict_path: Optional[str] = None
     custom_dict_path: Optional[str] = None
-    confidence_threshold: float = 0.3
+    confidence_threshold: float = 0.5
     numeric_confidence_threshold: float = 0.5
     explain_top_n: int = 8
 

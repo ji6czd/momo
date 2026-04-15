@@ -36,7 +36,7 @@ class PredictorConfig {
 
  private:
   std::string model_path_;                     // モデルファイルのパス（.mbm）
-  float confidence_threshold_ = 0.3f;          // KANJIフォールバックを発動させる自信度の上限
+  float confidence_threshold_ = 0.5f;          // KANJIフォールバックを発動させる自信度の上限
   float numeric_confidence_threshold_ = 0.5f;  // JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
 };
 

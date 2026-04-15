@@ -702,14 +702,17 @@ class Predictor:
             is_applied = True
             decision = DecisionSource.FALLBACK_KANJI
 
-        elif char == '々' and last_fallback:
+        elif char == '々' and last_fallback and confidence < self._config.confidence_threshold:
             new_label = last_fallback
             new_last_fallback = last_fallback
             is_applied = True
             decision = DecisionSource.FALLBACK_REPEAT
 
         if not is_applied and not ctype.startswith('SYMBOL'):
-            new_last_fallback = ""
+            if ctype == 'KANJI':
+                new_last_fallback = label  # LR高自信度でも々のために伝播
+            else:
+                new_last_fallback = ""
 
         return new_label, new_last_fallback, is_applied, decision
 

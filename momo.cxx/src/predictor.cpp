@@ -32,6 +32,7 @@ static const char32_t SMALL_KANA_LIST[] = {
     U'\u3083',
     U'\u3085',
     U'\u3087',  // ゃゅょ
+    U'\u308E',  // ゎ
     // 小書きカタカナ
     U'\u30A1',
     U'\u30A3',
@@ -42,6 +43,7 @@ static const char32_t SMALL_KANA_LIST[] = {
     U'\u30E3',
     U'\u30E5',
     U'\u30E7',  // ャュョ
+    U'\u30EE',  // ヮ
 };
 
 static bool is_small_kana(char32_t cp) {
@@ -279,6 +281,9 @@ PredictionResult Predictor::predict(const std::string& text) const {
   std::vector<int32_t> int_scores(n_cls);
   std::vector<float> scores(n_cls);
 
+  // 々フォールバック用の直前漢字読み記憶（Python の last_fallback 相当）
+  std::string last_fallback;
+
   // 救済ロジック用の親追跡（Python の parent_idx 相当）
   int parent_src_idx = -1;             // source_seq 上の親インデックス（-1 = なし）
   bool parent_is_bypass = false;       // 親が bypass 文字か
@@ -299,6 +304,7 @@ PredictionResult Predictor::predict(const std::string& text) const {
       parent_has_small_kana = false;
       parent_kana_char_end = result.kana_to_src_index.size();
       parent_kana_byte_end = result.kana_text.size();
+      last_fallback.clear();
       continue;
     }
 
@@ -379,6 +385,7 @@ PredictionResult Predictor::predict(const std::string& text) const {
       parent_has_small_kana = false;
       parent_kana_char_end = result.kana_to_src_index.size();
       parent_kana_byte_end = result.kana_text.size();
+      last_fallback.clear();
       if (has_split_num) {
         result.kana_text += ' ';
         result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
@@ -486,9 +493,18 @@ PredictionResult Predictor::predict(const std::string& text) const {
     }
 #endif
 
+    // 々 フォールバック（Python の _apply_kanji_fallback と対応）
+    // LR低自信度の「々」は直前漢字の読みを繰り返す
+    const std::string* eff_label = &label;
+    std::string repeat_buf;
+    if (entry.cp == U'\u3005' /* 々 */ && !last_fallback.empty() && conf < config_.confidence_threshold()) {
+      repeat_buf = last_fallback;
+      eff_label = &repeat_buf;
+    }
+
     // かな出力
-    for (const char c : label) result.kana_text += c;
-    for (std::size_t j = 0; j < label.size(); ++j) {
+    for (const char c : *eff_label) result.kana_text += c;
+    for (std::size_t j = 0; j < eff_label->size(); ++j) {
       result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
       result.confidences.push_back(conf);
     }
@@ -499,6 +515,13 @@ PredictionResult Predictor::predict(const std::string& text) const {
     parent_has_small_kana = false;
     parent_kana_char_end = result.kana_to_src_index.size();
     parent_kana_byte_end = result.kana_text.size();
+
+    // last_fallback の更新（々のために直前漢字の読みを記憶、LR高自信度でも伝播）
+    if (entry.ctype == CharType::KANJI) {
+      last_fallback = *eff_label;
+    } else {
+      last_fallback.clear();
+    }
 
     if (has_split) {
       result.kana_text += ' ';

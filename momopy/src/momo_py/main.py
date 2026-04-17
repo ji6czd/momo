@@ -133,8 +133,8 @@ def main():
     
     trainer_parser = subparsers.add_parser("train")
     trainer_parser.add_argument("--tsv", required=True)
-    trainer_parser.add_argument("--window", type=int, default=5, choices=[3, 5],
-                            help="特徴量ウィンドウサイズ（3または5、デフォルト: 5）")
+    trainer_parser.add_argument("--window", type=int, default=7, choices=[3, 5, 7],
+                            help="特徴量ウィンドウサイズ（3, 5, 7、デフォルト: 7）")
     trainer_parser.add_argument("--dry-run", action="store_true", help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する")
     args = parser.parse_args()
 

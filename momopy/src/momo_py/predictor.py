@@ -364,6 +364,7 @@ class Predictor:
         self._read_classes        = bundle.read_classes
         self._vectorizer_boundary = bundle.vectorizer_boundary
         self._model_boundary      = bundle.model_boundary
+        self._window_size: int    = self._version_info.get("window_size", 5)
 
         # 逆引き辞書をキャッシュ（explain用）
         self._vocab_inv: Dict[int, str] = {
@@ -532,7 +533,7 @@ class Predictor:
             boundary_proba  : 境界の確率 shape=(n, 2)
             src_features    : 特徴量辞書リスト（explain用）
         """
-        src_features = compute_source_features(source_seq)
+        src_features = compute_source_features(source_seq, window=self._window_size)
         X_read     = self._vectorizer_read.transform(src_features)
         X_boundary = self._vectorizer_boundary.transform(src_features)
 

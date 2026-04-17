@@ -224,7 +224,7 @@ def _split_labels(raw_labels: List[str]) -> tuple:
 # ==========================================
 # 🌟 7. train()
 # ==========================================
-def train(tsvdata: str, window: int = 5, dry_run: bool = False) -> None:
+def train(tsvdata: str, window: int = 7, dry_run: bool = False) -> None:
     """
     TSVから読みモデル（LinearSVC）と境界モデル（SGDClassifier）を学習し、
     1つのZIPにまとめる。
@@ -290,6 +290,7 @@ def train(tsvdata: str, window: int = 5, dry_run: bool = False) -> None:
     print("🏋️  [読みモデル] 学習中 (LinearSVC)...")
     # windowに応じてパラメータだけ切り替え
     params = {
+        7: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
         5: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
         3: dict(C=0.1, max_iter=2000, tol=1e-2, verbose=0),
     }

@@ -143,10 +143,14 @@ std::vector<std::vector<FeatureKey>> compute_source_features(const std::vector<S
     const CharType prev_ctype = (i > 0) ? seq[i - 1].ctype : CharType::OTHER;
     const char32_t prev2_c = (i > 1) ? seq[i - 2].cp : 0;
     const CharType prev2_ctype = (i > 1) ? seq[i - 2].ctype : CharType::OTHER;
+    const char32_t prev3_c = (i > 2) ? seq[i - 3].cp : 0;
+    const CharType prev3_ctype = (i > 2) ? seq[i - 3].ctype : CharType::OTHER;
     const char32_t next_c = (i < n - 1) ? seq[i + 1].cp : 0;
     const CharType next_ctype = (i < n - 1) ? seq[i + 1].ctype : CharType::OTHER;
     const char32_t next2_c = (i < n - 2) ? seq[i + 2].cp : 0;
     const CharType next2_ctype = (i < n - 2) ? seq[i + 2].ctype : CharType::OTHER;
+    const char32_t next3_c = (i < n - 3) ? seq[i + 3].cp : 0;
+    const CharType next3_ctype = (i < n - 3) ? seq[i + 3].ctype : CharType::OTHER;
 
     auto& feats = result[i];
 
@@ -168,6 +172,15 @@ std::vector<std::vector<FeatureKey>> compute_source_features(const std::vector<S
         // trigram: 前2-前1-対象
         feats.push_back(make_trigram(FeatureType::TRIGRAM_PREV2_PREV1_SELF, prev2_c, prev_c, c));
         feats.push_back(make_type_tri(FeatureType::TYPE_TRI_PREV2_PREV1_SELF, prev2_ctype, prev_ctype, ctype));
+
+        if (i > 2) {
+          feats.push_back(make_char(FeatureType::CHAR_PREV3, prev3_c));
+          feats.push_back(make_type(FeatureType::TYPE_PREV3, prev3_ctype));
+          feats.push_back(make_bigram(FeatureType::BIGRAM_PREV3_PREV2, prev3_c, prev2_c));
+          // trigram: 前3-前2-前1
+          feats.push_back(make_trigram(FeatureType::TRIGRAM_PREV3_PREV2_PREV1, prev3_c, prev2_c, prev_c));
+          feats.push_back(make_type_tri(FeatureType::TYPE_TRI_PREV3_PREV2_PREV1, prev3_ctype, prev2_ctype, prev_ctype));
+        }
       }
     }
 
@@ -183,6 +196,15 @@ std::vector<std::vector<FeatureKey>> compute_source_features(const std::vector<S
         // trigram: 対象-後1-後2
         feats.push_back(make_trigram(FeatureType::TRIGRAM_SELF_NEXT1_NEXT2, c, next_c, next2_c));
         feats.push_back(make_type_tri(FeatureType::TYPE_TRI_SELF_NEXT1_NEXT2, ctype, next_ctype, next2_ctype));
+
+        if (i < n - 3) {
+          feats.push_back(make_char(FeatureType::CHAR_NEXT3, next3_c));
+          feats.push_back(make_type(FeatureType::TYPE_NEXT3, next3_ctype));
+          feats.push_back(make_bigram(FeatureType::BIGRAM_NEXT2_NEXT3, next2_c, next3_c));
+          // trigram: 後1-後2-後3
+          feats.push_back(make_trigram(FeatureType::TRIGRAM_NEXT1_NEXT2_NEXT3, next_c, next2_c, next3_c));
+          feats.push_back(make_type_tri(FeatureType::TYPE_TRI_NEXT1_NEXT2_NEXT3, next_ctype, next2_ctype, next3_ctype));
+        }
       }
     }
 

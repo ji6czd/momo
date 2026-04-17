@@ -32,14 +32,18 @@ enum class FeatureType : uint8_t {
   TYPE_PREV2 = 0x52,  // -2:type=T
   TYPE_NEXT1 = 0x53,  // +1:type=T
   TYPE_NEXT2 = 0x54,  // +2:type=T
+  TYPE_PREV3 = 0x55,  // -3:type=T
+  TYPE_NEXT3 = 0x56,  // +3:type=T
 
   // 0b01'10'xxxx  CharType×2
   TYPE_TRANSITION = 0x60,  // type_transition=T->T  (前1→対象)
 
   // 0b01'11'xxxx  CharType×3
-  TYPE_TRI_PREV2_PREV1_SELF = 0x70,  // type_tri=T-T-T  (前2-前1-対象)
-  TYPE_TRI_PREV1_SELF_NEXT1 = 0x71,  // type_tri=T-T-T  (前1-対象-後1)
-  TYPE_TRI_SELF_NEXT1_NEXT2 = 0x72,  // type_tri=T-T-T  (対象-後1-後2)
+  TYPE_TRI_PREV2_PREV1_SELF = 0x70,   // type_tri=T-T-T  (前2-前1-対象)
+  TYPE_TRI_PREV1_SELF_NEXT1 = 0x71,   // type_tri=T-T-T  (前1-対象-後1)
+  TYPE_TRI_SELF_NEXT1_NEXT2 = 0x72,   // type_tri=T-T-T  (対象-後1-後2)
+  TYPE_TRI_PREV3_PREV2_PREV1 = 0x73,  // type_tri=T-T-T  (前3-前2-前1)
+  TYPE_TRI_NEXT1_NEXT2_NEXT3 = 0x74,  // type_tri=T-T-T  (後1-後2-後3)
 
   // 0b10'01'xxxx  char32_t×1
   CHAR_SELF = 0x90,   // char=X
@@ -47,17 +51,23 @@ enum class FeatureType : uint8_t {
   CHAR_PREV2 = 0x92,  // -2:char=X
   CHAR_NEXT1 = 0x93,  // +1:char=X
   CHAR_NEXT2 = 0x94,  // +2:char=X
+  CHAR_PREV3 = 0x95,  // -3:char=X
+  CHAR_NEXT3 = 0x96,  // +3:char=X
 
   // 0b10'10'xxxx  char32_t×2
   BIGRAM_PREV1_SELF = 0xA0,   // -1:bi=XY
   BIGRAM_PREV2_PREV1 = 0xA1,  // -2:-1:bi=XY
   BIGRAM_SELF_NEXT1 = 0xA2,   // +1:bi=XY
   BIGRAM_NEXT1_NEXT2 = 0xA3,  // +1:+2:bi=XY
+  BIGRAM_PREV3_PREV2 = 0xA4,  // -3:-2:bi=XY
+  BIGRAM_NEXT2_NEXT3 = 0xA5,  // +2:+3:bi=XY
 
   // 0b10'11'xxxx  char32_t×3
-  TRIGRAM_PREV2_PREV1_SELF = 0xB0,  // tri=XYZ  (前2-前1-対象)
-  TRIGRAM_PREV1_SELF_NEXT1 = 0xB1,  // tri=XYZ  (前1-対象-後1)
-  TRIGRAM_SELF_NEXT1_NEXT2 = 0xB2,  // tri=XYZ  (対象-後1-後2)
+  TRIGRAM_PREV2_PREV1_SELF = 0xB0,   // tri=XYZ  (前2-前1-対象)
+  TRIGRAM_PREV1_SELF_NEXT1 = 0xB1,   // tri=XYZ  (前1-対象-後1)
+  TRIGRAM_SELF_NEXT1_NEXT2 = 0xB2,   // tri=XYZ  (対象-後1-後2)
+  TRIGRAM_PREV3_PREV2_PREV1 = 0xB3,  // tri=XYZ  (前3-前2-前1)
+  TRIGRAM_NEXT1_NEXT2_NEXT3 = 0xB4,  // tri=XYZ  (後1-後2-後3)
 
   // 0b11'00'xxxx  uint8×1
   KANJI_RUN_LEN = 0xC0,                  // kanji_run_len=N

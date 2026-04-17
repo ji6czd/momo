@@ -94,27 +94,37 @@ class FT:
     TYPE_PREV2                    = 0x52
     TYPE_NEXT1                    = 0x53
     TYPE_NEXT2                    = 0x54
+    TYPE_PREV3                    = 0x55
+    TYPE_NEXT3                    = 0x56
 
     TYPE_TRANSITION               = 0x60   # CharType×2
 
     TYPE_TRI_PREV2_PREV1_SELF     = 0x70   # CharType×3  (前2-前1-対象)
     TYPE_TRI_PREV1_SELF_NEXT1     = 0x71   # CharType×3  (前1-対象-後1)
     TYPE_TRI_SELF_NEXT1_NEXT2     = 0x72   # CharType×3  (対象-後1-後2)
+    TYPE_TRI_PREV3_PREV2_PREV1    = 0x73   # CharType×3  (前3-前2-前1)
+    TYPE_TRI_NEXT1_NEXT2_NEXT3    = 0x74   # CharType×3  (後1-後2-後3)
 
     CHAR_SELF                     = 0x90   # char32_t×1
     CHAR_PREV1                    = 0x91
     CHAR_PREV2                    = 0x92
     CHAR_NEXT1                    = 0x93
     CHAR_NEXT2                    = 0x94
+    CHAR_PREV3                    = 0x95
+    CHAR_NEXT3                    = 0x96
 
     BIGRAM_PREV1_SELF             = 0xA0   # char32_t×2
     BIGRAM_PREV2_PREV1            = 0xA1
     BIGRAM_SELF_NEXT1             = 0xA2
     BIGRAM_NEXT1_NEXT2            = 0xA3
+    BIGRAM_PREV3_PREV2            = 0xA4
+    BIGRAM_NEXT2_NEXT3            = 0xA5
 
     TRIGRAM_PREV2_PREV1_SELF      = 0xB0   # char32_t×3  (前2-前1-対象)
     TRIGRAM_PREV1_SELF_NEXT1      = 0xB1   # char32_t×3  (前1-対象-後1)
     TRIGRAM_SELF_NEXT1_NEXT2      = 0xB2   # char32_t×3  (対象-後1-後2)
+    TRIGRAM_PREV3_PREV2_PREV1     = 0xB3   # char32_t×3  (前3-前2-前1)
+    TRIGRAM_NEXT1_NEXT2_NEXT3     = 0xB4   # char32_t×3  (後1-後2-後3)
 
     KANJI_RUN_LEN                 = 0xC0   # uint8
     JAPANESE_NUMERIC_RUN_LEN      = 0xC1
@@ -190,6 +200,16 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
         cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
         return FT.TYPE_TRI_SELF_NEXT1_NEXT2, cts, [], None
 
+    m = re.fullmatch(r'type_tri_p3p2p1=(.+)-(.+)-(.+)', key)
+    if m:
+        cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
+        return FT.TYPE_TRI_PREV3_PREV2_PREV1, cts, [], None
+
+    m = re.fullmatch(r'type_tri_n1n2n3=(.+)-(.+)-(.+)', key)
+    if m:
+        cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
+        return FT.TYPE_TRI_NEXT1_NEXT2_NEXT3, cts, [], None
+
     # --- type_transition （CharType×2）---
     m = re.fullmatch(r'type_transition=(.+)->(.+)', key)
     if m:
@@ -212,6 +232,12 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
     m = re.fullmatch(r'\+2:type=(.+)', key)
     if m:
         return FT.TYPE_NEXT2, [CHARTYPE_TO_INT[m.group(1)]], [], None
+    m = re.fullmatch(r'-3:type=(.+)', key)
+    if m:
+        return FT.TYPE_PREV3, [CHARTYPE_TO_INT[m.group(1)]], [], None
+    m = re.fullmatch(r'\+3:type=(.+)', key)
+    if m:
+        return FT.TYPE_NEXT3, [CHARTYPE_TO_INT[m.group(1)]], [], None
 
     # --- trigram（char32_t×3）---
     m = re.fullmatch(r'tri_p2p1s=(.)(.)(.)', key)
@@ -229,6 +255,16 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
         cps = [ord(m.group(i)) for i in (1, 2, 3)]
         return FT.TRIGRAM_SELF_NEXT1_NEXT2, [], cps, None
 
+    m = re.fullmatch(r'tri_p3p2p1=(.)(.)(.)', key)
+    if m:
+        cps = [ord(m.group(i)) for i in (1, 2, 3)]
+        return FT.TRIGRAM_PREV3_PREV2_PREV1, [], cps, None
+
+    m = re.fullmatch(r'tri_n1n2n3=(.)(.)(.)', key)
+    if m:
+        cps = [ord(m.group(i)) for i in (1, 2, 3)]
+        return FT.TRIGRAM_NEXT1_NEXT2_NEXT3, [], cps, None
+
     # --- bigram（char32_t×2）---
     m = re.fullmatch(r'-1:bi=(.)(.)', key)
     if m:
@@ -242,6 +278,12 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
     m = re.fullmatch(r'\+1:\+2:bi=(.)(.)', key)
     if m:
         return FT.BIGRAM_NEXT1_NEXT2, [], [ord(m.group(1)), ord(m.group(2))], None
+    m = re.fullmatch(r'-3:-2:bi=(.)(.)', key)
+    if m:
+        return FT.BIGRAM_PREV3_PREV2, [], [ord(m.group(1)), ord(m.group(2))], None
+    m = re.fullmatch(r'\+2:\+3:bi=(.)(.)', key)
+    if m:
+        return FT.BIGRAM_NEXT2_NEXT3, [], [ord(m.group(1)), ord(m.group(2))], None
 
     # --- char 系（char32_t×1）---
     m = re.fullmatch(r'char=(.)', key)
@@ -259,6 +301,12 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
     m = re.fullmatch(r'\+2:char=(.)', key)
     if m:
         return FT.CHAR_NEXT2, [], [ord(m.group(1))], None
+    m = re.fullmatch(r'-3:char=(.)', key)
+    if m:
+        return FT.CHAR_PREV3, [], [ord(m.group(1))], None
+    m = re.fullmatch(r'\+3:char=(.)', key)
+    if m:
+        return FT.CHAR_NEXT3, [], [ord(m.group(1))], None
 
     raise ValueError(f"未知の特徴量キー: {key!r}")
 

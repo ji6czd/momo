@@ -16,6 +16,45 @@ MORA_SPLIT     = "+S"
 LABEL_CONTINUE = "---"
 LABEL_SKIP     = "_"
 
+# --- [特徴量キー定数] ---
+# 実際のキーは f'{F_xxx}={value}' の形式（ペイロードなし系は定数そのまま）。
+F_BIAS              = 'bias'
+F_CHAR_S            = 'char_s'
+F_CHAR_P1           = 'char_p1'
+F_CHAR_P2           = 'char_p2'
+F_CHAR_P3           = 'char_p3'
+F_CHAR_N1           = 'char_n1'
+F_CHAR_N2           = 'char_n2'
+F_CHAR_N3           = 'char_n3'
+F_TYPE_S            = 'type_s'
+F_TYPE_P1           = 'type_p1'
+F_TYPE_P2           = 'type_p2'
+F_TYPE_P3           = 'type_p3'
+F_TYPE_N1           = 'type_n1'
+F_TYPE_N2           = 'type_n2'
+F_TYPE_N3           = 'type_n3'
+F_BI_P1_S           = 'bi_p1_s'
+F_BI_P2_P1          = 'bi_p2_p1'
+F_BI_P3_P2          = 'bi_p3_p2'
+F_BI_S_N1           = 'bi_s_n1'
+F_BI_N1_N2          = 'bi_n1_n2'
+F_BI_N2_N3          = 'bi_n2_n3'
+F_TRI_P3_P2_P1      = 'tri_p3_p2_p1'
+F_TRI_P2_P1_S       = 'tri_p2_p1_s'
+F_TRI_P1_S_N1       = 'tri_p1_s_n1'
+F_TRI_S_N1_N2       = 'tri_s_n1_n2'
+F_TRI_N1_N2_N3      = 'tri_n1_n2_n3'
+F_TYPE_TRI_P3_P2_P1 = 'type_tri_p3_p2_p1'
+F_TYPE_TRI_P2_P1_S  = 'type_tri_p2_p1_s'
+F_TYPE_TRI_P1_S_N1  = 'type_tri_p1_s_n1'
+F_TYPE_TRI_S_N1_N2  = 'type_tri_s_n1_n2'
+F_TYPE_TRI_N1_N2_N3 = 'type_tri_n1_n2_n3'
+F_TYPE_TRANS_P1_S   = 'type_trans_p1_s'
+F_KANJI_RUN         = 'kanji_run'
+F_KANJI_POS_FIRST   = 'kanji_pos_first'
+F_JNUM_RUN          = 'jnum_run'
+F_JNUM_RUN_P1       = 'jnum_run_p1'
+
 
 def get_units(text: str) -> List[Tuple[str, int, str]]:
     """
@@ -107,62 +146,62 @@ def compute_source_features(
         next3_ctype = source_seq[i + 3][2] if i < n - 3 else ""
 
         features: FeatureDict = {
-            'bias': 1.0,
-            f'char={char}': 1.0,
-            f'type={ctype}': 1.0,
+            F_BIAS: 1.0,
+            f'{F_CHAR_S}={char}': 1.0,
+            f'{F_TYPE_S}={ctype}': 1.0,
         }
 
         if i > 0:
-            features[f'-1:char={prev_char}'] = 1.0
-            features[f'-1:type={prev_ctype}'] = 1.0
-            features[f'-1:bi={prev_char}{char}'] = 1.0
+            features[f'{F_CHAR_P1}={prev_char}'] = 1.0
+            features[f'{F_TYPE_P1}={prev_ctype}'] = 1.0
+            features[f'{F_BI_P1_S}={prev_char}{char}'] = 1.0
             if window >= 5 and i > 1:
-                features[f'-2:char={prev2_char}'] = 1.0
-                features[f'-2:type={prev2_ctype}'] = 1.0
-                features[f'-2:-1:bi={prev2_char}{prev_char}'] = 1.0
+                features[f'{F_CHAR_P2}={prev2_char}'] = 1.0
+                features[f'{F_TYPE_P2}={prev2_ctype}'] = 1.0
+                features[f'{F_BI_P2_P1}={prev2_char}{prev_char}'] = 1.0
                 if window >= 7 and i > 2:
-                    features[f'-3:char={prev3_char}'] = 1.0
-                    features[f'-3:type={prev3_ctype}'] = 1.0
-                    features[f'-3:-2:bi={prev3_char}{prev2_char}'] = 1.0
+                    features[f'{F_CHAR_P3}={prev3_char}'] = 1.0
+                    features[f'{F_TYPE_P3}={prev3_ctype}'] = 1.0
+                    features[f'{F_BI_P3_P2}={prev3_char}{prev2_char}'] = 1.0
         if i < n - 1:
-            features[f'+1:char={next_char}'] = 1.0
-            features[f'+1:type={next_ctype}'] = 1.0
-            features[f'+1:bi={char}{next_char}'] = 1.0
+            features[f'{F_CHAR_N1}={next_char}'] = 1.0
+            features[f'{F_TYPE_N1}={next_ctype}'] = 1.0
+            features[f'{F_BI_S_N1}={char}{next_char}'] = 1.0
             if window >= 5 and i < n - 2:
-                features[f'+2:char={next2_char}'] = 1.0
-                features[f'+2:type={next2_ctype}'] = 1.0
-                features[f'+1:+2:bi={next_char}{next2_char}'] = 1.0
+                features[f'{F_CHAR_N2}={next2_char}'] = 1.0
+                features[f'{F_TYPE_N2}={next2_ctype}'] = 1.0
+                features[f'{F_BI_N1_N2}={next_char}{next2_char}'] = 1.0
                 if window >= 7 and i < n - 3:
-                    features[f'+3:char={next3_char}'] = 1.0
-                    features[f'+3:type={next3_ctype}'] = 1.0
-                    features[f'+2:+3:bi={next2_char}{next3_char}'] = 1.0
+                    features[f'{F_CHAR_N3}={next3_char}'] = 1.0
+                    features[f'{F_TYPE_N3}={next3_ctype}'] = 1.0
+                    features[f'{F_BI_N2_N3}={next2_char}{next3_char}'] = 1.0
         if i > 0:
-            features[f'type_transition={prev_ctype}->{ctype}'] = 1.0
+            features[f'{F_TYPE_TRANS_P1_S}={prev_ctype}->{ctype}'] = 1.0
 
         # trigram: 前3-前2-前1（window=7 のみ）
         if window >= 7 and i > 2:
-            features[f'tri_p3p2p1={prev3_char}{prev2_char}{prev_char}'] = 1.0
-            features[f'type_tri_p3p2p1={prev3_ctype}-{prev2_ctype}-{prev_ctype}'] = 1.0
+            features[f'{F_TRI_P3_P2_P1}={prev3_char}{prev2_char}{prev_char}'] = 1.0
+            features[f'{F_TYPE_TRI_P3_P2_P1}={prev3_ctype}-{prev2_ctype}-{prev_ctype}'] = 1.0
 
         # trigram: 前2-前1-対象（window=5 以上）
         if window >= 5 and i > 1:
-            features[f'tri_p2p1s={prev2_char}{prev_char}{char}'] = 1.0
-            features[f'type_tri_p2p1s={prev2_ctype}-{prev_ctype}-{ctype}'] = 1.0
+            features[f'{F_TRI_P2_P1_S}={prev2_char}{prev_char}{char}'] = 1.0
+            features[f'{F_TYPE_TRI_P2_P1_S}={prev2_ctype}-{prev_ctype}-{ctype}'] = 1.0
 
         # trigram: 前1-対象-後1
         if i > 0 and i < n - 1:
-            features[f'tri_p1sn1={prev_char}{char}{next_char}'] = 1.0
-            features[f'type_tri_p1sn1={prev_ctype}-{ctype}-{next_ctype}'] = 1.0
+            features[f'{F_TRI_P1_S_N1}={prev_char}{char}{next_char}'] = 1.0
+            features[f'{F_TYPE_TRI_P1_S_N1}={prev_ctype}-{ctype}-{next_ctype}'] = 1.0
 
         # trigram: 対象-後1-後2（window=5 以上）
         if window >= 5 and i < n - 2:
-            features[f'tri_sn1n2={char}{next_char}{next2_char}'] = 1.0
-            features[f'type_tri_sn1n2={ctype}-{next_ctype}-{next2_ctype}'] = 1.0
+            features[f'{F_TRI_S_N1_N2}={char}{next_char}{next2_char}'] = 1.0
+            features[f'{F_TYPE_TRI_S_N1_N2}={ctype}-{next_ctype}-{next2_ctype}'] = 1.0
 
         # trigram: 後1-後2-後3（window=7 のみ）
         if window >= 7 and i < n - 3:
-            features[f'tri_n1n2n3={next_char}{next2_char}{next3_char}'] = 1.0
-            features[f'type_tri_n1n2n3={next_ctype}-{next2_ctype}-{next3_ctype}'] = 1.0
+            features[f'{F_TRI_N1_N2_N3}={next_char}{next2_char}{next3_char}'] = 1.0
+            features[f'{F_TYPE_TRI_N1_N2_N3}={next_ctype}-{next2_ctype}-{next3_ctype}'] = 1.0
 
         if ctype == 'KANJI':
             run = 1
@@ -174,10 +213,10 @@ def compute_source_features(
                 run += 1; j -= 1
 
             run_key = str(run) if run <= 4 else '5+'
-            features[f'kanji_run_len={run_key}'] = 1.0
+            features[f'{F_KANJI_RUN}={run_key}'] = 1.0
 
             if i == 0 or source_seq[i - 1][2] != 'KANJI':
-                features['kanji_pos_first'] = 1.0
+                features[F_KANJI_POS_FIRST] = 1.0
 
             # 左隣の JAPANESE_NUMERIC 連続長を「日」などの隣接 KANJI に伝える
             if i > 0 and source_seq[i - 1][2] == 'JAPANESE_NUMERIC':
@@ -186,7 +225,7 @@ def compute_source_features(
                 while j >= 0 and source_seq[j][2] == 'JAPANESE_NUMERIC':
                     num_run += 1; j -= 1
                 num_run_key = str(num_run) if num_run <= 4 else '5+'
-                features[f'-1:japanese_numeric_run_len={num_run_key}'] = 1.0
+                features[f'{F_JNUM_RUN_P1}={num_run_key}'] = 1.0
 
         if ctype == 'JAPANESE_NUMERIC':
             run = 1
@@ -198,7 +237,7 @@ def compute_source_features(
                 run += 1; j -= 1
 
             run_key = str(run) if run <= 4 else '5+'
-            features[f'japanese_numeric_run_len={run_key}'] = 1.0
+            features[f'{F_JNUM_RUN}={run_key}'] = 1.0
 
         result.append(features)
 

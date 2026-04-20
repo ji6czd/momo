@@ -171,140 +171,140 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
     if key == "kanji_pos_first":
         return FT.KANJI_POS_FIRST, [], [], None
 
-    # --- run_len 系（uint8ペイロード）---
-    m = re.fullmatch(r'kanji_run_len=(.+)', key)
+    # --- run 系（uint8ペイロード）---
+    m = re.fullmatch(r'kanji_run=(.+)', key)
     if m:
         return FT.KANJI_RUN_LEN, [], [], _RUN_LEN_MAP[m.group(1)]
 
-    m = re.fullmatch(r'japanese_numeric_run_len=(.+)', key)
+    m = re.fullmatch(r'jnum_run=(.+)', key)
     if m:
         return FT.JAPANESE_NUMERIC_RUN_LEN, [], [], _RUN_LEN_MAP[m.group(1)]
 
-    m = re.fullmatch(r'-1:japanese_numeric_run_len=(.+)', key)
+    m = re.fullmatch(r'jnum_run_p1=(.+)', key)
     if m:
         return FT.PREV_JAPANESE_NUMERIC_RUN_LEN, [], [], _RUN_LEN_MAP[m.group(1)]
 
     # --- type_tri （CharType×3）---
-    m = re.fullmatch(r'type_tri_p2p1s=(.+)-(.+)-(.+)', key)
+    m = re.fullmatch(r'type_tri_p2_p1_s=(.+)-(.+)-(.+)', key)
     if m:
         cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
         return FT.TYPE_TRI_PREV2_PREV1_SELF, cts, [], None
 
-    m = re.fullmatch(r'type_tri_p1sn1=(.+)-(.+)-(.+)', key)
+    m = re.fullmatch(r'type_tri_p1_s_n1=(.+)-(.+)-(.+)', key)
     if m:
         cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
         return FT.TYPE_TRI_PREV1_SELF_NEXT1, cts, [], None
 
-    m = re.fullmatch(r'type_tri_sn1n2=(.+)-(.+)-(.+)', key)
+    m = re.fullmatch(r'type_tri_s_n1_n2=(.+)-(.+)-(.+)', key)
     if m:
         cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
         return FT.TYPE_TRI_SELF_NEXT1_NEXT2, cts, [], None
 
-    m = re.fullmatch(r'type_tri_p3p2p1=(.+)-(.+)-(.+)', key)
+    m = re.fullmatch(r'type_tri_p3_p2_p1=(.+)-(.+)-(.+)', key)
     if m:
         cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
         return FT.TYPE_TRI_PREV3_PREV2_PREV1, cts, [], None
 
-    m = re.fullmatch(r'type_tri_n1n2n3=(.+)-(.+)-(.+)', key)
+    m = re.fullmatch(r'type_tri_n1_n2_n3=(.+)-(.+)-(.+)', key)
     if m:
         cts = [CHARTYPE_TO_INT[m.group(i)] for i in (1, 2, 3)]
         return FT.TYPE_TRI_NEXT1_NEXT2_NEXT3, cts, [], None
 
-    # --- type_transition （CharType×2）---
-    m = re.fullmatch(r'type_transition=(.+)->(.+)', key)
+    # --- type_trans_p1_s （CharType×2）---
+    m = re.fullmatch(r'type_trans_p1_s=(.+)->(.+)', key)
     if m:
         cts = [CHARTYPE_TO_INT[m.group(1)], CHARTYPE_TO_INT[m.group(2)]]
         return FT.TYPE_TRANSITION, cts, [], None
 
     # --- type 系（CharType×1）---
-    m = re.fullmatch(r'type=(.+)', key)
+    m = re.fullmatch(r'type_s=(.+)', key)
     if m:
         return FT.TYPE_SELF, [CHARTYPE_TO_INT[m.group(1)]], [], None
-    m = re.fullmatch(r'-1:type=(.+)', key)
+    m = re.fullmatch(r'type_p1=(.+)', key)
     if m:
         return FT.TYPE_PREV1, [CHARTYPE_TO_INT[m.group(1)]], [], None
-    m = re.fullmatch(r'-2:type=(.+)', key)
+    m = re.fullmatch(r'type_p2=(.+)', key)
     if m:
         return FT.TYPE_PREV2, [CHARTYPE_TO_INT[m.group(1)]], [], None
-    m = re.fullmatch(r'\+1:type=(.+)', key)
+    m = re.fullmatch(r'type_n1=(.+)', key)
     if m:
         return FT.TYPE_NEXT1, [CHARTYPE_TO_INT[m.group(1)]], [], None
-    m = re.fullmatch(r'\+2:type=(.+)', key)
+    m = re.fullmatch(r'type_n2=(.+)', key)
     if m:
         return FT.TYPE_NEXT2, [CHARTYPE_TO_INT[m.group(1)]], [], None
-    m = re.fullmatch(r'-3:type=(.+)', key)
+    m = re.fullmatch(r'type_p3=(.+)', key)
     if m:
         return FT.TYPE_PREV3, [CHARTYPE_TO_INT[m.group(1)]], [], None
-    m = re.fullmatch(r'\+3:type=(.+)', key)
+    m = re.fullmatch(r'type_n3=(.+)', key)
     if m:
         return FT.TYPE_NEXT3, [CHARTYPE_TO_INT[m.group(1)]], [], None
 
     # --- trigram（char32_t×3）---
-    m = re.fullmatch(r'tri_p2p1s=(.)(.)(.)', key)
+    m = re.fullmatch(r'tri_p2_p1_s=(.)(.)(.)', key)
     if m:
         cps = [ord(m.group(i)) for i in (1, 2, 3)]
         return FT.TRIGRAM_PREV2_PREV1_SELF, [], cps, None
 
-    m = re.fullmatch(r'tri_p1sn1=(.)(.)(.)', key)
+    m = re.fullmatch(r'tri_p1_s_n1=(.)(.)(.)', key)
     if m:
         cps = [ord(m.group(i)) for i in (1, 2, 3)]
         return FT.TRIGRAM_PREV1_SELF_NEXT1, [], cps, None
 
-    m = re.fullmatch(r'tri_sn1n2=(.)(.)(.)', key)
+    m = re.fullmatch(r'tri_s_n1_n2=(.)(.)(.)', key)
     if m:
         cps = [ord(m.group(i)) for i in (1, 2, 3)]
         return FT.TRIGRAM_SELF_NEXT1_NEXT2, [], cps, None
 
-    m = re.fullmatch(r'tri_p3p2p1=(.)(.)(.)', key)
+    m = re.fullmatch(r'tri_p3_p2_p1=(.)(.)(.)', key)
     if m:
         cps = [ord(m.group(i)) for i in (1, 2, 3)]
         return FT.TRIGRAM_PREV3_PREV2_PREV1, [], cps, None
 
-    m = re.fullmatch(r'tri_n1n2n3=(.)(.)(.)', key)
+    m = re.fullmatch(r'tri_n1_n2_n3=(.)(.)(.)', key)
     if m:
         cps = [ord(m.group(i)) for i in (1, 2, 3)]
         return FT.TRIGRAM_NEXT1_NEXT2_NEXT3, [], cps, None
 
     # --- bigram（char32_t×2）---
-    m = re.fullmatch(r'-1:bi=(.)(.)', key)
+    m = re.fullmatch(r'bi_p1_s=(.)(.)', key)
     if m:
         return FT.BIGRAM_PREV1_SELF, [], [ord(m.group(1)), ord(m.group(2))], None
-    m = re.fullmatch(r'-2:-1:bi=(.)(.)', key)
+    m = re.fullmatch(r'bi_p2_p1=(.)(.)', key)
     if m:
         return FT.BIGRAM_PREV2_PREV1, [], [ord(m.group(1)), ord(m.group(2))], None
-    m = re.fullmatch(r'\+1:bi=(.)(.)', key)
+    m = re.fullmatch(r'bi_s_n1=(.)(.)', key)
     if m:
         return FT.BIGRAM_SELF_NEXT1, [], [ord(m.group(1)), ord(m.group(2))], None
-    m = re.fullmatch(r'\+1:\+2:bi=(.)(.)', key)
+    m = re.fullmatch(r'bi_n1_n2=(.)(.)', key)
     if m:
         return FT.BIGRAM_NEXT1_NEXT2, [], [ord(m.group(1)), ord(m.group(2))], None
-    m = re.fullmatch(r'-3:-2:bi=(.)(.)', key)
+    m = re.fullmatch(r'bi_p3_p2=(.)(.)', key)
     if m:
         return FT.BIGRAM_PREV3_PREV2, [], [ord(m.group(1)), ord(m.group(2))], None
-    m = re.fullmatch(r'\+2:\+3:bi=(.)(.)', key)
+    m = re.fullmatch(r'bi_n2_n3=(.)(.)', key)
     if m:
         return FT.BIGRAM_NEXT2_NEXT3, [], [ord(m.group(1)), ord(m.group(2))], None
 
     # --- char 系（char32_t×1）---
-    m = re.fullmatch(r'char=(.)', key)
+    m = re.fullmatch(r'char_s=(.)', key)
     if m:
         return FT.CHAR_SELF, [], [ord(m.group(1))], None
-    m = re.fullmatch(r'-1:char=(.)', key)
+    m = re.fullmatch(r'char_p1=(.)', key)
     if m:
         return FT.CHAR_PREV1, [], [ord(m.group(1))], None
-    m = re.fullmatch(r'-2:char=(.)', key)
+    m = re.fullmatch(r'char_p2=(.)', key)
     if m:
         return FT.CHAR_PREV2, [], [ord(m.group(1))], None
-    m = re.fullmatch(r'\+1:char=(.)', key)
+    m = re.fullmatch(r'char_n1=(.)', key)
     if m:
         return FT.CHAR_NEXT1, [], [ord(m.group(1))], None
-    m = re.fullmatch(r'\+2:char=(.)', key)
+    m = re.fullmatch(r'char_n2=(.)', key)
     if m:
         return FT.CHAR_NEXT2, [], [ord(m.group(1))], None
-    m = re.fullmatch(r'-3:char=(.)', key)
+    m = re.fullmatch(r'char_p3=(.)', key)
     if m:
         return FT.CHAR_PREV3, [], [ord(m.group(1))], None
-    m = re.fullmatch(r'\+3:char=(.)', key)
+    m = re.fullmatch(r'char_n3=(.)', key)
     if m:
         return FT.CHAR_NEXT3, [], [ord(m.group(1))], None
 

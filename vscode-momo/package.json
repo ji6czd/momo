@@ -1,0 +1,57 @@
+{
+  "name": "momo-translator",
+  "displayName": "momo-translator",
+  "description": "",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.116.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "momo-translator.translate",
+        "title": "Translate to kana"
+      }
+    ]
+  },
+  "configuration": {
+    "type": "object",
+    "title": "Momo Translator Configuration",
+    "properties": {
+      "momoTranslator.command": {
+        "type": "string",
+        "default": "momo",
+        "description": "The command to run the momo translator. This can be an absolute path or a command available in the system PATH."
+      },
+      "momoTranslator.model": {
+        "type": "string",
+        "default": "basic_data.zip",
+        "description": "The model to use for translation. This should correspond to a model available in the momo translator."
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "pnpm run compile && pnpm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.116.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.9.1",
+    "eslint": "^9.39.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  }
+}

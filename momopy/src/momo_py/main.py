@@ -1,7 +1,6 @@
 import sys
 import argparse
 import time
-from typing import List, Tuple
 from importlib.metadata import version
 
 from .trainer import create_data, train
@@ -25,12 +24,12 @@ def run_translate(opt_segment: bool = False):
             kana = t.segment_kana_string(src) if opt_segment else t.convert_to_kana(src)
             braille = t.convert_to_braille(src)
             print(src)
-            print(kana)
             print(braille)
+            print(kana)
     except KeyboardInterrupt:
         print("\n🛑 翻訳モード終了。")
 
-def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile: bool = False, segmented_output: bool = False) -> None:
+def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile: bool = False, segmented_output: bool = False, show_source: bool = True, show_kana: bool = True, show_braille: bool = True) -> None:
     """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード。
     show_trace が True の場合、各文字の決定根拠をターミナルにも表示する。
     """
@@ -46,12 +45,13 @@ def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile:
             print(f"予測時間: {(time.perf_counter() - t1)*1000:.2f} ms") if show_profile else None
             if show_trace:
                 print(result.to_json())
-            if segmented_output:
+            kana: str = result.format_segmented() if segmented_output else result.kana_text
+            if show_source:
                 print(result.source_text)
-                print(result.format_segmented())
+            if show_braille:
                 print(to_jp_braille(result.kana_text))
-            else:
-                print(result.kana_text)
+            if show_kana:
+                print(kana)
 
             if show_trace:
                 print("─" * 48, file=sys.stderr)
@@ -120,6 +120,9 @@ def main():
                                 help="--trace時に表示する特徴量寄与度の上位件数（デフォルト: 8、0で無効）")
     predict_parser.add_argument("--profile", action="store_true", help="予測の実行時間を表示する")
     predict_parser.add_argument("--segment", action="store_true", help="予測結果を文字ごとに分割して出力する")
+    predict_parser.add_argument("--no-source", action="store_true", help="予測結果のみ出力（ソーステキストを出力しない）")
+    predict_parser.add_argument("--no-kana", action="store_true", help="予測結果の点字のみ出力（カナテキストを出力しない）")
+    predict_parser.add_argument("--no-braille", action="store_true", help="予測結果のカナのみ出力（点字テキストを出力しない）")
     
     translate_parser = subparsers.add_parser("translate")
     translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
@@ -162,7 +165,7 @@ def main():
             single_kanji_dict_path=args.single_dict,
             explain_top_n=explain_top_n,
         )
-        run_predict(config, show_trace=args.trace, show_profile=args.profile, segmented_output=args.segment)
+        run_predict(config, show_trace=args.trace, show_profile=args.profile, segmented_output=args.segment, show_source=not args.no_source, show_kana=not args.no_kana, show_braille=not args.no_braille)
         
     elif args.command == "translate":
         run_translate(args.segment)

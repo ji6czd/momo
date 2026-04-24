@@ -5,6 +5,7 @@ from importlib.metadata import version
 from flask import Flask, request
 from momo_py import PredictionResult, Predictor, Translator, PredictorConfig
 from momo_py import pybraille
+
 app = Flask(__name__)
 
 version_info = f"Momo version {version('momo_py')}"
@@ -24,7 +25,13 @@ top_page = f"""
     <form action="/predict" method="get">
         <label for="source">点訳したい文章を入力してね：</label><br>
         <input type="text" id="source" name="source" required><br>
-        <input type="submit" value="CRF機械学習点訳">
+        <input type="radio" id="small" name="model" value="small">
+        <label for="small">Small (約5MB)</label><br>
+        <input type="radio" id="medium" name="model" value="medium" checked>
+        <label for="medium">Medium (約14MB)</label><br>
+        <input type="radio" id="large" name="model" value="large">
+        <label for="large">Large (約21MB)</label><br>
+        <input type="submit" value="LR機械学習点訳">
         <input type="submit" formaction="/translate" value="Sudachi辞書点訳">
     </form>
     </p>
@@ -32,7 +39,6 @@ top_page = f"""
 </body>
 </html>
 """
-
 
 predict_page = """<!DOCTYPE html>
 <html lang="ja">
@@ -51,7 +57,13 @@ predict_page = """<!DOCTYPE html>
     <form action="/predict" method="get">
         <label for="source">点訳したい文章を入力してね：</label><br>
         <input type="text" id="source" value="{source}" name="source" required><br>
-        <input type="submit" value="CRF機械学習点訳">
+        <input type="radio" id="small" name="model" value="small">
+        <label for="small">Small (約5MB)</label><br>
+        <input type="radio" id="medium" name="model" value="medium" checked>
+        <label for="medium">Medium (約14MB)</label><br>
+        <input type="radio" id="large" name="model" value="large">
+        <label for="large">Large (約21MB)</label><br>
+        <input type="submit" value="LR機械学習点訳">
         <input type="submit" formaction="/translate" value="Sudachi 辞書点訳">
     </form>
     </p>
@@ -85,19 +97,18 @@ translate_page = """<!DOCTYPE html>
 </body></html>
 """
 
-model_file = "./dataset/basic_data.zip"
-custom_dic_file = "./dataset/custom_dictionary.tsv"
+
 def make_characters_table(res: PredictionResult) -> str:
-    '''
+    """
     点訳結果の詳細を表示する。
-    '''
+    """
     characters_table = "<table border='1'><tr><th>元の文字</th>"
 
     for i, idx in enumerate(res.kana_to_src_index):
-        if res.kana_text[i] == ' ':
-            orig_char = ' '
+        if res.kana_text[i] == " ":
+            orig_char = " "
         else:
-            orig_char = res.source_text[idx] if idx < len(res.source_text) else ''
+            orig_char = res.source_text[idx] if idx < len(res.source_text) else ""
         characters_table += f"<td>{orig_char}</td>"
     characters_table += "</tr><tr><th>文字</th>"
     # かな約結果を並べる
@@ -114,44 +125,69 @@ def make_characters_table(res: PredictionResult) -> str:
     characters_table += "</tr></table>"
     return characters_table
 
+
 @app.route("/")
 def hello() -> str:
     return top_page
 
+
 @app.route("/predict", methods=["GET"])
 def predict() -> str:
-    source = request.args.get('source')
+    source = request.args.get("source")
+    model = request.args.get("model", "large")
+    if model == "small":
+        model_file = "./dataset/basic_data_3.zip"
+    elif model == "medium":
+        model_file = "./dataset/basic_data_5.zip"
+    else:
+        model_file = "./dataset/basic_data_7.zip"
+    custom_dic_file = "./dataset/custom_dictionary.tsv"
     cfg = PredictorConfig(model_path=model_file, custom_dict_path=custom_dic_file)
     prd = Predictor(cfg)
-    model_version = prd.get_version_info().get('trained_at', '不明')
+    model_version = prd.get_version_info().get("trained_at", "不明")
 
     res = prd.predict(source)
     braille = pybraille.to_jp_braille(res.kana_text)
-    
-    return predict_page.format(source=source, result=res.kana_text, confidences_table=make_characters_table(res), braille_result=braille, model_version=model_version, version_info=version_info)
+
+    return predict_page.format(
+        source=source,
+        result=res.kana_text,
+        confidences_table=make_characters_table(res),
+        braille_result=braille,
+        model_version=model_version,
+        version_info=version_info,
+    )
+
 
 @app.route("/translate", methods=["GET"])
 def translate() -> str:
-    source = request.args.get('source')
+    source = request.args.get("source")
     t = Translator()
     kana = t.convert_to_kana(source)
     braille = pybraille.to_jp_braille(kana)
-    return translate_page.format(source=source, result=kana, braille_result=braille, version_info=version_info, sudachi_version=version('sudachipy'))
+    return translate_page.format(
+        source=source,
+        result=kana,
+        braille_result=braille,
+        version_info=version_info,
+        sudachi_version=version("sudachipy"),
+    )
+
 
 @app.route("/api/predict", methods=["GET"])
 def api_predict() -> str:
-    source = request.args.get('source')
+    source = request.args.get("source")
     cfg = PredictorConfig(model_path=model_file, custom_dict_path=custom_dic_file)
     p = Predictor(cfg)
     return p.predict(source).to_json()
-    
+
+
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:
     # Safely exit program
     sys.exit(0)
 
 
 if __name__ == "__main__":
-
     # handles Ctrl-C termination
     signal.signal(signal.SIGINT, shutdown_handler)
 

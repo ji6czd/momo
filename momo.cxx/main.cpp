@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <chrono>
 
 #include "CLI/CLI.hpp"
 #include "predictor.hpp"
@@ -22,7 +23,7 @@ bool is_utf8_firstbyte(unsigned char c) { return (c & 0xC0) != 0x80; }
  * @param compute_confidence 自信度スコアを計算するかどうかのフラグ
  * @return 終了コード（0は成功、1はエラー）
  */
-int predict(const PredictorConfig& config, bool compute_confidence) {
+int predict(const PredictorConfig& config, bool compute_confidence, bool profile) {
   Predictor predictor(config);
   try {
     predictor.load();
@@ -39,9 +40,12 @@ int predict(const PredictorConfig& config, bool compute_confidence) {
       continue;
     }
     try {
+      auto start = std::chrono::high_resolution_clock::now();
       const PredictionResult result = predictor.predict(line);
+      auto end = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> elapsed = end - start;
+      if (profile) std::cout << "予測時間: " << elapsed.count() << "秒\n";
       std::cout << result.kana_text << "\n";
-      predictor.config().model_path();  // ダミー呼び出し（config_へのアクセスを行うことで、予測結果の出力前にモデルのロードが完了していることを保証）
       if (compute_confidence) {
         for (size_t i = 0; i < result.confidences.size(); ++i) {
           if (is_utf8_firstbyte(static_cast<unsigned char>(result.kana_text[i]))) {
@@ -66,8 +70,10 @@ int main(int argc, char* argv[]) {
   float confidence_threshold = 0.3f;
   float numeric_confidence_threshold = 0.5f;
   bool compute_confidence = false;
+  bool profile = false;
   app.add_option("--model", model_path, "Path to model file (.mbm)")->default_val("basic_data.mbm");
   app.add_flag("--confidence", compute_confidence, "Compute confidence scores (marginal probabilities)");
+  app.add_flag("--profile", profile, "Enable profiling (not implemented yet)")->default_val(false);
   app.add_option("--confidence-threshold", confidence_threshold, "KANJI fallback threshold (default: 0.3)");
   app.add_option("--numeric-confidence-threshold", numeric_confidence_threshold,
                  "JAPANESE_NUMERIC rule-based conversion threshold (default: 0.5)");
@@ -82,5 +88,5 @@ int main(int argc, char* argv[]) {
   config.set_confidence_threshold(confidence_threshold);
   config.set_numeric_confidence_threshold(numeric_confidence_threshold);
 
-  return momo::predict(config, compute_confidence);
+  return momo::predict(config, compute_confidence, profile);
 }

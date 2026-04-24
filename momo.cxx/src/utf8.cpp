@@ -1,6 +1,7 @@
 #include "utf8.hpp"
 
 #include <cstdint>
+#include "char_type_generated.hpp"
 
 // ============================================================
 // UTF-8 → char32_t
@@ -138,56 +139,21 @@ static bool is_japanese_numeric_char(char32_t cp) {
   return false;
 }
 
-// 記号サブカテゴリ
-static CharType symbol_subtype(char32_t cp) {
-  // 閉じ括弧類
-  static const char32_t close_syms[] = {
-      U'」', U'』', U')', U'）', U'】', U'〕', U'}', U'｝', U'〉', U'》', U'"', U'\'',
-  };
-  for (char32_t c : close_syms) {
-    if (cp == c) return CharType::SYMBOL_CLOSE;
-  }
-
-  // 開き括弧類
-  static const char32_t open_syms[] = {
-      U'「', U'『', U'(', U'（', U'【', U'〔', U'{', U'｛', U'〈', U'《',
-  };
-  for (char32_t c : open_syms) {
-    if (cp == c) return CharType::SYMBOL_OPEN;
-  }
-
-  // 文末記号類
-  static const char32_t stop_syms[] = {
-      U'。', U'！', U'？', U'.', U'!', U'?',
-  };
-  for (char32_t c : stop_syms) {
-    if (cp == c) return CharType::SYMBOL_STOP;
-  }
-
-  // 読点・中点類
-  static const char32_t pause_syms[] = {
-      U'、',
-      U'・',
-      U',',
-  };
-  for (char32_t c : pause_syms) {
-    if (cp == c) return CharType::SYMBOL_PAUSE;
-  }
-
-  return CharType::SYMBOL;
-}
-
 CharType get_char_type(char32_t cp) {
   // 空白
   if (cp == U' ' || cp == U'\t' || cp == U'\n' || cp == U'\r' || cp == U'　') {
     return CharType::SPACE;
   }
 
-  // ASCII数字
-  if (cp >= U'0' && cp <= U'9') return CharType::NUMERIC;
+  // 数字（ASCII・全角）
+  if ((cp >= U'0' && cp <= U'9') || (cp >= U'０' && cp <= U'９')) return CharType::NUMERIC;
 
-  // 全角数字
-  if (cp >= U'０' && cp <= U'９') return CharType::NUMERIC;
+  // 記号ルックアップ — Python は unicodedata.category() の P*/S* をレンジより先に判定する。
+  // char_type_generated.hpp の symbol_type_lookup() がその挙動を完全に再現する。
+  {
+    const CharType st = symbol_type_lookup(cp);
+    if (st != CharType::OTHER) return st;
+  }
 
   // ひらがな (U+3041–U+309F)
   if (cp >= 0x3041 && cp <= 0x309F) return CharType::HIRAGANA;
@@ -199,37 +165,11 @@ CharType get_char_type(char32_t cp) {
   if (is_japanese_numeric_char(cp)) return CharType::JAPANESE_NUMERIC;
 
   // CJK統合漢字 (U+4E00–U+9FFF) および拡張A (U+3400–U+4DBF)
-  if ((cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0x3400 && cp <= 0x4DBF)) {
-    return CharType::KANJI;
-  }
+  if ((cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0x3400 && cp <= 0x4DBF)) return CharType::KANJI;
 
-  // ラテン文字（ASCII大文字・小文字）
-  if ((cp >= U'A' && cp <= U'Z') || (cp >= U'a' && cp <= U'z')) {
-    return CharType::ALPHA;
-  }
-
-  // 全角ラテン文字 (U+FF21–U+FF3A, U+FF41–U+FF5A)
-  if ((cp >= 0xFF21 && cp <= 0xFF3A) || (cp >= 0xFF41 && cp <= 0xFF5A)) {
-    return CharType::ALPHA;
-  }
-
-  // 記号類（Unicode の P* / S* カテゴリに相当する主要範囲）
-  // ASCII 記号
-  if ((cp >= 0x21 && cp <= 0x2F)        // !"#$%&'()*+,-./
-      || (cp >= 0x3A && cp <= 0x40)     // :;<=>?@
-      || (cp >= 0x5B && cp <= 0x60)     // [\]^_`
-      || (cp >= 0x7B && cp <= 0x7E)) {  // {|}~
-    return symbol_subtype(cp);
-  }
-
-  // CJK記号・句読点 (U+3000–U+303F)
-  if (cp >= 0x3000 && cp <= 0x303F) return symbol_subtype(cp);
-
-  // 全角記号 (U+FF01–U+FF0F, U+FF1A–U+FF20, U+FF3B–U+FF40, U+FF5B–U+FF65)
-  if ((cp >= 0xFF01 && cp <= 0xFF0F) || (cp >= 0xFF1A && cp <= 0xFF20) || (cp >= 0xFF3B && cp <= 0xFF40) ||
-      (cp >= 0xFF5B && cp <= 0xFF65)) {
-    return symbol_subtype(cp);
-  }
+  // ラテン文字（ASCII・全角）
+  if ((cp >= U'A' && cp <= U'Z') || (cp >= U'a' && cp <= U'z')) return CharType::ALPHA;
+  if ((cp >= 0xFF21 && cp <= 0xFF3A) || (cp >= 0xFF41 && cp <= 0xFF5A)) return CharType::ALPHA;
 
   return CharType::OTHER;
 }

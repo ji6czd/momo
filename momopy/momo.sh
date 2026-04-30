@@ -37,15 +37,9 @@ label() {
 build_model() {
     echo "Building model..."
     uv run ${cmd} createdata --raw=${raw}
-    uv run ${cmd} train --tsv=${tsv} --window 7
-    mv ${model}.zip ${model}_7.zip
-    mv ${model}.mbm ${model}_7.mbm
-    uv run ${cmd} train --tsv=${tsv} --window 5
-    mv ${model}.zip ${model}_5.zip
-    mv ${model}.mbm ${model}_5.mbm
-    uv run ${cmd} train --tsv=${tsv} --window 3
-    mv ${model}.zip ${model}_3.zip
-    mv ${model}.mbm ${model}_3.mbm
+    uv run ${cmd} train --tsv=${tsv} --window 7 --model ${model}_7
+    uv run ${cmd} train --tsv ${tsv} --window 5 --model ${model}_5
+    uv run ${cmd} train --tsv ${tsv} --window 3 --model ${model}_3
 }
 
 # メイン処理

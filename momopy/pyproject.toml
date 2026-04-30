@@ -9,7 +9,6 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "protobuf",
-    "python-crfsuite>=0.9.12",
     "scikit-learn>=1.8.0",
     "sudachidict-core",
     "sudachipy",
@@ -21,6 +20,7 @@ build-backend = "uv_build"
 [project.scripts]
 momo = "momo_py.main:main"
 lookup = "momo_py.lookup:main"
+makedic = "momo_py.makedic:main"
 [[tool.mypy.overrides]]
 module = ["pycrfsuite.*"]
 ignore_missing_imports = true

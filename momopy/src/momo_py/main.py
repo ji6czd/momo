@@ -136,10 +136,13 @@ def main():
     
     trainer_parser = subparsers.add_parser("train")
     trainer_parser.add_argument("--tsv", required=True)
+    trainer_parser.add_argument("--model", help="学習済みモデルのファイルパス（デフォルトはtsvファイル名に基づく）")
     trainer_parser.add_argument("--window", type=int, default=7, choices=[3, 5, 7],
                             help="特徴量ウィンドウサイズ（3, 5, 7、デフォルト: 7）")
     trainer_parser.add_argument("--dry-run", action="store_true", help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する")
     args = parser.parse_args()
+    if not args.model:
+       args.model = args.tsv 
 
     if args.command is None:
         parser.print_help()
@@ -154,7 +157,7 @@ def main():
             sys.exit(1)
             
     elif args.command == "train":
-        train(tsvdata=args.tsv, window=args.window, dry_run=args.dry_run)
+        train(tsvdata=args.tsv, model_file=args.model, window=args.window, dry_run=args.dry_run)
         
     elif args.command == "predict":
         # --trace なしのときは explain_top_n=0 にして計算を省略

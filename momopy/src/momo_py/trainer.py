@@ -224,7 +224,7 @@ def _split_labels(raw_labels: List[str]) -> tuple:
 # ==========================================
 # 🌟 7. train()
 # ==========================================
-def train(tsvdata: str, window: int = 7, dry_run: bool = False) -> None:
+def train(tsvdata: str, model_file: str, window: int = 7, dry_run: bool = False) -> None:
     """
     TSVから読みモデル（LinearSVC）と境界モデル（SGDClassifier）を学習し、
     1つのZIPにまとめる。
@@ -330,8 +330,11 @@ def train(tsvdata: str, window: int = 7, dry_run: bool = False) -> None:
     # ==========================================
     # ZIPにまとめて保存
     # ==========================================
-
-    base        = tsvdata.rsplit('.', 1)[0]
+    # model_fileが指定されていればそれを使う。
+    if model_file:
+        base = model_file
+    else:
+        base = tsvdata.rsplit('.', 1)[0]
     bundle_name = os.path.basename(base) + "_bundle.pkl"
     bundle_path = os.path.join(os.path.dirname(tsvdata), bundle_name)
     zip_path    = base + ".zip"

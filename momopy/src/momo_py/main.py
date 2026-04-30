@@ -141,7 +141,7 @@ def main():
                             help="特徴量ウィンドウサイズ（3, 5, 7、デフォルト: 7）")
     trainer_parser.add_argument("--dry-run", action="store_true", help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する")
     args = parser.parse_args()
-    if not args.model:
+    if args.command == "train" and not args.model:
        args.model = args.tsv 
 
     if args.command is None:

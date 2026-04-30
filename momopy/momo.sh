@@ -15,6 +15,7 @@ train() {
     uv run ${cmd} createdata --raw=${raw}
     uv run ${cmd} train --tsv=${tsv} --window 7
     mv ${model}.zip ${model}_7.zip
+    mv ${model}.mbm ${model}_7.mbm
 }
 
 # 予測用関数
@@ -38,10 +39,13 @@ build_model() {
     uv run ${cmd} createdata --raw=${raw}
     uv run ${cmd} train --tsv=${tsv} --window 7
     mv ${model}.zip ${model}_7.zip
+    mv ${model}.mbm ${model}_7.mbm
     uv run ${cmd} train --tsv=${tsv} --window 5
     mv ${model}.zip ${model}_5.zip
+    mv ${model}.mbm ${model}_5.mbm
     uv run ${cmd} train --tsv=${tsv} --window 3
     mv ${model}.zip ${model}_3.zip
+    mv ${model}.mbm ${model}_3.mbm
 }
 
 # メイン処理

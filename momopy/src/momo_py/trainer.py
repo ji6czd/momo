@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import unicodedata
 import zipfile
 from datetime import datetime, timezone
@@ -224,7 +225,7 @@ def _split_labels(raw_labels: List[str]) -> tuple:
 # ==========================================
 # 🌟 7. train()
 # ==========================================
-def train(tsvdata: str, model_file: str, window: int = 7, dry_run: bool = False) -> None:
+def train(tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool = False) -> None:
     """
     TSVから読みモデル（LinearSVC）と境界モデル（SGDClassifier）を学習し、
     1つのZIPにまとめる。
@@ -241,6 +242,7 @@ def train(tsvdata: str, model_file: str, window: int = 7, dry_run: bool = False)
         basename_bundle.pkl  - モデル一式（joblib）
         basename.zip         - 上記をまとめたパッケージ
     """
+    print(f"tsv={tsvdata}, model_file={model_file}, window={window}, dry_run={dry_run}")
     sentences, current = [], []
     with open(tsvdata, 'r', encoding='utf-8') as f:
         for line in f:
@@ -336,9 +338,12 @@ def train(tsvdata: str, model_file: str, window: int = 7, dry_run: bool = False)
     else:
         base = tsvdata.rsplit('.', 1)[0]
     bundle_name = os.path.basename(base) + "_bundle.pkl"
-    bundle_path = os.path.join(os.path.dirname(tsvdata), bundle_name)
     zip_path    = base + ".zip"
     mbm_path    = base + ".mbm"
+
+    out_dir = os.path.dirname(zip_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     bundle = LRModelBundle(
         vectorizer_read     = vect_read,
@@ -349,8 +354,6 @@ def train(tsvdata: str, model_file: str, window: int = 7, dry_run: bool = False)
         model_boundary      = model_boundary,
         version_info        = {},
     )
-    joblib.dump(bundle, bundle_path, compress=3)
-    print(f"\n💾 バンドル保存完了: {bundle_path}")
 
     version_info = {
         "trained_at":   datetime.now(timezone.utc).isoformat(),
@@ -358,12 +361,12 @@ def train(tsvdata: str, model_file: str, window: int = 7, dry_run: bool = False)
         "algorithm":    "LinearSVC+SGD",
         "window_size":  window,
     }
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(bundle_path, bundle_name)
-        zf.writestr("version_info.json", json.dumps(version_info, ensure_ascii=False, indent=2))
-
-    # 中間ファイルを削除
-    os.remove(bundle_path)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bundle_path = os.path.join(tmpdir, bundle_name)
+        joblib.dump(bundle, bundle_path, compress=3)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(bundle_path, bundle_name)
+            zf.writestr("version_info.json", json.dumps(version_info, ensure_ascii=False, indent=2))
 
     print(f"\n📦 ZIPパッケージ作成完了: {zip_path}")
     print(f"   ├ {bundle_name}")

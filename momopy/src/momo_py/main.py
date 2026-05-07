@@ -1,13 +1,37 @@
+import os
 import sys
 import argparse
 import time
 from importlib.metadata import version
+from platformdirs import user_data_dir
 
 from .trainer import create_data, train
 from .predictor import Predictor, PredictorConfig
 
 from .pybraille import to_jp_braille
 from .translator import Translator
+
+_DATA_VERSION = "1.0"
+
+
+def _resolve_userdata_path() -> str:
+    env_data = os.environ.get("MOMO_DATADIR")
+    if env_data:
+        return env_data
+    return user_data_dir(appname="momo", appauthor="seiken", version=_DATA_VERSION)
+
+def _resolve_model_path(model_arg: str | None) -> str:
+    if model_arg and os.path.dirname(model_arg):
+        base = model_arg
+        if base.endswith(".zip"):
+            base = base[:-4]
+        return base
+    default_dir = _resolve_userdata_path()
+    model_name = model_arg if model_arg else "basic_data_7"
+    if model_name.endswith(".zip"):
+        model_name = model_name[:-4]
+    model_path = os.path.join(default_dir, model_name)
+    return model_path
 
 def run_translate(opt_segment: bool = False):
     """
@@ -112,7 +136,7 @@ def main():
     
     # コマンドの定義
     predict_parser = subparsers.add_parser("predict")
-    predict_parser.add_argument("--model", required=True)
+    predict_parser.add_argument("--model", default=None)
     predict_parser.add_argument("--custom-dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
     predict_parser.add_argument("--single-dict", dest="single_dict", help="単一漢字用辞書ファイルのパス")
     predict_parser.add_argument("--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する")
@@ -128,7 +152,7 @@ def main():
     translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
     
     labelscan_parser = subparsers.add_parser("label")
-    labelscan_parser.add_argument("--model", required=True)
+    labelscan_parser.add_argument("--model", default=None)
     labelscan_parser.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")    
 
     create_data_parser = subparsers.add_parser("createdata")
@@ -141,8 +165,8 @@ def main():
                             help="特徴量ウィンドウサイズ（3, 5, 7、デフォルト: 7）")
     trainer_parser.add_argument("--dry-run", action="store_true", help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する")
     args = parser.parse_args()
-    if args.command == "train" and not args.model:
-       args.model = args.tsv 
+    if args.command == "train":
+        args.model = _resolve_model_path(args.model)
 
     if args.command is None:
         parser.print_help()
@@ -163,7 +187,7 @@ def main():
         # --trace なしのときは explain_top_n=0 にして計算を省略
         explain_top_n = args.explain if args.trace else 0
         config = PredictorConfig(
-            model_path=args.model,
+            model_path=_resolve_model_path(args.model),
             custom_dict_path=args.custom_dict,
             single_kanji_dict_path=args.single_dict,
             explain_top_n=explain_top_n,
@@ -175,7 +199,7 @@ def main():
         
     elif args.command == "label":
         config = PredictorConfig(
-            model_path=args.model,
+            model_path=_resolve_model_path(args.model),
             custom_dict_path=args.custom_dict,
         )
         run_label_scanner(config)

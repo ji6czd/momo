@@ -329,15 +329,14 @@ class LRModelBundle:
 class Predictor:
     def __init__(self, config: PredictorConfig):
         model_path = config.model_path
+        if not model_path.endswith(".zip"):
+            model_path = model_path + ".zip"
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"❌ モデル未検出: {model_path}")
 
         self._config = config
-        self._version_info: dict | None = None
+        self._version_info: dict[str, Any] | None = None
         self._tmp_dir: str | None = None
-
-        if not model_path.endswith(".zip"):
-            raise ValueError(f"❌ 未対応のモデル形式です（.zip を指定してください）: {model_path}")
 
         with zipfile.ZipFile(model_path, "r") as zf:
             namelist = zf.namelist()
@@ -386,7 +385,7 @@ class Predictor:
         if self._tmp_dir and os.path.exists(self._tmp_dir):
             shutil.rmtree(self._tmp_dir, ignore_errors=True)
 
-    def get_version_info(self) -> dict | None:
+    def get_version_info(self) -> dict[str, Any] | None:
         return self._version_info
 
     # ==========================================

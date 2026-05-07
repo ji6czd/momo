@@ -14,24 +14,29 @@
   "contributes": {
     "commands": [
       {
-        "command": "momo-translator.translate",
+        "command": "momo-translator.to-kana",
         "title": "Translate to kana"
-      }
-    ]
-  },
-  "configuration": {
-    "type": "object",
-    "title": "Momo Translator Configuration",
-    "properties": {
-      "momoTranslator.command": {
-        "type": "string",
-        "default": "momo",
-        "description": "The command to run the momo translator. This can be an absolute path or a command available in the system PATH."
       },
-      "momoTranslator.model": {
-        "type": "string",
-        "default": "basic_data.zip",
-        "description": "The model to use for translation. This should correspond to a model available in the momo translator."
+      {
+        "command": "momo-translator.to-braille",
+        "title": "Translate to braille"
+      }
+    ],
+    "configuration": {
+      "title": "Momo Translator Configuration",
+      "properties": {
+        "momoTranslator.command": {
+          "title": "Momo Translator Command",
+          "type": "string",
+          "default": "momo",
+          "description": "The command to run the momo translator. This can be an absolute path or a command available in the system PATH."
+        },
+        "momoTranslator.model": {
+          "title": "Momo Translator Model",
+          "type": "string",
+          "default": "basic_data_7.zip",
+          "description": "The model to use for translation. This should correspond to a model available in the momo translator."
+        }
       }
     }
   },

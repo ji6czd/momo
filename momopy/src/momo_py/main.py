@@ -3,6 +3,7 @@ import sys
 import argparse
 import time
 from importlib.metadata import version
+from importlib import resources
 from platformdirs import user_data_dir
 
 from .trainer import create_data, train
@@ -26,6 +27,7 @@ def _resolve_model_path(model_arg: str | None) -> str:
         if base.endswith(".zip"):
             base = base[:-4]
         return base
+    
     default_dir = _resolve_userdata_path()
     model_name = model_arg if model_arg else "basic_data_7"
     if model_name.endswith(".zip"):
@@ -147,6 +149,8 @@ def main():
     predict_parser.add_argument("--no-source", action="store_true", help="予測結果のみ出力（ソーステキストを出力しない）")
     predict_parser.add_argument("--no-kana", action="store_true", help="予測結果の点字のみ出力（カナテキストを出力しない）")
     predict_parser.add_argument("--no-braille", action="store_true", help="予測結果のカナのみ出力（点字テキストを出力しない）")
+    predict_parser.add_argument("--window", type=int, default=7, choices=[3, 5, 7],
+                                help="特徴量ウィンドウサイズ（3, 5, 7、デフォルト: 7）")
     
     translate_parser = subparsers.add_parser("translate")
     translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
@@ -166,7 +170,7 @@ def main():
     trainer_parser.add_argument("--dry-run", action="store_true", help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する")
     args = parser.parse_args()
     if args.command == "train":
-        args.model = _resolve_model_path(args.model)
+        args.model = args.model
 
     if args.command is None:
         parser.print_help()
@@ -187,10 +191,11 @@ def main():
         # --trace なしのときは explain_top_n=0 にして計算を省略
         explain_top_n = args.explain if args.trace else 0
         config = PredictorConfig(
-            model_path=_resolve_model_path(args.model),
+            model_path=args.model,
             custom_dict_path=args.custom_dict,
             single_kanji_dict_path=args.single_dict,
             explain_top_n=explain_top_n,
+            window=args.window
         )
         run_predict(config, show_trace=args.trace, show_profile=args.profile, segmented_output=args.segment, show_source=not args.no_source, show_kana=not args.no_kana, show_braille=not args.no_braille)
         
@@ -199,7 +204,7 @@ def main():
         
     elif args.command == "label":
         config = PredictorConfig(
-            model_path=_resolve_model_path(args.model),
+            model_path=args.model,
             custom_dict_path=args.custom_dict,
         )
         run_label_scanner(config)

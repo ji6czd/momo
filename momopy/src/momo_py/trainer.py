@@ -1,6 +1,6 @@
+import io
 import json
 import os
-import tempfile
 import unicodedata
 import zipfile
 from datetime import datetime, timezone
@@ -242,7 +242,6 @@ def train(tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool =
         basename_bundle.pkl  - モデル一式（joblib）
         basename.zip         - 上記をまとめたパッケージ
     """
-    print(f"tsv={tsvdata}, model_file={model_file}, window={window}, dry_run={dry_run}")
     sentences, current = [], []
     with open(tsvdata, 'r', encoding='utf-8') as f:
         for line in f:
@@ -338,8 +337,8 @@ def train(tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool =
     else:
         base = tsvdata.rsplit('.', 1)[0]
     bundle_name = os.path.basename(base) + "_bundle.pkl"
-    zip_path    = base + ".zip"
-    mbm_path    = base + ".mbm"
+    zip_path    = base + f"_{window}.zip"
+    mbm_path    = base + f"_{window}.mbm"
 
     out_dir = os.path.dirname(zip_path)
     if out_dir:
@@ -361,12 +360,11 @@ def train(tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool =
         "algorithm":    "LinearSVC+SGD",
         "window_size":  window,
     }
-    with tempfile.TemporaryDirectory() as tmpdir:
-        bundle_path = os.path.join(tmpdir, bundle_name)
-        joblib.dump(bundle, bundle_path, compress=3)
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.write(bundle_path, bundle_name)
-            zf.writestr("version_info.json", json.dumps(version_info, ensure_ascii=False, indent=2))
+    bundle_buf = io.BytesIO()
+    joblib.dump(bundle, bundle_buf, compress=0)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(bundle_name, bundle_buf.getvalue())
+        zf.writestr("version_info.json", json.dumps(version_info, ensure_ascii=False, indent=2))
 
     print(f"\n📦 ZIPパッケージ作成完了: {zip_path}")
     print(f"   ├ {bundle_name}")

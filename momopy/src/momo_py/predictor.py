@@ -1,11 +1,10 @@
 import json
 import os
-import shutil
-import tempfile
+import io
 import zipfile
 from dataclasses import dataclass, field
 from typing import List, Tuple, Set, Dict, Optional, Any
-
+from importlib import resources
 import joblib
 import numpy as np
 from sklearn.linear_model import SGDClassifier
@@ -74,13 +73,15 @@ class PredictorConfig:
 
     Attributes:
         model_path: モデルファイルのパス（.zip）
+        window: 特徴量ウィンドウサイズ（3, 5, 7）
         single_kanji_dict_path: 単一漢字辞書TSVのパス（省略可）
         custom_dict_path: カスタム辞書ファイルのパス（省略可）
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
         explain_top_n: トレース時に表示する特徴量寄与度の上位件数（0=無効）
     """
-    model_path: str
+    model_path: Optional[str] = None
+    window: int = 7
     single_kanji_dict_path: Optional[str] = None
     custom_dict_path: Optional[str] = None
     confidence_threshold: float = 0.5
@@ -318,52 +319,52 @@ def _confidence_bar(conf: float, width: int = 12) -> str:
 @dataclass
 class LRModelBundle:
     """ZIPに格納するモデル一式"""
-    vectorizer_read:     DictVectorizer
-    coef_read_sparse:    Any
-    intercept_read:      Any
-    read_classes:        Any
+    vectorizer_read: DictVectorizer
+    coef_read_sparse: Any
+    intercept_read: Any
+    read_classes: Any
     vectorizer_boundary: DictVectorizer
-    model_boundary:      SGDClassifier
-    version_info:        dict
+    model_boundary: SGDClassifier
+    version_info: dict
 
 class Predictor:
     def __init__(self, config: PredictorConfig):
-        model_path = config.model_path
-        if not model_path.endswith(".zip"):
-            model_path = model_path + ".zip"
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"❌ モデル未検出: {model_path}")
+        if config.model_path:
+            model_path = config.model_path
+            if not model_path.endswith(".zip"):
+                model_path += ".zip"
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"❌ モデル未検出: {model_path}")
+            zip_source: str | io.BytesIO = model_path
+        else:
+            zip_bytes = (resources.files("momo_py") / f"resources/basic_data_{config.window}.zip").read_bytes()
+            zip_source = io.BytesIO(zip_bytes)
 
         self._config = config
         self._version_info: dict[str, Any] | None = None
-        self._tmp_dir: str | None = None
 
-        with zipfile.ZipFile(model_path, "r") as zf:
+        with zipfile.ZipFile(zip_source, "r") as zf:
             namelist = zf.namelist()
 
             if "version_info.json" not in namelist:
-                raise ValueError(f"❌ ZIPファイル内に version_info.json が見つかりません: {model_path}")
+                raise ValueError(f"❌ ZIPファイル内に version_info.json が見つかりません: {zip_source}")
 
             self._version_info = json.loads(zf.read("version_info.json").decode("utf-8"))
 
             bundle_name = self._version_info.get("model_bundle")
             if bundle_name is None:
-                raise ValueError(f"❌ version_info.json に model_bundle キーがありません: {model_path}")
+                raise ValueError(f"❌ version_info.json に model_bundle キーがありません: {zip_source}")
             if bundle_name not in namelist:
-                raise ValueError(f"❌ ZIPファイル内に {bundle_name} が見つかりません: {model_path}")
+                raise ValueError(f"❌ ZIPファイル内に {bundle_name} が見つかりません: {zip_source}")
 
-            self._tmp_dir = tempfile.mkdtemp()
-            zf.extract(bundle_name, self._tmp_dir)
-            bundle_path = os.path.join(self._tmp_dir, bundle_name)
-
-        bundle: LRModelBundle = joblib.load(bundle_path)
-        self._vectorizer_read     = bundle.vectorizer_read
-        self._coef_read_sparse    = bundle.coef_read_sparse
-        self._intercept_read      = bundle.intercept_read
-        self._read_classes        = bundle.read_classes
-        self._vectorizer_boundary = bundle.vectorizer_boundary
-        self._model_boundary      = bundle.model_boundary
-        self._window_size: int    = self._version_info.get("window_size", 5)
+            bundle: LRModelBundle = joblib.load(io.BytesIO(zf.read(bundle_name)))
+            self._vectorizer_read     = bundle.vectorizer_read
+            self._coef_read_sparse    = bundle.coef_read_sparse
+            self._intercept_read      = bundle.intercept_read
+            self._read_classes        = bundle.read_classes
+            self._vectorizer_boundary = bundle.vectorizer_boundary
+            self._model_boundary      = bundle.model_boundary
+            self._window_size: int    = self._version_info.get("window_size", 5)
 
         # 逆引き辞書をキャッシュ（explain用）
         self._vocab_inv: Dict[int, str] = {
@@ -381,9 +382,6 @@ class Predictor:
             custom_dict = load_custom_dict(config.custom_dict_path)
             self._dict_index = build_dict_index(custom_dict)
 
-    def __del__(self) -> None:
-        if self._tmp_dir and os.path.exists(self._tmp_dir):
-            shutil.rmtree(self._tmp_dir, ignore_errors=True)
 
     def get_version_info(self) -> dict[str, Any] | None:
         return self._version_info

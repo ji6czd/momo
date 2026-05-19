@@ -28,6 +28,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.uv.sources]
+momo-model = { path = "../momo-model/dist/momo_model-0.1.0.tar.gz" }
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",

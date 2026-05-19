@@ -4,36 +4,12 @@ import argparse
 import time
 from importlib.metadata import version
 from importlib import resources
-from platformdirs import user_data_dir
 
 from .trainer import create_data, train
 from .predictor import Predictor, PredictorConfig
 
 from .pybraille import to_jp_braille
 from .translator import Translator
-
-_DATA_VERSION = "1.0"
-
-
-def _resolve_userdata_path() -> str:
-    env_data = os.environ.get("MOMO_DATADIR")
-    if env_data:
-        return env_data
-    return user_data_dir(appname="momo", appauthor="seiken", version=_DATA_VERSION)
-
-def _resolve_model_path(model_arg: str | None) -> str:
-    if model_arg and os.path.dirname(model_arg):
-        base = model_arg
-        if base.endswith(".zip"):
-            base = base[:-4]
-        return base
-    
-    default_dir = _resolve_userdata_path()
-    model_name = model_arg if model_arg else "basic_data_7"
-    if model_name.endswith(".zip"):
-        model_name = model_name[:-4]
-    model_path = os.path.join(default_dir, model_name)
-    return model_path
 
 def run_translate(opt_segment: bool = False):
     """

@@ -125,8 +125,8 @@ def main():
     predict_parser.add_argument("--no-source", action="store_true", help="予測結果のみ出力（ソーステキストを出力しない）")
     predict_parser.add_argument("--no-kana", action="store_true", help="予測結果の点字のみ出力（カナテキストを出力しない）")
     predict_parser.add_argument("--no-braille", action="store_true", help="予測結果のカナのみ出力（点字テキストを出力しない）")
-    predict_parser.add_argument("--window", type=int, default=7, choices=[3, 5, 7],
-                                help="特徴量ウィンドウサイズ（3, 5, 7、デフォルト: 7）")
+    predict_parser.add_argument("--window", type=int, default=7, choices=[3, 4, 5, 7],
+                                help="特徴量ウィンドウサイズ（3, 4, 5, 7、デフォルト: 7）")
     
     translate_parser = subparsers.add_parser("translate")
     translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
@@ -141,8 +141,8 @@ def main():
     trainer_parser = subparsers.add_parser("train")
     trainer_parser.add_argument("--tsv", required=True)
     trainer_parser.add_argument("--model", help="学習済みモデルのファイルパス（デフォルトはtsvファイル名に基づく）")
-    trainer_parser.add_argument("--window", type=int, default=7, choices=[3, 5, 7],
-                            help="特徴量ウィンドウサイズ（3, 5, 7、デフォルト: 7）")
+    trainer_parser.add_argument("--window", type=int, default=7, choices=[3, 4, 5, 7],
+                            help="特徴量ウィンドウサイズ（3, 4, 5, 7、デフォルト: 7）")
     trainer_parser.add_argument("--dry-run", action="store_true", help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する")
     args = parser.parse_args()
     if args.command == "train":

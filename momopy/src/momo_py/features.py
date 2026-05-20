@@ -123,9 +123,10 @@ def compute_source_features(
     ソース文字系列全体に対して、各文字の文脈特徴量を一括計算する。
     pycrfsuiteネイティブの { "feature_name=value": 1.0 } 形式で出力する。
 
-    window: 前後に参照する文字数。3, 5, 7 を指定する。
+    window: 参照する文字数。3, 4, 5, 7 を指定する。
       7 (デフォルト): 前後3文字まで参照（bigram×6, trigram×5）
       5             : 前後2文字まで参照（bigram×4, trigram×3）
+      4             : 前1・後2文字参照 [-1,0,+1,+2]（bigram×3, trigram×2）
       3             : 前後1文字のみ参照（bigram×2, trigram×1）
     """
     result: List[FeatureDict] = []
@@ -167,7 +168,7 @@ def compute_source_features(
             features[f'{F_CHAR_N1}={next_char}'] = 1.0
             features[f'{F_TYPE_N1}={next_ctype}'] = 1.0
             features[f'{F_BI_S_N1}={char}{next_char}'] = 1.0
-            if window >= 5 and i < n - 2:
+            if window >= 4 and i < n - 2:
                 features[f'{F_CHAR_N2}={next2_char}'] = 1.0
                 features[f'{F_TYPE_N2}={next2_ctype}'] = 1.0
                 features[f'{F_BI_N1_N2}={next_char}{next2_char}'] = 1.0
@@ -193,7 +194,7 @@ def compute_source_features(
             features[f'{F_TRI_P1_S_N1}={prev_char}{char}{next_char}'] = 1.0
             features[f'{F_TYPE_TRI_P1_S_N1}={prev_ctype}-{ctype}-{next_ctype}'] = 1.0
 
-        # trigram: 対象-後1-後2（window=5 以上）
+        # trigram: 対象-後1-後2（window=5 以上。window=4 はバイグラムで代替）
         if window >= 5 and i < n - 2:
             features[f'{F_TRI_S_N1_N2}={char}{next_char}{next2_char}'] = 1.0
             features[f'{F_TYPE_TRI_S_N1_N2}={ctype}-{next_ctype}-{next2_ctype}'] = 1.0

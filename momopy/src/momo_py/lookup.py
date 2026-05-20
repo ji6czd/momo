@@ -1,11 +1,16 @@
 import sys
-from enum import Enum
-from momo_py.features import CharType
-from momo_py.translator import Translator
+import json
+from importlib import resources
 
-def lookup(c: str):
-    t = Translator()
-    readings = t._get_reading_form_in_dictionary(c)
+
+def _load_single_char_dic() -> dict:
+    data = (resources.files("momo_py") / "single_character_dic.json").read_bytes()
+    return json.loads(data.decode("utf-8"))
+
+
+def lookup(c: str) -> None:
+    dic = _load_single_char_dic()
+    readings = dic.get(c)
     if not readings:
         print(f"No readings found for '{c}'")
         return
@@ -13,12 +18,13 @@ def lookup(c: str):
     for reading in readings:
         print(f"  {reading}")
 
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python lookup.py <text>")
+        print("Usage: lookup <char>")
         return
-    text = sys.argv[1]
-    lookup(text)
+    lookup(sys.argv[1])
+
 
 if __name__ == "__main__":
     main()

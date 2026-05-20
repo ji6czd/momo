@@ -9,27 +9,6 @@ from .trainer import create_data, train
 from .predictor import Predictor, PredictorConfig
 
 from .pybraille import to_jp_braille
-from .translator import Translator
-
-def run_translate(opt_segment: bool = False):
-    """
-    Sudachiを使い、形態素解析ベースの点訳を行う。
-    標準入力からテキストを読み込み、点字変換して標準出力に出力する対話型モード。
-    Ctrl+Cで終了。
-    """
-    t = Translator()
-    try:
-        for line in sys.stdin:
-            src = line.strip()
-            if not src:
-                continue
-            kana = t.segment_kana_string(src) if opt_segment else t.convert_to_kana(src)
-            braille = t.convert_to_braille(src)
-            print(src)
-            print(braille)
-            print(kana)
-    except KeyboardInterrupt:
-        print("\n🛑 翻訳モード終了。")
 
 def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile: bool = False, segmented_output: bool = False, show_source: bool = True, show_kana: bool = True, show_braille: bool = True) -> None:
     """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード。
@@ -128,9 +107,6 @@ def main():
     predict_parser.add_argument("--window", type=int, default=7, choices=[3, 4, 5, 7],
                                 help="特徴量ウィンドウサイズ（3, 4, 5, 7、デフォルト: 7）")
     
-    translate_parser = subparsers.add_parser("translate")
-    translate_parser.add_argument("-s", "--segment", action="store_true", help="ソーステキストの文字に対応するように仮名を分割して出力")
-    
     labelscan_parser = subparsers.add_parser("label")
     labelscan_parser.add_argument("--model", default=None)
     labelscan_parser.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")    
@@ -174,9 +150,6 @@ def main():
             window=args.window
         )
         run_predict(config, show_trace=args.trace, show_profile=args.profile, segmented_output=args.segment, show_source=not args.no_source, show_kana=not args.no_kana, show_braille=not args.no_braille)
-        
-    elif args.command == "translate":
-        run_translate(args.segment)
         
     elif args.command == "label":
         config = PredictorConfig(

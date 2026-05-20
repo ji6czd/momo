@@ -135,15 +135,14 @@ class TestComputeSourceFeatures:
         seq = self._make_seq("あいう")
         features = compute_source_features(seq)
         mid = features[1]
-        # pycrfsuiteネイティブ形式: 値がキーに埋め込まれる
-        assert mid.get("-1:char=あ") == 1.0
-        assert mid.get("+1:char=う") == 1.0
+        assert mid.get("char_p1=あ") == 1.0
+        assert mid.get("char_n1=う") == 1.0
 
     def test_kanji_run_len(self):
         seq = self._make_seq("漢字")
         features = compute_source_features(seq)
-        assert features[0]["kanji_run_len"] == 2
-        assert features[1]["kanji_run_len"] == 2
+        assert features[0].get("kanji_run=2") == 1.0
+        assert features[1].get("kanji_run=2") == 1.0
 
     def test_kanji_pos_first(self):
         seq = self._make_seq("漢字")
@@ -154,8 +153,7 @@ class TestComputeSourceFeatures:
     def test_type_transition(self):
         seq = self._make_seq("あ字")
         features = compute_source_features(seq)
-        # pycrfsuiteネイティブ形式: 値がキーに埋め込まれる
-        assert features[1].get("type_transition=HIRAGANA->KANJI") == 1.0
+        assert features[1].get("type_trans_p1_s=HIRAGANA->KANJI") == 1.0
 
     def test_single_char(self):
         seq = self._make_seq("あ")

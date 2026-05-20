@@ -2,26 +2,24 @@
 set -eu
 raw=../dataset/basic_raw.tsv
 tsv=../dataset/basic_data.tsv
-model=../dataset/basic_data
 cmd=momo
 # 学習用関数
 check() {
     echo "Training..."
     uv run ${cmd} createdata --raw=${raw}
+    uv run ${cmd} train --dry-run --tsv ${tsv} --window 7
 }
 
 train() {
     echo "Training..."
     uv run ${cmd} createdata --raw=${raw}
     uv run ${cmd} train --tsv=${tsv} --window 7
-    mv ${model}.zip ${model}_7.zip
-    mv ${model}.mbm ${model}_7.mbm
 }
 
 # 予測用関数
 predict() {
     echo "Predicting..."
-    uv run ${cmd} predict --model=${model}_7.zip
+    uv run ${cmd} predict
 }
 
 translate() {
@@ -31,15 +29,15 @@ translate() {
 
 label() {
     echo "Labeling..."
-    uv run ${cmd} label --model=${model}_7.zip
+    uv run ${cmd} label
 }
 
 build_model() {
     echo "Building model..."
     uv run ${cmd} createdata --raw=${raw}
-    uv run ${cmd} train --tsv=${tsv} --window 7 --model ${model}_7
-    uv run ${cmd} train --tsv ${tsv} --window 5 --model ${model}_5
-    uv run ${cmd} train --tsv ${tsv} --window 3 --model ${model}_3
+    uv run ${cmd} train --tsv=${tsv} --window 7
+    uv run ${cmd} train --tsv ${tsv} --window 5
+    uv run ${cmd} train --tsv ${tsv} --window 3
 }
 
 # メイン処理

@@ -4,6 +4,10 @@ from sudachipy import dictionary
 from sudachipy import Morpheme
 
 wordlist = []  # 単語を格納するリスト
+# SudachiPyのトークナイザを初期化
+mode = tokenizer.Tokenizer.SplitMode.A
+tokenizer_obj = dictionary.Dictionary().create(mode)
+
 def count_words_chars(text: str) -> Tuple[int, int]:
     """
     日本語テキストの単語数をカウントする関数。
@@ -11,9 +15,6 @@ def count_words_chars(text: str) -> Tuple[int, int]:
     """
     # テキストをタブ文字で分割して左側を得る
     text = text.split('\t')[0]
-    # SudachiPyのトークナイザを初期化
-    mode = tokenizer.Tokenizer.SplitMode.B
-    tokenizer_obj = dictionary.Dictionary().create(mode)
 
     # テキストを形態素解析して単語数をカウント
     morphemes = tokenizer_obj.tokenize(text)

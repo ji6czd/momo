@@ -3,7 +3,7 @@ import sys
 from types import FrameType
 from importlib.metadata import version
 from flask import Flask, request
-from momo_py import PredictionResult, Predictor, Translator, PredictorConfig
+from momo_py import PredictionResult, Predictor, PredictorConfig
 from momo_py import pybraille
 
 app = Flask(__name__)
@@ -32,7 +32,6 @@ top_page = f"""
         <input type="radio" id="large" name="model" value="large">
         <label for="large">Large (約21MB)</label><br>
         <input type="submit" value="LR機械学習点訳">
-        <input type="submit" formaction="/translate" value="Sudachi辞書点訳">
     </form>
     </p>
     <p>{version_info}</p>
@@ -64,39 +63,12 @@ predict_page = """<!DOCTYPE html>
         <input type="radio" id="large" name="model" value="large">
         <label for="large">Large (約21MB)</label><br>
         <input type="submit" value="LR機械学習点訳">
-        <input type="submit" formaction="/translate" value="Sudachi 辞書点訳">
     </form>
     </p>
     <p>Model version: {model_version}</p>
     <p>{version_info}</p>
 </body></html>
 """
-
-translate_page = """<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Momo - 点訳結果</title>
-</head>
-<body>
-    <h1>点訳結果</h1>
-    <p>原文: {source}</p>
-    <p>仮名: {result}</p>
-    <p>点字: <span style="font-size: 24px; font-family: monospace; letter-spacing: 2px;">{braille_result}</span></p>
-    <p>
-    <form action="/predict" method="get">
-        <label for="source">点訳したい文章を入力してね：</label><br>
-        <input type="text" id="source" value="{source}" name="source" required><br>
-        <input type="submit" value="CRF機械学習点訳">
-        <input type="submit" formaction="/translate" value="Sudachi辞書点訳">
-    </form>
-    </p>
-    <p>Powered by Sudachi {sudachi_version}</p>
-    <p>{version_info}</p>
-</body></html>
-"""
-
 
 def make_characters_table(res: PredictionResult) -> str:
     """

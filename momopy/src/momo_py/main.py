@@ -10,7 +10,7 @@ from .predictor import Predictor, PredictorConfig
 
 from .pybraille import to_jp_braille
 
-def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile: bool = False, segmented_output: bool = False, show_source: bool = True, show_kana: bool = True, show_braille: bool = True) -> None:
+def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile: bool = False, segmented_output: bool = False, segmented_source_output: bool = False, show_source: bool = True, show_kana: bool = True, show_braille: bool = True) -> None:
     """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード。
     show_trace が True の場合、各文字の決定根拠をターミナルにも表示する。
     """
@@ -19,7 +19,8 @@ def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile:
     try:
         for line in sys.stdin:
             text = line.strip()
-            if not text: continue
+            if not text:
+                continue
 
             t1 = time.perf_counter() if show_profile else 0.0
             result = predictor.predict(text)
@@ -27,8 +28,9 @@ def run_predict(config: PredictorConfig, show_trace: bool = False, show_profile:
             if show_trace:
                 print(result.to_json())
             kana: str = result.format_segmented() if segmented_output else result.kana_text
+            src: str = result.format_source_segmented() if segmented_source_output else result.source_text
             if show_source:
-                print(result.source_text)
+                print(src)
             if show_braille:
                 print(to_jp_braille(result.kana_text))
             if show_kana:
@@ -101,6 +103,7 @@ def main():
                                 help="--trace時に表示する特徴量寄与度の上位件数（デフォルト: 8、0で無効）")
     predict_parser.add_argument("--profile", action="store_true", help="予測の実行時間を表示する")
     predict_parser.add_argument("--segment", action="store_true", help="予測結果を文字ごとに分割して出力する")
+    predict_parser.add_argument("--segment-source", action="store_true", help="原文を点字の分かち書き単位で分割して出力する")
     predict_parser.add_argument("--no-source", action="store_true", help="予測結果のみ出力（ソーステキストを出力しない）")
     predict_parser.add_argument("--no-kana", action="store_true", help="予測結果の点字のみ出力（カナテキストを出力しない）")
     predict_parser.add_argument("--no-braille", action="store_true", help="予測結果のカナのみ出力（点字テキストを出力しない）")
@@ -149,7 +152,7 @@ def main():
             explain_top_n=explain_top_n,
             window=args.window
         )
-        run_predict(config, show_trace=args.trace, show_profile=args.profile, segmented_output=args.segment, show_source=not args.no_source, show_kana=not args.no_kana, show_braille=not args.no_braille)
+        run_predict(config, show_trace=args.trace, show_profile=args.profile, segmented_output=args.segment, segmented_source_output=args.segment_source, show_source=not args.no_source, show_kana=not args.no_kana, show_braille=not args.no_braille)
         
     elif args.command == "label":
         config = PredictorConfig(

@@ -232,7 +232,53 @@ class PredictionResult:
                     current += ch
             if current:
                 segments.append(current)
-        return "/".join(segments) + "/"
+        return "/".join(segments)
+
+    def format_source_segmented(self) -> str:
+        """点字の分かち書きに沿って原文を分割し、' 'で区切って返す。
+
+        境界モデルが予測した単語境界（仮名列のスペース）に基づいて原文を分割する。
+        境界がまったくない場合は原文全体を1セグメントとして返す。
+
+        例:
+            "東京都民のために" → "東京 都民の ために"
+        """
+        segments = self.get_source_segments()
+        if not segments:
+            return ""
+        return "/".join(segments)
+
+    def get_source_segments(self) -> List[str]:
+        """点字の分かち書きに沿って原文を分割したリストを返す。
+
+        境界モデルが予測した単語境界（仮名列のスペース）に基づいて原文を分割する。
+        境界がまったくない場合は原文全体を含む1要素のリストを返す。
+
+        例:
+            "東京都民のために" → ["東京", "都民", "の", "ために"]
+        """
+        if not self.source_text:
+            return []
+
+        segments: List[str] = []
+        current_start = 0
+
+        for k, ch in enumerate(self.kana_text):
+            if ch == " ":
+                # kana_to_src_index[k] は、このスペースを生んだ原文文字のインデックス
+                src_i = self.kana_to_src_index[k]
+                end = src_i + 1
+                seg = self.source_text[current_start:end]
+                if seg:
+                    segments.append(seg)
+                current_start = end
+
+        # 末尾の残りセグメント
+        remaining = self.source_text[current_start:]
+        if remaining:
+            segments.append(remaining)
+
+        return segments
 
     def to_json(self) -> str:
         text_safe = json.dumps(self.source_text, ensure_ascii=False)
@@ -731,7 +777,7 @@ class Predictor:
         src_to_kana_index: List[List[int]] = [[] for _ in text]
         kana_pos = 0
 
-        for i, (char, orig_idx, _) in enumerate(source_seq):
+        for i, (_char, orig_idx, _) in enumerate(source_seq):
             clean_label = refined_labels[i]
             confidence  = raw_confidences[i]
             decision    = decision_sources[i]

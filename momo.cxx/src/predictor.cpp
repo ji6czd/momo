@@ -17,6 +17,12 @@
 #endif
 
 // ============================================================
+// モデルラベル定数（Python features.py の LABEL_* と対応）
+// LABEL_CONTINUE = "---"  この文字の読みは直前文字のラベルに含まれる
+// LABEL_SKIP     = "_"    この文字はスキップ（読みなし）
+// ============================================================
+
+// ============================================================
 // bypass（素通し）扱いにする文字種
 // ============================================================
 
@@ -116,7 +122,8 @@ static char digit_table(char32_t cp) {
 
 // 位取り文字（十百千万億兆）のフォールバック変換
 // Python側の _kurai_fallback() と対応
-// 戻り値 "_" は LABEL_SKIP（呼び出し側でスキップ処理）
+// 戻り値 "_" は内部スキップセンチネル（LABEL_SKIP と同一値。呼び出し側でスキップ処理）
+// ※ モデルの LABEL_CONTINUE = "---"、LABEL_SKIP = "_"（Python features.py と対応）
 static std::string kurai_fallback(char32_t cp, char32_t left_cp, CharType left_ctype, CharType right_ctype) {
   const bool left_is_numeric = (left_ctype == CharType::JAPANESE_NUMERIC);
   const bool right_is_numeric = (right_ctype == CharType::JAPANESE_NUMERIC);
@@ -398,7 +405,7 @@ PredictionResult Predictor::predict(const std::string& text) const {
     // 救済ロジック（Python の _refine_predictions と対応）
     // --------------------------------------------------------
 
-    if (label == "_") {  // LABEL_CONTINUE
+    if (label == "---") {  // LABEL_CONTINUE
       // 1. 孤立 CONTINUE 救済：有効な親がない場合は文字そのままを出力
       //    Python: label == LABEL_CONTINUE and (parent_idx == -1 or parent_idx in bypass_indices)
       if (parent_src_idx < 0 || parent_is_bypass) {
@@ -462,7 +469,7 @@ PredictionResult Predictor::predict(const std::string& text) const {
       continue;
     }
 
-    if (label == "---") {  // LABEL_SKIP
+    if (label == "_") {  // LABEL_SKIP
       // NUMERIC + SKIP 救済：文字そのままを出力
       //    Python: if clean_label in (LABEL_SKIP, LABEL_CONTINUE) and ctype == CharType.NUMERIC
       if (entry.ctype == CharType::NUMERIC) {

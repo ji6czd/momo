@@ -221,7 +221,7 @@ wheels = [
 [[package]]
 name = "momo-py"
 version = "0.5.0"
-source = { git = "https://github.com/ji6czd/momo?subdirectory=momopy&branch=LR_feature#c3b452bfe3e307f31d4910bc4851d764ea705baa" }
+source = { git = "https://github.com/ji6czd/momo?subdirectory=momopy&branch=LR_feature#544ab1f8e67c74e3d082ecec9815c207bed0d566" }
 dependencies = [
     { name = "scikit-learn" },
 ]

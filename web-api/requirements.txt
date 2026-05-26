@@ -10,7 +10,7 @@ itsdangerous==2.2.0
 jinja2==3.1.6
 joblib==1.5.3
 markupsafe==3.0.3
-momo-py @ git+https://github.com/ji6czd/momo@c3b452bfe3e307f31d4910bc4851d764ea705baa#subdirectory=momopy
+momo-py @ git+https://github.com/ji6czd/momo@544ab1f8e67c74e3d082ecec9815c207bed0d566#subdirectory=momopy
 numpy==2.4.6
 packaging==26.2
 requests==2.34.2

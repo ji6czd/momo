@@ -1,4 +1,6 @@
+import gc
 import signal
+import threading
 import sys
 from types import FrameType
 from importlib.metadata import version
@@ -9,6 +11,48 @@ from momo_py import pybraille
 app = Flask(__name__)
 
 version_info = f"Momo version {version('momo_py')}"
+
+# モデルファイルのパス定義
+_CUSTOM_DICT = "./dataset/custom_dictionary.tsv"
+_MODEL_FILES = {
+    "small":  "./dataset/basic_data_4.zip",
+    "medium": "./dataset/basic_data_5.zip",
+    "large":  "./dataset/basic_data_7.zip",
+}
+
+# セマフォで同時実行を1に制限する。
+# Cloud Run の concurrency 設定に関係なく、コード側で強制する。
+# これにより「現在のモデルを1つだけキャッシュ・切り替え時は解放」が安全に動作する。
+_semaphore = threading.Semaphore(1)
+
+@app.before_request
+def _acquire_semaphore() -> None:
+    _semaphore.acquire()
+
+@app.teardown_request
+def _release_semaphore(exc: BaseException | None) -> None:
+    _semaphore.release()
+
+# 現在キャッシュしているモデル（同時に1つだけ保持）
+_current_model: str = ""
+_current_predictor: Predictor | None = None
+
+def _get_predictor(model: str = "large") -> Predictor:
+    global _current_model, _current_predictor
+    if _current_predictor is None or _current_model != model:
+        # 別モデルへの切り替え: 古いインスタンスを解放してからロード
+        _current_predictor = None
+        gc.collect()
+        cfg = PredictorConfig(
+            model_path=_MODEL_FILES.get(model, _MODEL_FILES["large"]),
+            custom_dict_path=_CUSTOM_DICT,
+        )
+        _current_predictor = Predictor(cfg)
+        _current_model = model
+    return _current_predictor
+
+# アプリ起動時に large モデルを先読みしておく（初回リクエストのコールドスタートを防ぐ）
+_get_predictor("large")
 
 top_page = f"""
 <!DOCTYPE html>
@@ -27,9 +71,9 @@ top_page = f"""
         <input type="text" id="source" name="source" required><br>
         <input type="radio" id="small" name="model" value="small">
         <label for="small">Small (約8.7MB)</label><br>
-        <input type="radio" id="medium" name="model" value="medium" checked>
+        <input type="radio" id="medium" name="model" value="medium">
         <label for="medium">Medium (約14MB)</label><br>
-        <input type="radio" id="large" name="model" value="large">
+        <input type="radio" id="large" name="model" value="large" checked>
         <label for="large">Large (約21MB)</label><br>
         <input type="submit" value="LR機械学習点訳">
     </form>
@@ -57,10 +101,10 @@ predict_page = """<!DOCTYPE html>
         <label for="source">点訳したい文章を入力してね：</label><br>
         <input type="text" id="source" value="{source}" name="source" required><br>
         <input type="radio" id="small" name="model" value="small">
-        <label for="small">Small (約5MB)</label><br>
-        <input type="radio" id="medium" name="model" value="medium" checked>
+        <label for="small">Small (約8.7MB)</label><br>
+        <input type="radio" id="medium" name="model" value="medium">
         <label for="medium">Medium (約14MB)</label><br>
-        <input type="radio" id="large" name="model" value="large">
+        <input type="radio" id="large" name="model" value="large" checked>
         <label for="large">Large (約21MB)</label><br>
         <input type="submit" value="LR機械学習点訳">
     </form>
@@ -107,16 +151,8 @@ def hello() -> str:
 def predict() -> str:
     source = request.args.get("source")
     model = request.args.get("model", "large")
-    if model == "small":
-        model_file = "./dataset/basic_data_4.zip"
-    elif model == "medium":
-        model_file = "./dataset/basic_data_5.zip"
-    else:
-        model_file = "./dataset/basic_data_7.zip"
-    custom_dic_file = "./dataset/custom_dictionary.tsv"
-    cfg = PredictorConfig(model_path=model_file, custom_dict_path=custom_dic_file)
-    prd = Predictor(cfg)
-    model_version = prd.get_version_info().get("trained_at", "不明")
+    prd = _get_predictor(model)
+    model_version = (prd.get_version_info() or {}).get("trained_at", "不明")
 
     res = prd.predict(source)
     braille = pybraille.to_jp_braille(res.kana_text)
@@ -130,28 +166,11 @@ def predict() -> str:
         version_info=version_info,
     )
 
-
-@app.route("/translate", methods=["GET"])
-def translate() -> str:
-    source = request.args.get("source")
-    t = Translator()
-    kana = t.convert_to_kana(source)
-    braille = pybraille.to_jp_braille(kana)
-    return translate_page.format(
-        source=source,
-        result=kana,
-        braille_result=braille,
-        version_info=version_info,
-        sudachi_version=version("sudachipy"),
-    )
-
-
 @app.route("/api/predict", methods=["GET"])
 def api_predict() -> str:
     source = request.args.get("source")
-    cfg = PredictorConfig(model_path=model_file, custom_dict_path=custom_dic_file)
-    p = Predictor(cfg)
-    return p.predict(source).to_json()
+    model = request.args.get("model", "large")
+    return _get_predictor(model).predict(source).to_json()
 
 
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:

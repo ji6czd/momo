@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 import io
@@ -405,17 +406,21 @@ class Predictor:
 
             bundle: LRModelBundle = joblib.load(io.BytesIO(zf.read(bundle_name)))
             self._vectorizer_read     = bundle.vectorizer_read
-            self._coef_read_sparse    = bundle.coef_read_sparse
-            self._intercept_read      = bundle.intercept_read
-            self._read_classes        = bundle.read_classes
             self._vectorizer_boundary = bundle.vectorizer_boundary
+            # 係数・バイアスを float32 に変換してメモリを半減させる（精度への影響は軽微）
+            self._coef_read_sparse    = bundle.coef_read_sparse.astype(np.float32)
+            self._intercept_read      = bundle.intercept_read.astype(np.float32)
+            self._read_classes        = bundle.read_classes
             self._model_boundary      = bundle.model_boundary
             self._window_size: int    = self._version_info.get("window_size", 5)
+            del bundle
+        # vectorizer の出力を float32 に固定する（推論ごとの astype コピーを回避）
+        self._vectorizer_read.dtype     = np.float32  # type: ignore[attr-defined]
+        self._vectorizer_boundary.dtype = np.float32  # type: ignore[attr-defined]
+        gc.collect()
 
-        # 逆引き辞書をキャッシュ（explain用）
-        self._vocab_inv: Dict[int, str] = {
-            v: k for k, v in self._vectorizer_read.vocabulary_.items()
-        }
+        # 逆引き辞書（explain用）: 実際に explain が呼ばれるまで構築しない
+        self._vocab_inv: Optional[Dict[int, str]] = None
 
         # フォールバック辞書のロード
         self._single_kanji_dict: Dict[str, Dict[str, str]] = {}
@@ -454,6 +459,13 @@ class Predictor:
         if idx >= len(self._read_classes) or self._read_classes[idx] != label:
             return []
 
+        # 逆引き辞書を初回呼び出し時だけ構築する（遅延初期化）
+        if self._vocab_inv is None:
+            self._vocab_inv = {  # type: ignore[union-attr]
+                v: k
+                for k, v in self._vectorizer_read.vocabulary_.items()  # type: ignore[union-attr]
+            }
+
         X = self._vectorizer_read.transform([src_features[i]])
         # そのラベルの重みベクトルを取得
         coef_for_label = np.asarray(
@@ -485,12 +497,12 @@ class Predictor:
         if not source_seq:
             return PredictionResult(text, "", [], [], [[] for _ in text])
 
-        raw_labels, boundary_labels, decision_scores, boundary_proba, src_features = \
+        raw_labels, boundary_labels, max_scores, boundary_proba, src_features = \
             self._run_inference(source_seq)
 
         refined_labels, raw_confidences, has_splits, decision_sources = self._refine_predictions(
             source_seq, raw_labels, boundary_labels,
-            decision_scores, boundary_proba,
+            max_scores, boundary_proba,
             bypass_indices, ascii_overrides, dict_overrides
         )
 
@@ -564,25 +576,32 @@ class Predictor:
     # ==========================================
     def _run_inference(
         self, source_seq: List[SourceEntry]
-    ) -> Tuple[List[str], List[str], np.ndarray, np.ndarray, List[dict]]:
+    ) -> Tuple[List[str], List[str], np.ndarray, np.ndarray, List[Dict[str, float]]]:
         """
         読みモデル（LinearSVC）と境界モデル（SGDClassifier）を推論する。
 
         戻り値:
             raw_labels      : 読みラベル列
             boundary_labels : 境界ラベル列（"0" or "1"）
-            decision_scores : LinearSVC の decision_function 結果
-                              shape=(n, n_classes) — sigmoidで確信度に変換して使う
+            max_scores      : 各文字の予測クラスに対する decision score（shape=(n,)）
+                              全クラス分の密行列は作らず、argmax クラスのスコアのみ保持する
             boundary_proba  : 境界の確率 shape=(n, 2)
             src_features    : 特徴量辞書リスト（explain用）
         """
         src_features = compute_source_features(source_seq, window=self._window_size)
+        # vectorizer.dtype=float32 をロード時に設定済みなので、transform は直接 float32 を返す
         X_read     = self._vectorizer_read.transform(src_features)
         X_boundary = self._vectorizer_boundary.transform(src_features)
 
         # 読みモデル（LinearSVC）
-        decision_scores = (self._coef_read_sparse @ X_read.T).toarray().T + self._intercept_read
-        predicted_indices = np.argmax(decision_scores, axis=1)
+        # scores_T: (n_classes, n_chars) の疎行列のまま計算する
+        scores_T = (self._coef_read_sparse @ X_read.T).toarray()  # type: ignore[union-attr]  # (n_classes, n_chars), float32
+        scores_T += self._intercept_read[:, np.newaxis]            # intercept を in-place で加算
+        predicted_indices = scores_T.argmax(axis=0)                # (n_chars,)
+        # 予測クラスのスコアだけを 1D 配列として取り出し、全クラス分の行列は即座に解放する
+        n = scores_T.shape[1]
+        max_scores = scores_T[predicted_indices, np.arange(n)]     # (n_chars,), float32
+        del scores_T
         raw_labels = list(self._read_classes[predicted_indices])
 
         # 境界モデル（SGDClassifier）
@@ -590,18 +609,14 @@ class Predictor:
         boundary_labels = [str(b) for b in boundary_raw]
         boundary_proba  = self._model_boundary.predict_proba(X_boundary)
 
-        return raw_labels, boundary_labels, decision_scores, boundary_proba, src_features
+        return raw_labels, boundary_labels, max_scores, boundary_proba, src_features
 
-    def _get_read_confidence(self, decision_scores: np.ndarray, label: str, i: int) -> float:
+    def _get_read_confidence(self, max_scores: np.ndarray, i: int) -> float:
         """
-        LinearSVC の decision_function スコアを sigmoid で 0〜1 に変換して返す。
-        ラベルがクラスリストにない場合は 0.0 を返す。
+        読みモデルの予測クラスに対する decision score を sigmoid で 0〜1 に変換して返す。
+        max_scores[i] は _run_inference で計算した「予測クラスのスコア」（intercept込み）。
         """
-        idx = np.searchsorted(self._read_classes, label)
-        if idx < len(self._read_classes) and self._read_classes[idx] == label:
-            score = decision_scores[i] if decision_scores.ndim == 1 else decision_scores[i, idx]
-            return float(1.0 / (1.0 + np.exp(-score)))
-        return 0.0
+        return float(1.0 / (1.0 + np.exp(-float(max_scores[i]))))
 
     # ==========================================
     # 🌟 ステップ 3: 後処理
@@ -611,7 +626,7 @@ class Predictor:
         source_seq: List[SourceEntry],
         raw_labels: List[str],
         boundary_labels: List[str],
-        decision_scores: np.ndarray,
+        max_scores: np.ndarray,
         boundary_proba: np.ndarray,
         bypass_indices: Set[int],
         ascii_overrides: Dict[int, str],
@@ -648,7 +663,7 @@ class Predictor:
                 label    = raw_labels[i]
                 decision = DecisionSource.LR
 
-                confidence = self._get_read_confidence(decision_scores, label, i)
+                confidence = self._get_read_confidence(max_scores, i)
 
                 # 文字消失バグの救済ロジック
                 if label == LABEL_CONTINUE and (parent_idx == -1 or parent_idx in bypass_indices):

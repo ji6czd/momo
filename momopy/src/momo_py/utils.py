@@ -87,6 +87,15 @@ def convert_to_katakana(c: str) -> str:
         return chr(ord(c) + 0x60)
     return c
 
+def normalize_compat_ideographs(text: str) -> str:
+    return "".join(
+        unicodedata.normalize("NFKC", c) if (
+            "\u2F00" <= c <= "\u2FD5"          # 康煕部首
+            or "\uF900" <= c <= "\uFAFF"       # CJK互換漢字
+            or "\U0002F800" <= c <= "\U0002FA1F"  # CJK互換漢字補助
+        ) else c
+        for c in text
+    )
 
 def has_vowel(char: str, vowel: str) -> bool:
     """

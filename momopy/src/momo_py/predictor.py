@@ -12,8 +12,8 @@ from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
 
 from .features import get_units, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
-from .utils import split_on_unescaped_slash, CharType
-
+from .utils import split_on_unescaped_slash, CharType, normalize_compat_ideographs
+from .pybraille import to_braille, to_jp_braille
 
 # 小書き仮名（拗音・促音など）。直前の文字に吸収されるべき文字。
 _SMALL_KANA = frozenset("ぁぃぅぇぉゃゅょっゎァィゥェォャュョッヮ")
@@ -284,6 +284,7 @@ class PredictionResult:
     def to_json(self) -> str:
         text_safe = json.dumps(self.source_text, ensure_ascii=False)
         kana_safe = json.dumps(self.kana_text, ensure_ascii=False)
+        braille_safe = json.dumps(to_jp_braille(self.kana_text), ensure_ascii=False)
 
         conf_str = "[" + ", ".join([f"{c:.3f}" for c in self.confidences]) + "]"
         k2s_str = "[" + ", ".join(map(str, self.kana_to_src_index)) + "]"
@@ -294,6 +295,7 @@ class PredictionResult:
             f'{{\n'
             f'  "text": {text_safe},\n'
             f'  "kana": {kana_safe},\n'
+            f'  "braille": {braille_safe},\n'
             f'  "kana_to_src_index": {k2s_str},\n'
             f'  "src_to_kana_index": {s2k_str},\n'
             f'  "confidences": {conf_str},\n'
@@ -492,6 +494,7 @@ class Predictor:
     def predict(self, text: str) -> PredictionResult:
         if not text:
             return PredictionResult("", "", [], [], [])
+        text = normalize_compat_ideographs(text)
 
         source_seq, bypass_indices, ascii_overrides, dict_overrides = self._preprocess_text(text)
         if not source_seq:

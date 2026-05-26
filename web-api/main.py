@@ -26,7 +26,7 @@ top_page = f"""
         <label for="source">点訳したい文章を入力してね：</label><br>
         <input type="text" id="source" name="source" required><br>
         <input type="radio" id="small" name="model" value="small">
-        <label for="small">Small (約5MB)</label><br>
+        <label for="small">Small (約8.7MB)</label><br>
         <input type="radio" id="medium" name="model" value="medium" checked>
         <label for="medium">Medium (約14MB)</label><br>
         <input type="radio" id="large" name="model" value="large">
@@ -108,7 +108,7 @@ def predict() -> str:
     source = request.args.get("source")
     model = request.args.get("model", "large")
     if model == "small":
-        model_file = "./dataset/basic_data_3.zip"
+        model_file = "./dataset/basic_data_4.zip"
     elif model == "medium":
         model_file = "./dataset/basic_data_5.zip"
     else:

@@ -1,16 +1,16 @@
 blinker==1.9.0
 certifi==2026.5.20
 charset-normalizer==3.4.7
-click==8.4.0
+click==8.4.1
 colorama==0.4.6
 flask==3.1.3
 gunicorn==26.0.0
-idna==3.15
+idna==3.16
 itsdangerous==2.2.0
 jinja2==3.1.6
 joblib==1.5.3
 markupsafe==3.0.3
-momo-py @ git+https://github.com/ji6czd/momo@ffe77740a891f0bb412a3a066c918d63e25d539f#subdirectory=momopy
+momo-py @ git+https://github.com/ji6czd/momo@c3b452bfe3e307f31d4910bc4851d764ea705baa#subdirectory=momopy
 numpy==2.4.6
 packaging==26.2
 requests==2.34.2

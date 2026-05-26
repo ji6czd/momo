@@ -409,8 +409,11 @@ class Predictor:
             bundle: LRModelBundle = joblib.load(io.BytesIO(zf.read(bundle_name)))
             self._vectorizer_read     = bundle.vectorizer_read
             self._vectorizer_boundary = bundle.vectorizer_boundary
-            # 係数・バイアスを float32 に変換してメモリを半減させる（精度への影響は軽微）
+            # 係数を float32 に変換する。変換直後に元の float64 を手放すことで
+            # 「float64 と float32 の一時的な共存」によるスパイクを最小化する。
             self._coef_read_sparse    = bundle.coef_read_sparse.astype(np.float32)
+            del bundle.coef_read_sparse  # type: ignore[attr-defined]
+            gc.collect()
             self._intercept_read      = bundle.intercept_read.astype(np.float32)
             self._read_classes        = bundle.read_classes
             self._model_boundary      = bundle.model_boundary

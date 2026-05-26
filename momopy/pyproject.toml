@@ -11,22 +11,26 @@ dependencies = [
     "scikit-learn>=1.8.0",
 ]
 
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+]
+
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 [project.scripts]
-momo = "momo_py.main:main"
+momo = "momo_py.cli:main"
 lookup = "momo_py.lookup:main"
 makedic = "momo_py.makedic:main"
+momo-server = "momo_py.server:main"
 [[tool.mypy.overrides]]
 module = ["pycrfsuite.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[tool.uv.sources]
-momo-model = { path = "../momo-model/dist/momo_model-0.1.0.tar.gz" }
 
 [dependency-groups]
 dev = [

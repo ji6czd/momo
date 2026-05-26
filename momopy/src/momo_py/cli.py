@@ -92,7 +92,7 @@ def main():
     parser = argparse.ArgumentParser(prog="momo")
     subparsers = parser.add_subparsers(dest="command")
     parser.add_argument("-v", "--version", action="version", version=f"Momo {version('momo-py')}")
-    
+
     # コマンドの定義
     predict_parser = subparsers.add_parser("predict")
     predict_parser.add_argument("--model", default=None)
@@ -109,14 +109,14 @@ def main():
     predict_parser.add_argument("--no-braille", action="store_true", help="予測結果のカナのみ出力（点字テキストを出力しない）")
     predict_parser.add_argument("--window", type=int, default=7, choices=[3, 4, 5, 7],
                                 help="特徴量ウィンドウサイズ（3, 4, 5, 7、デフォルト: 7）")
-    
+
     labelscan_parser = subparsers.add_parser("label")
     labelscan_parser.add_argument("--model", default=None)
-    labelscan_parser.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")    
+    labelscan_parser.add_argument("--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス")
 
     create_data_parser = subparsers.add_parser("createdata")
     create_data_parser.add_argument("--raw", required=True)
-    
+
     trainer_parser = subparsers.add_parser("train")
     trainer_parser.add_argument("--tsv", required=True)
     trainer_parser.add_argument("--model", help="学習済みモデルのファイルパス（デフォルトはtsvファイル名に基づく）")
@@ -138,10 +138,10 @@ def main():
         except ValueError as e:
             print(f"\n❌ Error: {e}", file=sys.stderr)
             sys.exit(1)
-            
+
     elif args.command == "train":
         train(tsvdata=args.tsv, model_file=args.model, window=args.window, dry_run=args.dry_run)
-        
+
     elif args.command == "predict":
         # --trace なしのときは explain_top_n=0 にして計算を省略
         explain_top_n = args.explain if args.trace else 0
@@ -153,7 +153,7 @@ def main():
             window=args.window
         )
         run_predict(config, show_trace=args.trace, show_profile=args.profile, segmented_output=args.segment, segmented_source_output=args.segment_source, show_source=not args.no_source, show_kana=not args.no_kana, show_braille=not args.no_braille)
-        
+
     elif args.command == "label":
         config = PredictorConfig(
             model_path=args.model,

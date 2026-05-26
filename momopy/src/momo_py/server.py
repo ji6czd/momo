@@ -76,6 +76,18 @@ def predict_kana(req: PredictRequest) -> KanaResponse:
     return KanaResponse(kana_text=result.kana_text)
 
 
+@app.get("/predict/kana", response_model=KanaResponse)
+def predict_kana_get(text: Annotated[str, Field(description="変換するソーステキスト", min_length=1)]) -> KanaResponse:
+    """ソーステキストを仮名文字列に変換して返す（GETメソッド版）。
+
+    - **text**: 変換したい日本語テキスト（クエリパラメータ）
+    """
+    if predictor is None:
+        raise HTTPException(status_code=503, detail="Predictor is not initialized.")
+    result = predictor.predict(text)
+    return KanaResponse(kana_text=result.kana_text)
+
+
 @app.post("/predict/predict")
 def predict_json(req: PredictRequest) -> Response:
     """ソーステキストを、点字表記を含むJSON形式で返す。
@@ -85,6 +97,18 @@ def predict_json(req: PredictRequest) -> Response:
     if predictor is None:
         raise HTTPException(status_code=503, detail="Predictor is not initialized.")
     json_str = predictor.predict(req.text).to_json()
+    return Response(content=json_str, media_type="application/json")
+
+
+@app.get("/predict/predict")
+def predict_json_get(text: Annotated[str, Field(description="変換するソーステキスト", min_length=1)]) -> Response:
+    """ソーステキストを、点字表記を含むJSON形式で返す（GETメソッド版）。
+
+    - **text**: 変換したい日本語テキスト（クエリパラメータ）
+    """
+    if predictor is None:
+        raise HTTPException(status_code=503, detail="Predictor is not initialized.")
+    json_str = predictor.predict(text).to_json()
     return Response(content=json_str, media_type="application/json")
 
 

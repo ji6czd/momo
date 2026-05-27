@@ -12,6 +12,6 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-momo-py = { git = "https://github.com/ji6czd/momo", subdirectory = "momopy", branch = "LR_feature"}
+momo-py = { git = "https://github.com/ji6czd/momo", subdirectory = "momo-py", branch = "LR_feature"}
 
 

@@ -221,7 +221,7 @@ wheels = [
 [[package]]
 name = "momo-py"
 version = "0.5.0"
-source = { git = "https://github.com/ji6czd/momo?subdirectory=momopy&branch=LR_feature#544ab1f8e67c74e3d082ecec9815c207bed0d566" }
+source = { git = "https://github.com/ji6czd/momo?subdirectory=momo-py&branch=LR_feature#9990575795d92b0b2d563b9a2bffc0fb59bbe159" }
 dependencies = [
     { name = "scikit-learn" },
 ]
@@ -241,7 +241,7 @@ dependencies = [
 requires-dist = [
     { name = "flask", specifier = ">=3.1.3" },
     { name = "gunicorn", specifier = ">=25.1.0" },
-    { name = "momo-py", git = "https://github.com/ji6czd/momo?subdirectory=momopy&branch=LR_feature" },
+    { name = "momo-py", git = "https://github.com/ji6czd/momo?subdirectory=momo-py&branch=LR_feature" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
 

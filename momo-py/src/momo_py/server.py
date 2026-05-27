@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from .predictor import Predictor, PredictorConfig
+from .pybraille import to_jp_braille
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,37 @@ class KanaResponse(BaseModel):
     kana_text: Annotated[str, Field(description="仮名に変換された文字列")]
 
 
+class BrailleResponse(BaseModel):
+    braille_text: Annotated[str, Field(description="点字（Unicode点字ブロック）に変換された文字列")]
+
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー
+# ---------------------------------------------------------------------------
+def _get_predictor_or_raise() -> Predictor:
+    if predictor is None:
+        raise HTTPException(status_code=503, detail="Predictor is not initialized.")
+    return predictor
+
+
+def _do_predict_kana(text: str) -> KanaResponse:
+    return KanaResponse(kana_text=_get_predictor_or_raise().predict(text).kana_text)
+
+
+def _do_predict_kana_segment(text: str) -> KanaResponse:
+    return KanaResponse(kana_text=_get_predictor_or_raise().predict(text).format_segmented())
+
+
+def _do_predict_json(text: str) -> Response:
+    json_str = _get_predictor_or_raise().predict(text).to_json()
+    return Response(content=json_str, media_type="application/json")
+
+
+def _do_predict_braille(text: str) -> BrailleResponse:
+    kana = _get_predictor_or_raise().predict(text).kana_text
+    return BrailleResponse(braille_text=to_jp_braille(kana))
+
+
 # ---------------------------------------------------------------------------
 # エンドポイント
 # ---------------------------------------------------------------------------
@@ -70,10 +102,7 @@ def predict_kana(req: PredictRequest) -> KanaResponse:
 
     - **text**: 変換したい日本語テキスト（1文字以上）
     """
-    if predictor is None:
-        raise HTTPException(status_code=503, detail="Predictor is not initialized.")
-    result = predictor.predict(req.text)
-    return KanaResponse(kana_text=result.kana_text)
+    return _do_predict_kana(req.text)
 
 
 @app.get("/predict/kana", response_model=KanaResponse)
@@ -82,10 +111,25 @@ def predict_kana_get(text: Annotated[str, Field(description="変換するソー�
 
     - **text**: 変換したい日本語テキスト（クエリパラメータ）
     """
-    if predictor is None:
-        raise HTTPException(status_code=503, detail="Predictor is not initialized.")
-    result = predictor.predict(text)
-    return KanaResponse(kana_text=result.kana_text)
+    return _do_predict_kana(text)
+
+
+@app.post("/predict/kana_segment", response_model=KanaResponse)
+def predict_kana_segment(req: PredictRequest) -> KanaResponse:
+    """ソーステキストを仮名文字列に変換して返す（分かち書き版）。
+
+    - **text**: 変換したい日本語テキスト（1文字以上）
+    """
+    return _do_predict_kana_segment(req.text)
+
+
+@app.get("/predict/kana_segment", response_model=KanaResponse)
+def predict_kana_segment_get(text: Annotated[str, Field(description="変換するソーステキスト", min_length=1)]) -> KanaResponse:
+    """ソーステキストを仮名文字列に変換して返す（分かち書き版・GETメソッド版）。
+
+    - **text**: 変換したい日本語テキスト（クエリパラメータ）
+    """
+    return _do_predict_kana_segment(text)
 
 
 @app.post("/predict/predict")
@@ -94,10 +138,7 @@ def predict_json(req: PredictRequest) -> Response:
 
     - **text**: 変換したい日本語テキスト（1文字以上）
     """
-    if predictor is None:
-        raise HTTPException(status_code=503, detail="Predictor is not initialized.")
-    json_str = predictor.predict(req.text).to_json()
-    return Response(content=json_str, media_type="application/json")
+    return _do_predict_json(req.text)
 
 
 @app.get("/predict/predict")
@@ -106,10 +147,25 @@ def predict_json_get(text: Annotated[str, Field(description="変換するソー�
 
     - **text**: 変換したい日本語テキスト（クエリパラメータ）
     """
-    if predictor is None:
-        raise HTTPException(status_code=503, detail="Predictor is not initialized.")
-    json_str = predictor.predict(text).to_json()
-    return Response(content=json_str, media_type="application/json")
+    return _do_predict_json(text)
+
+
+@app.post("/predict/braille", response_model=BrailleResponse)
+def predict_braille(req: PredictRequest) -> BrailleResponse:
+    """ソーステキストを点字（Unicode点字ブロック）文字列に変換して返す。
+
+    - **text**: 変換したい日本語テキスト（1文字以上）
+    """
+    return _do_predict_braille(req.text)
+
+
+@app.get("/predict/braille", response_model=BrailleResponse)
+def predict_braille_get(text: Annotated[str, Field(description="変換するソーステキスト", min_length=1)]) -> BrailleResponse:
+    """ソーステキストを点字（Unicode点字ブロック）文字列に変換して返す（GETメソッド版）。
+
+    - **text**: 変換したい日本語テキスト（クエリパラメータ）
+    """
+    return _do_predict_braille(text)
 
 
 # ---------------------------------------------------------------------------

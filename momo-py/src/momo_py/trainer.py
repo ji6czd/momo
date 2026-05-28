@@ -294,7 +294,6 @@ def train(tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool =
         7: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
         5: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
         4: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
-        3: dict(C=0.1, max_iter=2000, tol=1e-2, verbose=0),
     }
 
     model_read = LinearSVC(**params[window])

@@ -38,7 +38,6 @@ build_model() {
     uv run ${cmd} train --tsv=${tsv} --window 7
     uv run ${cmd} train --tsv ${tsv} --window 5
     uv run ${cmd} train --tsv ${tsv} --window 4
-    uv run ${cmd} train --tsv ${tsv} --window 3
 }
 
 # メイン処理

@@ -123,12 +123,13 @@ def compute_source_features(
     ソース文字系列全体に対して、各文字の文脈特徴量を一括計算する。
     pycrfsuiteネイティブの { "feature_name=value": 1.0 } 形式で出力する。
 
-    window: 参照する文字数。3, 4, 5, 7 を指定する。
+    window: 参照する文字数。4, 5, 7 を指定する。
       7 (デフォルト): 前後3文字まで参照（bigram×6, trigram×5）
       5             : 前後2文字まで参照（bigram×4, trigram×3）
       4             : 前1・後2文字参照 [-1,0,+1,+2]（bigram×3, trigram×2）
-      3             : 前後1文字のみ参照（bigram×2, trigram×1）
     """
+    if window not in (4, 5, 7):
+        raise ValueError(f"window は 4, 5, 7 のいずれかでなければなりません: {window}")
     result: List[FeatureDict] = []
     n = len(source_seq)
 

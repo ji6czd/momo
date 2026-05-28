@@ -74,7 +74,7 @@ class PredictorConfig:
 
     Attributes:
         model_path: モデルファイルのパス（.zip）
-        window: 特徴量ウィンドウサイズ（3, 4, 5, 7）
+        window: 特徴量ウィンドウサイズ（4, 5, 7）
         single_kanji_dict_path: 単一漢字辞書TSVのパス（省略可）
         custom_dict_path: カスタム辞書ファイルのパス（省略可）
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限

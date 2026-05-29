@@ -5,11 +5,10 @@ members = [
     "crates/momors-cli",
 ]
 
-# 各クレートで共通のメタデータをここに集約
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 
-# 各クレートで共通の依存もここに集約
 [workspace.dependencies]
-

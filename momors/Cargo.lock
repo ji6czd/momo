@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "momors-cli"
 version = "0.1.0"
+dependencies = [
+ "momors-core",
+]
 
 [[package]]
 name = "momors-core"

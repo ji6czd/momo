@@ -1,14 +1,46 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # momors-core
+//!
+//! 日本語の漢字かな交じり文をカタカナに変換するライブラリ。
+//!
+//! ## 使い方
+//!
+//! ```no_run
+//! use momors_core::{Predictor, PredictorConfig};
+//!
+//! # fn main() -> momors_core::Result<()> {
+//! let config = PredictorConfig::new("basic_data.mbm")
+//!     .with_confidence_threshold(0.3);
+//!
+//! let predictor = Predictor::load(config)?;
+//!
+//! let result = predictor.predict("漢字混じりの文章")?;
+//! println!("{}", result.kana_text());
+//! # Ok(())
+//! # }
+//! ```
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// ============================================================
+// モジュール構成
+// ============================================================
+// pub mod: 外部に公開するモジュール
+// mod    : クレート内部だけで使うモジュール
+//
+// 公開する型は `pub use` で lib.rs のトップレベルに引き上げて、
+// 使う側が `momors_core::Predictor` のように短く書けるようにする。
+// ============================================================
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod error;
+pub mod prediction;
+
+// 内部モジュール（実装が進んだら追加していく）
+// mod char_type;
+// mod feature;
+// mod loader;
+// mod model;
+
+// ============================================================
+// 公開 API の再エクスポート
+// ============================================================
+
+pub use error::{Error, Result};
+pub use prediction::{PredictionResult, Predictor, PredictorConfig};

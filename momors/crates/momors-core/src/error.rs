@@ -1,0 +1,45 @@
+//! ライブラリ全体で共有するエラー型。
+//!
+//! `thiserror` クレートを使って `Display` と `std::error::Error` を自動実装する。
+//! 使う側は `momors_core::Result<T>` を返り値型にすれば、`?` 演算子で
+//! エラーを伝播できる。
+
+use std::path::PathBuf;
+use thiserror::Error;
+
+/// `momors-core` で発生しうるエラー。
+///
+/// `#[non_exhaustive]` を付けておくと、将来バリアントを追加しても
+/// 破壊的変更扱いにならない。マッチするときに `_` が必須になる。
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// モデルファイルが開けなかった、または読めなかった。
+    #[error("モデルファイルの読み込みに失敗しました: {path}")]
+    ModelIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// モデルファイルのマジックバイトが "MOMO" ではない。
+    #[error("不正なマジックバイト: {path}")]
+    InvalidMagic { path: PathBuf },
+
+    /// モデルファイルのバージョンがサポート外。
+    #[error("未対応のモデルバージョン: {version}")]
+    UnsupportedVersion { version: u8 },
+
+    /// モデルファイルの構造が壊れている（途中で終端した等）。
+    #[error("モデルファイルが壊れています: {reason}")]
+    CorruptModel { reason: String },
+
+    /// 予測時の内部エラー。
+    #[error("予測に失敗しました: {reason}")]
+    Prediction { reason: String },
+}
+
+/// 本クレート用の `Result` 型エイリアス。
+///
+/// 使う側は `momors_core::Result<T>` と書くだけで済む。
+pub type Result<T> = std::result::Result<T, Error>;

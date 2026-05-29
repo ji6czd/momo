@@ -4,5 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "momo"
+path = "src/main.rs"
+
 [dependencies]
-momors-core = { path = "../momors-core" }
+momors-core.workspace = true
+clap.workspace = true

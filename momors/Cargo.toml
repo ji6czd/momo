@@ -1,0 +1,15 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/momors-core",
+    "crates/momors-cli",
+]
+
+# 各クレートで共通のメタデータをここに集約
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+# 各クレートで共通の依存もここに集約
+[workspace.dependencies]
+

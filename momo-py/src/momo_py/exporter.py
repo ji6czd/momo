@@ -440,21 +440,11 @@ def export(zip_path: str, out_path: str) -> None:
     boundary_bytes += bytes(b_int8.tobytes())
     boundary_bytes += struct.pack('<ff', b_intercept[0], b_intercept[1])
 
-    # --- 複合ユニット辞書（MBM v2）---
-    compound_units: list[str] = version_info.get("compound_units", [])
-    compound_bytes = bytearray()
-    compound_bytes += struct.pack('<I', len(compound_units))
-    for unit in compound_units:
-        encoded = unit.encode("utf-8")
-        assert len(encoded) <= 255, f"複合ユニットが長すぎます: {unit!r}"
-        compound_bytes.append(len(encoded))
-        compound_bytes += encoded
-
-    # --- ファイルヘッダ（v2）---
+    # --- ファイルヘッダ ---
     header = struct.pack(
         '<4sBBBBII',
         b'MOMO',          # magic
-        0x02,             # version（複合ユニット辞書対応）
+        0x01,             # version
         0x00, 0x00, 0x00, # reserved
         n_classes,
         n_features,
@@ -469,7 +459,6 @@ def export(zip_path: str, out_path: str) -> None:
         f.write(read_weight_bytes)
         f.write(intercept_r_bytes)
         f.write(boundary_bytes)
-        f.write(compound_bytes)
 
     size_mb = os.path.getsize(out_path) / 1024 / 1024
     print(f"✅ 完了: {size_mb:.1f} MB")

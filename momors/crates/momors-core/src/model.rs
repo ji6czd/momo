@@ -6,8 +6,6 @@
 //!
 //! [`Predictor`]: crate::Predictor
 
-use std::collections::HashSet;
-
 use crate::feature::FeatureKey;
 
 // ============================================================
@@ -83,12 +81,6 @@ pub struct MomoModel {
     // --- サイズ情報 ---
     pub(crate) n_classes: u32,
     pub(crate) n_features: u32,
-
-    // --- 複合ユニット辞書 (MBM v2 以降) ---
-    /// 拗音以外で一体処理すべき文字列 (例: "今日", "明日") の UTF-8 セット。
-    /// 拗音はアルゴリズムで検出するため含まない。
-    /// v1 ファイルからロードした場合は空。
-    pub(crate) compound_units: HashSet<String>,
 }
 
 impl MomoModel {
@@ -156,7 +148,6 @@ impl Default for MomoModel {
             boundary_intercept: [0.0, 0.0],
             n_classes: 0,
             n_features: 0,
-            compound_units: HashSet::new(),
         }
     }
 }

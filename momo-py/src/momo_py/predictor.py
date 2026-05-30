@@ -436,11 +436,6 @@ class Predictor:
         if config.single_kanji_dict_path:
             self._single_kanji_dict = _load_single_kanji_dict(config.single_kanji_dict_path)
 
-        # 複合ユニット辞書（version_info から読み込み、拗音は別途アルゴリズム検出）
-        self._compound_set: frozenset[str] = frozenset(
-            self._version_info.get("compound_units", [])
-        )
-
         # カスタム辞書のロードとインデックス構築
         self._dict_index: Dict[str, List[Tuple[str, List[str]]]] = {}
         if config.custom_dict_path:
@@ -546,7 +541,7 @@ class Predictor:
     def _preprocess_text(
         self, text: str
     ) -> Tuple[List[SourceEntry], Set[int], Dict[int, str], Dict[int, str]]:
-        units_info = get_units(text, compound_set=self._compound_set or None)
+        units_info = get_units(text)
         source_seq: List[SourceEntry] = []
         bypass_indices: Set[int] = set()
         ascii_overrides: Dict[int, str] = {}

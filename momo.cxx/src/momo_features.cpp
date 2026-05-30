@@ -26,10 +26,13 @@ static bool is_small_kana_cp(char32_t cp) {
   return false;
 }
 
-// ひらがな・カタカナ（小書き含む）かどうか
+// ひらがな/カタカナの基底文字かどうか。小書き仮名は除く。
+// 拗音は「基底文字 + 小書き仮名」の2文字セットであり、
+// 小書き仮名自体が基底になることはない。
 static bool is_base_kana(char32_t cp) {
-  return (cp >= U'ぁ' && cp <= U'ん') ||  // ぁ〜ん
-         (cp >= U'ァ' && cp <= U'ヶ');    // ァ〜ヶ
+  return ((cp >= U'ぁ' && cp <= U'ん') ||
+          (cp >= U'ァ' && cp <= U'ヶ')) &&
+         !is_small_kana_cp(cp);
 }
 
 // ============================================================
@@ -50,9 +53,7 @@ static bool is_kurai_char(char32_t cp) {
 // テキスト → SourceEntry 列
 // ============================================================
 
-std::vector<SourceEntry> to_source_seq(
-    const std::vector<char32_t>& text,
-    const std::unordered_set<std::string>* compound_units) {
+std::vector<SourceEntry> to_source_seq(const std::vector<char32_t>& text) {
   const int n = static_cast<int>(text.size());
 
   std::vector<CharType> ctypes(n);
@@ -89,32 +90,6 @@ std::vector<SourceEntry> to_source_seq(
       seq.push_back(e);
       i += 2;
       continue;
-    }
-
-    // --- 漢字複合ユニット検出（辞書ベース）---
-    if (compound_units && !compound_units->empty()) {
-      bool found = false;
-      // 最長一致（最大3文字まで）
-      for (int len = 3; len >= 2; --len) {
-        if (i + len > n) continue;
-        // UTF-8 文字列に変換して辞書引き
-        std::string candidate;
-        for (int k = 0; k < len; ++k) candidate += char32_to_utf8(text[i + k]);
-        if (compound_units->count(candidate)) {
-          SourceEntry e;
-          e.cp = text[i];
-          e.cp2 = (len >= 2) ? text[i + 1] : 0;
-          e.cp3 = (len >= 3) ? text[i + 2] : 0;
-          e.orig_idx = static_cast<uint32_t>(i);
-          e.ctype = ctypes[i];
-          e.compound_len = static_cast<uint8_t>(len);
-          seq.push_back(e);
-          i += len;
-          found = true;
-          break;
-        }
-      }
-      if (found) continue;
     }
 
     // --- 単一文字 ---

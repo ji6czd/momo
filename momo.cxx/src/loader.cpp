@@ -111,7 +111,7 @@ MomoModel load_model(const std::string& path) {
     throw std::runtime_error("不正なマジックバイト: " + path);
   }
   const uint8_t version = read_u8(fp);
-  if (version != 0x01 && version != 0x02) {
+  if (version != 0x01) {
     std::fclose(fp);
     throw std::runtime_error("未対応のバージョン: " + std::to_string(version));
   }
@@ -167,17 +167,6 @@ MomoModel load_model(const std::string& path) {
   read_exact(fp, model.boundary_data.data(), model.n_features * sizeof(int8_t), "boundary_data");
   model.boundary_intercept[0] = read_f32(fp);
   model.boundary_intercept[1] = read_f32(fp);
-
-  // --- 複合ユニット辞書（MBM v2 以降）---
-  if (version >= 0x02) {
-    const uint32_t n_compounds = read_u32(fp);
-    for (uint32_t i = 0; i < n_compounds; ++i) {
-      const uint8_t len = read_u8(fp);
-      std::string unit(len, '\0');
-      read_exact(fp, unit.data(), len, "compound_unit");
-      model.compound_units.insert(std::move(unit));
-    }
-  }
 
   std::fclose(fp);
   return model;

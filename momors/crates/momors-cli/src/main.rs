@@ -14,7 +14,7 @@ use momors_core::{Predictor, PredictorConfig};
 #[command(name = "momo", version, about, long_about = None)]
 struct Cli {
     /// モデルファイル (.mbm) のパス
-    #[arg(long, default_value = "basic_data.mbm")]
+    #[arg(long, default_value = "basic_data_7.mbm")]
     model: String,
 
     /// 自信度スコアも一緒に出力する

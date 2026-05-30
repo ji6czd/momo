@@ -120,8 +120,16 @@ def _create_tsv_rows(target_chars: str, ctype: str, r_label: str, orig_idx: int)
     if ctype in _SKIP_CTYPES:
         return [f"{char}\t{LABEL_SKIP}\t{ctype}\t{orig_idx + i}"
                 for i, char in enumerate(target_chars)]
-    # 複合ユニット（拗音・漢字語など）は1行にまとめる。LABEL_CONTINUE で分割しない。
-    return [f"{target_chars}\t{r_label}\t{ctype}\t{orig_idx}"]
+    # 拗音（ひらがな/カタカナ複合ユニット）は1行にまとめる。
+    # 推論時も get_units() が同じユニットとして認識するため整合が取れる。
+    # 漢字などは LABEL_CONTINUE で1文字ずつに分割する（推論は1文字単位のため）。
+    if len(target_chars) == 1 or ctype in (CharType.HIRAGANA, CharType.KATAKANA):
+        return [f"{target_chars}\t{r_label}\t{ctype}\t{orig_idx}"]
+    rows = []
+    for i, char in enumerate(target_chars):
+        r_val = r_label if i == 0 else LABEL_CONTINUE
+        rows.append(f"{char}\t{r_val}\t{ctype}\t{orig_idx + i}")
+    return rows
 
 
 # ==========================================
@@ -254,7 +262,6 @@ def train(tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool =
     X_dicts:    List[FeatureDict] = []
     Y_read:     List[str]         = []
     Y_boundary: List[str]         = []
-    compound_units: list[str]     = []  # 複合ユニット（拗音を除く漢字語など）
 
     for sentence in sentences:
         source_seq: List[SourceEntry] = [
@@ -262,15 +269,6 @@ def train(tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool =
             for idx, p in enumerate(sentence)
         ]
         raw_labels = [p[1] for p in sentence]
-
-        # 2文字以上の非skipユニットを複合ユニット辞書に登録（拗音は推論時にアルゴリズム検出）
-        for entry in source_seq:
-            val = entry[0]
-            if len(val) >= 2 and not all(
-                'ぁ' <= c <= 'ん' or 'ァ' <= c <= 'ヶ'
-                for c in val
-            ):
-                compound_units.append(val)
 
         features = compute_source_features(source_seq, window=window)
         X_dicts.extend(features)
@@ -360,11 +358,10 @@ def train(tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool =
     )
 
     version_info = {
-        "trained_at":     datetime.now(timezone.utc).isoformat(),
-        "model_bundle":   bundle_name,
-        "algorithm":      "LinearSVC+SGD",
-        "window_size":    window,
-        "compound_units": sorted(set(compound_units)),
+        "trained_at":   datetime.now(timezone.utc).isoformat(),
+        "model_bundle": bundle_name,
+        "algorithm":    "LinearSVC+SGD",
+        "window_size":  window,
     }
     bundle_buf = io.BytesIO()
     joblib.dump(bundle, bundle_buf, compress=0)

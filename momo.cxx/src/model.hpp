@@ -2,7 +2,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include "char_type.hpp"
@@ -86,9 +85,4 @@ struct MomoModel {
   // --- サイズ情報 ---
   uint32_t n_classes = 0;
   uint32_t n_features = 0;
-
-  // --- 複合ユニット辞書（MBM v2 以降）---
-  // 拗音以外で一体処理すべき文字列（例: "今日", "明日"）のUTF-8セット。
-  // 拗音はアルゴリズムで検出するため含まない。
-  std::unordered_set<std::string> compound_units;
 };

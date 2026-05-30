@@ -254,9 +254,7 @@ PredictionResult Predictor::predict(const std::string& text) const {
   }
 #endif
 
-  const std::vector<SourceEntry> source_seq = to_source_seq(
-      text32,
-      model_.compound_units.empty() ? nullptr : &model_.compound_units);
+  const std::vector<SourceEntry> source_seq = to_source_seq(text32);
   const int n = static_cast<int>(source_seq.size());
 #ifdef MOMO_TRACE
   {

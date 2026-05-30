@@ -57,7 +57,7 @@ F_JNUM_RUN = "jnum_run"
 F_JNUM_RUN_P1 = "jnum_run_p1"
 
 
-def get_units(text: str, compound_set: frozenset | None = None) -> List[Tuple[str, int, str]]:
+def get_units(text: str) -> List[Tuple[str, int, str]]:
     """
     テキストを音節ユニットに分解し、(文字列, 原文開始位置, 文字種) のリストを返す。
 
@@ -71,7 +71,9 @@ def get_units(text: str, compound_set: frozenset | None = None) -> List[Tuple[st
          （「万全」の「万」は昇格しない。「三万円」の「万」は昇格する。）
     ブロック化は行わず、各要素は1文字（または既存の複数文字ブロック）のまま。
     """
-    regex = r"\[(.*?)\]|([ぁ-んァ-ヶ][ぁぃぅぇぉゃゅょゎァィゥェォャュョヮヵヶ]+)|([!-~]+(?:[ \t]+[!-~]+)*)|(\s+)|(.)"
+    # 拗音・特殊音の複合ユニット: 1文字目は小書き仮名以外のかな、2文字目は小書き仮名1文字
+    # 1文字目の負lookbehindで小書き仮名（ぁぃぅぇぉっゃゅょゎ / ァィゥェォッャュョヮ）を除外する
+    regex = r"\[(.*?)\]|([ぁ-んァ-ヶ](?<![ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ])[ぁぃぅぇぉゃゅょゎァィゥェォャュョヮヵヶ])|([!-~]+(?:[ \t]+[!-~]+)*)|(\s+)|(.)"
     raw_units: List[Tuple[str, int]] = []
     for m in re.finditer(regex, text):
         if (g := m.group(1)) is not None:
@@ -84,27 +86,6 @@ def get_units(text: str, compound_set: frozenset | None = None) -> List[Tuple[st
             raw_units.append((g, m.start(4)))
         else:
             raw_units.append((m.group(5) or "", m.start(5)))
-
-    # --- 漢字複合ユニットのマージ（compound_set 使用時のみ）---
-    # 拗音は regex group 2 で既にまとめられているため対象外。
-    # 辞書に含まれる連続単一文字ユニットを最長一致で結合する。
-    if compound_set:
-        merged: List[Tuple[str, int]] = []
-        j = 0
-        while j < len(raw_units):
-            found = False
-            for length in (3, 2):
-                if j + length <= len(raw_units):
-                    candidate = "".join(raw_units[j + k][0] for k in range(length))
-                    if candidate in compound_set:
-                        merged.append((candidate, raw_units[j][1]))
-                        j += length
-                        found = True
-                        break
-            if not found:
-                merged.append(raw_units[j])
-                j += 1
-        raw_units = merged
 
     # --- 位取り文字の昇格判定 ---
     n = len(raw_units)

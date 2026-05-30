@@ -204,12 +204,7 @@ impl Predictor {
         }
 
         // --- 前処理 ---
-        let cu_opt = if self.model.compound_units.is_empty() {
-            None
-        } else {
-            Some(&self.model.compound_units)
-        };
-        let source_seq = to_source_seq(text, cu_opt);
+        let source_seq = to_source_seq(text);
         let n = source_seq.len();
         if n == 0 {
             return Ok(result);

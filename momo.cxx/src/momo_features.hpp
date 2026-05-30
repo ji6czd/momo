@@ -30,9 +30,6 @@ std::vector<std::vector<FeatureKey>> compute_source_features(const std::vector<S
 
 // テキスト（char32_t列）を SourceEntry 列に変換する。
 // 拗音（ひらがな/カタカナ＋小書き仮名）は複合ユニットとして1エントリにまとめる。
-// compound_units に含まれる漢字語も複合ユニットとして処理する。
 // 位取り文字（十百千万億兆）の JAPANESE_NUMERIC 昇格もここで行う。
 // Python側の get_units() + _preprocess_text() の推論時パスと対応。
-std::vector<SourceEntry> to_source_seq(
-    const std::vector<char32_t>& text,
-    const std::unordered_set<std::string>* compound_units = nullptr);
+std::vector<SourceEntry> to_source_seq(const std::vector<char32_t>& text);

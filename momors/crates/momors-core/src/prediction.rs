@@ -204,7 +204,12 @@ impl Predictor {
         }
 
         // --- 前処理 ---
-        let source_seq = to_source_seq(text);
+        let cu_opt = if self.model.compound_units.is_empty() {
+            None
+        } else {
+            Some(&self.model.compound_units)
+        };
+        let source_seq = to_source_seq(text, cu_opt);
         let n = source_seq.len();
         if n == 0 {
             return Ok(result);
@@ -219,6 +224,10 @@ impl Predictor {
         let n_cls = self.model.n_classes() as usize;
         let mut int_scores = vec![0i32; n_cls];
         let mut scores = vec![0f32; n_cls];
+
+        // --- 複合ユニット後続文字の src_to_kana_index 補完用 ---
+        // (src_byte_idx, kana_byte_begin, kana_byte_end) のリスト
+        let mut compound_extras: Vec<(usize, usize, usize)> = Vec::new();
 
         // --- 状態変数 ---
         // 々フォールバック用の「直前漢字の読み」記憶。
@@ -381,12 +390,30 @@ impl Predictor {
                 label.to_string()
             };
 
+            let kana_before = result.kana_text.len();
             self.emit_label(entry, &effective_label, conf, &mut result);
+            let kana_after = result.kana_text.len();
+
+            // 複合ユニット後続文字（orig_idx+1, +2）の src_to_kana_index 補完用に記録。
+            // C++ 版 compound_extra と対応。orig_idx は UTF-8 バイト位置なので
+            // 先頭コードポイントのバイト長を加算して後続文字のバイト位置を求める。
+            if entry.compound_len >= 2 {
+                let cp1_bytes = char::from_u32(entry.cp).map_or(1, |c| c.len_utf8());
+                let orig2 = entry.orig_idx as usize + cp1_bytes;
+                compound_extras.push((orig2, kana_before, kana_after));
+            }
+            if entry.compound_len >= 3 {
+                let cp1_bytes = char::from_u32(entry.cp).map_or(1, |c| c.len_utf8());
+                let cp2_bytes = char::from_u32(entry.cp2).map_or(1, |c| c.len_utf8());
+                let orig3 = entry.orig_idx as usize + cp1_bytes + cp2_bytes;
+                compound_extras.push((orig3, kana_before, kana_after));
+            }
 
             // 親情報更新
             parent_src_idx = Some(i);
             parent_is_bypass = false;
-            parent_has_small_kana = false;
+            // 親ラベルに小書き仮名が含まれているか確認（C++ 版と同じ判定）
+            parent_has_small_kana = effective_label.chars().any(|c| is_small_kana(c as u32));
             parent_kana_byte_end = result.kana_text.len();
 
             // last_fallback の更新: KANJI のラベルだけ記憶する
@@ -410,6 +437,15 @@ impl Predictor {
         for (j, &src_pos) in result.kana_to_src_index.iter().enumerate() {
             if src_pos < src_size {
                 result.src_to_kana_index[src_pos].push(j);
+            }
+        }
+        // 複合ユニットの後続文字（orig_idx+1, +2）も同じ kana 範囲に登録。
+        // C++ 版 compound_extra 処理と対応。
+        for (src_byte_idx, kana_begin, kana_end) in &compound_extras {
+            if *src_byte_idx < src_size {
+                for j in *kana_begin..*kana_end {
+                    result.src_to_kana_index[*src_byte_idx].push(j);
+                }
             }
         }
 

@@ -10,7 +10,6 @@ version = "0.1.0"
 edition = "2024"
 authors = ["KIRIAKE Masanori <seiken@rd01.net>"]
 license = "BSD-3-Clause"
-license-files = ["LICENSE"]
 
 [workspace.dependencies]
 thiserror = "1.0"

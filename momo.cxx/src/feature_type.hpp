@@ -61,6 +61,7 @@ enum class FeatureType : uint8_t {
   BIGRAM_NEXT1_NEXT2 = 0xA3,  // +1:+2:bi=XY
   BIGRAM_PREV3_PREV2 = 0xA4,  // -3:-2:bi=XY
   BIGRAM_NEXT2_NEXT3 = 0xA5,  // +2:+3:bi=XY
+  CHAR_SELF_COMPOUND_2 = 0xA6,  // char32_t×2: 2文字複合ユニットの char_s
 
   // 0b10'11'xxxx  char32_t×3
   TRIGRAM_PREV2_PREV1_SELF = 0xB0,   // tri=XYZ  (前2-前1-対象)
@@ -68,6 +69,7 @@ enum class FeatureType : uint8_t {
   TRIGRAM_SELF_NEXT1_NEXT2 = 0xB2,   // tri=XYZ  (対象-後1-後2)
   TRIGRAM_PREV3_PREV2_PREV1 = 0xB3,  // tri=XYZ  (前3-前2-前1)
   TRIGRAM_NEXT1_NEXT2_NEXT3 = 0xB4,  // tri=XYZ  (後1-後2-後3)
+  CHAR_SELF_COMPOUND_3 = 0xB5,  // char32_t×3: 3文字複合ユニットの char_s
 
   // 0b11'00'xxxx  uint8×1
   KANJI_RUN_LEN = 0xC0,                  // kanji_run_len=N

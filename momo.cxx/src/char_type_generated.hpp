@@ -1,7 +1,7 @@
 // AUTO-GENERATED — DO NOT EDIT MANUALLY
 // Source : tools/gen_char_type.py
 // Truth  : momopy/src/momo_py/utils.py (get_char_type / _*_SYMBOLS sets)
-// Generated : 2026-04-23T20:17:40Z
+// Generated : 2026-05-30T12:52:57Z
 // Codepoints: BMP (U+0000–U+FFFF), SYMBOL 系のみ
 // Entry count: 4474
 //

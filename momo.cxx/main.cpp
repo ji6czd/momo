@@ -1,6 +1,7 @@
+#include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <string>
-#include <chrono>
 
 #include "CLI/CLI.hpp"
 #include "predictor.hpp"
@@ -43,8 +44,8 @@ int predict(const PredictorConfig& config, bool compute_confidence, bool profile
       auto start = std::chrono::high_resolution_clock::now();
       const PredictionResult result = predictor.predict(line);
       auto end = std::chrono::high_resolution_clock::now();
-      std::chrono::duration<double> elapsed = end - start;
-      if (profile) std::cout << "予測時間: " << elapsed.count() << "秒\n";
+      auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+      if (profile) std::cout << "予測時間: " << elapsed.count() << "us\n";
       std::cout << result.kana_text << "\n";
       if (compute_confidence) {
         for (size_t i = 0; i < result.confidences.size(); ++i) {
@@ -66,12 +67,12 @@ int predict(const PredictorConfig& config, bool compute_confidence, bool profile
 
 int main(int argc, char* argv[]) {
   CLI::App app{"Momo - Japanese Braille Predictor"};
-  std::string model_path = "basic_data.mbm";
   float confidence_threshold = 0.3f;
   float numeric_confidence_threshold = 0.5f;
   bool compute_confidence = false;
   bool profile = false;
-  app.add_option("--model", model_path, "Path to model file (.mbm)")->default_val("basic_data.mbm");
+  std::string model_path;
+  app.add_option("--model", model_path, "Path to model file (.mbm)")->default_val("basic_data_7.mbm");
   app.add_flag("--confidence", compute_confidence, "Compute confidence scores (marginal probabilities)");
   app.add_flag("--profile", profile, "Enable profiling (not implemented yet)")->default_val(false);
   app.add_option("--confidence-threshold", confidence_threshold, "KANJI fallback threshold (default: 0.3)");
@@ -82,6 +83,11 @@ int main(int argc, char* argv[]) {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
     return app.exit(e);
+  }
+
+  if (!std::filesystem::path(model_path).is_absolute()) {
+    auto exe_dir = std::filesystem::path(argv[0]).parent_path();
+    model_path = (exe_dir / model_path).string();
   }
 
   PredictorConfig config(model_path);

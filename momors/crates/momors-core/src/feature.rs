@@ -73,6 +73,9 @@ pub enum FeatureType {
     BigramNext1Next2 = 0xA3,
     BigramPrev3Prev2 = 0xA4,
     BigramNext2Next3 = 0xA5,
+    /// 2文字複合ユニット (拗音・漢字語) の char_s 特徴量。
+    /// C++ 版 `CHAR_SELF_COMPOUND_2`、Python 版 `FT.CHAR_SELF_COMPOUND_2` と対応。
+    CharSelfCompound2 = 0xA6,
 
     // --- char32_t×3 (0b10'11'xxxx) ---
     TrigramPrev2Prev1Self = 0xB0,
@@ -80,6 +83,9 @@ pub enum FeatureType {
     TrigramSelfNext1Next2 = 0xB2,
     TrigramPrev3Prev2Prev1 = 0xB3,
     TrigramNext1Next2Next3 = 0xB4,
+    /// 3文字複合ユニットの char_s 特徴量。
+    /// C++ 版 `CHAR_SELF_COMPOUND_3`、Python 版 `FT.CHAR_SELF_COMPOUND_3` と対応。
+    CharSelfCompound3 = 0xB5,
 
     // --- u8×1 (0b11'00'xxxx) ---
     KanjiRunLen = 0xC0,
@@ -164,12 +170,14 @@ impl FeatureType {
             0xA3 => BigramNext1Next2,
             0xA4 => BigramPrev3Prev2,
             0xA5 => BigramNext2Next3,
+            0xA6 => CharSelfCompound2,
 
             0xB0 => TrigramPrev2Prev1Self,
             0xB1 => TrigramPrev1SelfNext1,
             0xB2 => TrigramSelfNext1Next2,
             0xB3 => TrigramPrev3Prev2Prev1,
             0xB4 => TrigramNext1Next2Next3,
+            0xB5 => CharSelfCompound3,
 
             0xC0 => KanjiRunLen,
             0xC1 => JapaneseNumericRunLen,
@@ -320,11 +328,24 @@ mod tests {
     }
 
     #[test]
+    fn from_u8_compound_values() {
+        assert_eq!(
+            FeatureType::from_u8(0xA6),
+            Some(FeatureType::CharSelfCompound2)
+        );
+        assert_eq!(
+            FeatureType::from_u8(0xB5),
+            Some(FeatureType::CharSelfCompound3)
+        );
+    }
+
+    #[test]
     fn from_u8_unknown_values() {
         assert_eq!(FeatureType::from_u8(0x02), None);
         assert_eq!(FeatureType::from_u8(0x57), None);
         assert_eq!(FeatureType::from_u8(0xFF), None);
         assert_eq!(FeatureType::from_u8(0xC3), None);
+        assert_eq!(FeatureType::from_u8(0xB6), None);
     }
 
     #[test]
@@ -337,7 +358,9 @@ mod tests {
         // char32 系
         assert_eq!(FeatureType::CharSelf.char32_count(), 1);
         assert_eq!(FeatureType::BigramPrev1Self.char32_count(), 2);
+        assert_eq!(FeatureType::CharSelfCompound2.char32_count(), 2);
         assert_eq!(FeatureType::TrigramPrev2Prev1Self.char32_count(), 3);
+        assert_eq!(FeatureType::CharSelfCompound3.char32_count(), 3);
 
         // u8 ペイロード系
         assert!(FeatureType::KanjiRunLen.is_uint8_payload());

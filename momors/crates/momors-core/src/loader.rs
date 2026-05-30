@@ -9,7 +9,7 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x01
+//!   version      : u8      0x01 または 0x02
 //!   _reserved    : u8[3]   0x00 × 3
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
@@ -39,6 +39,10 @@
 //!   quant_scale  : f32
 //!   data         : i8 × n_features
 //!   intercept    : f32 × 2
+//!
+//! [複合ユニット辞書 (v2 以降)]
+//!   n_compounds  : u32 LE
+//!   (len : u8, utf8 : u8[len]) × n_compounds
 //! ```
 //!
 //! ## CSR → CSC 変換
@@ -63,7 +67,6 @@ use crate::{Error, Result};
 // ============================================================
 
 const MAGIC: [u8; 4] = *b"MOMO";
-const SUPPORTED_VERSION: u8 = 0x01;
 
 // ============================================================
 // 公開エントリポイント
@@ -95,7 +98,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     }
 
     let version = reader.read_u8().map_err(io_err(path))?;
-    if version != SUPPORTED_VERSION {
+    if version != 0x01 && version != 0x02 {
         return Err(Error::UnsupportedVersion { version });
     }
 
@@ -143,6 +146,21 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
         reader.read_f32::<LittleEndian>().map_err(io_err(path))?,
         reader.read_f32::<LittleEndian>().map_err(io_err(path))?,
     ];
+
+    // ---- 複合ユニット辞書 (v2 以降) ----
+    if version >= 0x02 {
+        let n_compounds = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+        let mut buf = Vec::new();
+        for _ in 0..n_compounds {
+            let len = reader.read_u8().map_err(io_err(path))? as usize;
+            buf.clear();
+            buf.resize(len, 0u8);
+            reader.read_exact(&mut buf).map_err(io_err(path))?;
+            let unit = String::from_utf8(buf.clone())
+                .map_err(|e| Error::InvalidLabelUtf8 { source: e })?;
+            model.compound_units.insert(unit);
+        }
+    }
 
     // ---- 後処理: vocab を Rust の Ord で再ソート ----
     // C++ 版とソート順が異なるため、binary_search できるように改めて整列する。

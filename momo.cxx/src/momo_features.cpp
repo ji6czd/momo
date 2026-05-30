@@ -5,6 +5,34 @@
 #include "utf8.hpp"
 
 // ============================================================
+// 小書き仮名判定（拗音複合ユニット検出に使用）
+// Python側の _SMALL_KANA と対応
+// ============================================================
+
+static bool is_small_kana_cp(char32_t cp) {
+  static const char32_t list[] = {
+      U'ぁ', U'ぃ', U'ぅ', U'ぇ', U'ぉ',  // ぁぃぅぇぉ
+      U'っ',                                               // っ
+      U'ゃ', U'ゅ', U'ょ',                         // ゃゅょ
+      U'ゎ',                                               // ゎ
+      U'ァ', U'ィ', U'ゥ', U'ェ', U'ォ',  // ァィゥェォ
+      U'ッ',                                               // ッ
+      U'ャ', U'ュ', U'ョ',                         // ャュョ
+      U'ヮ',                                               // ヮ
+  };
+  for (char32_t c : list) {
+    if (cp == c) return true;
+  }
+  return false;
+}
+
+// ひらがな・カタカナ（小書き含む）かどうか
+static bool is_base_kana(char32_t cp) {
+  return (cp >= U'ぁ' && cp <= U'ん') ||  // ぁ〜ん
+         (cp >= U'ァ' && cp <= U'ヶ');    // ァ〜ヶ
+}
+
+// ============================================================
 // 位取り文字の判定
 // ============================================================
 
@@ -22,7 +50,9 @@ static bool is_kurai_char(char32_t cp) {
 // テキスト → SourceEntry 列
 // ============================================================
 
-std::vector<SourceEntry> to_source_seq(const std::vector<char32_t>& text) {
+std::vector<SourceEntry> to_source_seq(
+    const std::vector<char32_t>& text,
+    const std::unordered_set<std::string>* compound_units) {
   const int n = static_cast<int>(text.size());
 
   std::vector<CharType> ctypes(n);
@@ -45,9 +75,58 @@ std::vector<SourceEntry> to_source_seq(const std::vector<char32_t>& text) {
 
   std::vector<SourceEntry> seq;
   seq.reserve(n);
-  for (int i = 0; i < n; ++i) {
-    seq.push_back({text[i], static_cast<uint32_t>(i), ctypes[i]});
+
+  for (int i = 0; i < n;) {
+    // --- 拗音複合ユニット検出（アルゴリズム） ---
+    // ひらがな/カタカナ基底文字 + 小書き仮名
+    if (is_base_kana(text[i]) && i + 1 < n && is_small_kana_cp(text[i + 1])) {
+      SourceEntry e;
+      e.cp = text[i];
+      e.cp2 = text[i + 1];
+      e.orig_idx = static_cast<uint32_t>(i);
+      e.ctype = ctypes[i];
+      e.compound_len = 2;
+      seq.push_back(e);
+      i += 2;
+      continue;
+    }
+
+    // --- 漢字複合ユニット検出（辞書ベース）---
+    if (compound_units && !compound_units->empty()) {
+      bool found = false;
+      // 最長一致（最大3文字まで）
+      for (int len = 3; len >= 2; --len) {
+        if (i + len > n) continue;
+        // UTF-8 文字列に変換して辞書引き
+        std::string candidate;
+        for (int k = 0; k < len; ++k) candidate += char32_to_utf8(text[i + k]);
+        if (compound_units->count(candidate)) {
+          SourceEntry e;
+          e.cp = text[i];
+          e.cp2 = (len >= 2) ? text[i + 1] : 0;
+          e.cp3 = (len >= 3) ? text[i + 2] : 0;
+          e.orig_idx = static_cast<uint32_t>(i);
+          e.ctype = ctypes[i];
+          e.compound_len = static_cast<uint8_t>(len);
+          seq.push_back(e);
+          i += len;
+          found = true;
+          break;
+        }
+      }
+      if (found) continue;
+    }
+
+    // --- 単一文字 ---
+    SourceEntry e;
+    e.cp = text[i];
+    e.orig_idx = static_cast<uint32_t>(i);
+    e.ctype = ctypes[i];
+    e.compound_len = 1;
+    seq.push_back(e);
+    ++i;
   }
+
   return seq;
 }
 
@@ -131,11 +210,27 @@ static FeatureKey make_run(FeatureType ft, uint8_t run) {
   return k;
 }
 
+// 複合ユニットの CHAR_SELF 特徴量を生成する。
+// 単一文字は CHAR_SELF（0x90）、2文字は CHAR_SELF_COMPOUND_2（0xA6）、
+// 3文字は CHAR_SELF_COMPOUND_3（0xB5）。
+static FeatureKey make_char_self_compound(const SourceEntry& e) {
+  if (e.compound_len == 2) {
+    return make_bigram(FeatureType::CHAR_SELF_COMPOUND_2, e.cp, e.cp2);
+  }
+  if (e.compound_len == 3) {
+    return make_trigram(FeatureType::CHAR_SELF_COMPOUND_3, e.cp, e.cp2, e.cp3);
+  }
+  return make_char(FeatureType::CHAR_SELF, e.cp);
+}
+
 std::vector<std::vector<FeatureKey>> compute_source_features(const std::vector<SourceEntry>& seq) {
   const int n = static_cast<int>(seq.size());
   std::vector<std::vector<FeatureKey>> result(n);
 
   for (int i = 0; i < n; ++i) {
+    // 文脈特徴量は各エントリの先頭コードポイント（cp）を使用。
+    // 複合ユニットでも cp は先頭1文字なので bigram/trigram のサイズは変わらない。
+    // CHAR_SELF のみ複合ユニット専用の特徴量型を使用する。
     const char32_t c = seq[i].cp;
     const CharType ctype = seq[i].ctype;
 
@@ -154,9 +249,9 @@ std::vector<std::vector<FeatureKey>> compute_source_features(const std::vector<S
 
     auto& feats = result[i];
 
-    // bias, char=X, type=T
+    // bias, char_s（複合ユニット対応）, type_s
     feats.push_back(make_bias());
-    feats.push_back(make_char(FeatureType::CHAR_SELF, c));
+    feats.push_back(make_char_self_compound(seq[i]));
     feats.push_back(make_type(FeatureType::TYPE_SELF, ctype));
 
     if (i > 0) {

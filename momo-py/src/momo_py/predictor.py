@@ -160,10 +160,11 @@ def load_custom_dict(path: str) -> Dict[str, List[str]]:
                 )
             surface, reading_str = parts
             readings = [b.replace(r"\/", "/") for b in split_on_unescaped_slash(reading_str)]
-            if len(readings) != len(surface):
+            surface_units = [u[0] for u in get_units(surface)]
+            if len(readings) != len(surface_units):
                 raise ValueError(
                     f"カスタム辞書 {path} の {lineno} 行目: "
-                    f"表層形 {surface!r} の文字数（{len(surface)}）と "
+                    f"表層形 {surface!r} のユニット数（{len(surface_units)}）と "
                     f"読みブロック数（{len(readings)}）が一致しません。"
                 )
             result[surface] = readings
@@ -186,14 +187,17 @@ def find_longest_match(
     pos: int,
 ) -> Optional[Tuple[int, List[str]]]:
     char = source_seq[pos][0]
-    candidates = index.get(char)
+    first_char = char[0]  # 複合ユニットの場合は先頭1文字でインデックス引き
+    candidates = index.get(first_char)
     if not candidates:
         return None
     for surface, readings in candidates:
-        length = len(surface)
+        # surfaceをget_units()でユニット分解してunit単位で比較
+        surface_units = [u[0] for u in get_units(surface)]
+        length = len(surface_units)
         if pos + length > len(source_seq):
             continue
-        if all(source_seq[pos + j][0] == surface[j] for j in range(length)):
+        if all(source_seq[pos + j][0] == surface_units[j] for j in range(length)):
             return length, readings
     return None
 
@@ -432,6 +436,11 @@ class Predictor:
         if config.single_kanji_dict_path:
             self._single_kanji_dict = _load_single_kanji_dict(config.single_kanji_dict_path)
 
+        # 複合ユニット辞書（version_info から読み込み、拗音は別途アルゴリズム検出）
+        self._compound_set: frozenset[str] = frozenset(
+            self._version_info.get("compound_units", [])
+        )
+
         # カスタム辞書のロードとインデックス構築
         self._dict_index: Dict[str, List[Tuple[str, List[str]]]] = {}
         if config.custom_dict_path:
@@ -537,7 +546,7 @@ class Predictor:
     def _preprocess_text(
         self, text: str
     ) -> Tuple[List[SourceEntry], Set[int], Dict[int, str], Dict[int, str]]:
-        units_info = get_units(text)
+        units_info = get_units(text, compound_set=self._compound_set or None)
         source_seq: List[SourceEntry] = []
         bypass_indices: Set[int] = set()
         ascii_overrides: Dict[int, str] = {}
@@ -548,14 +557,20 @@ class Predictor:
             is_ascii_bypass = (ctype == 'ALPHA')
             is_symbol_bypass = ctype in _BYPASS_CTYPES
 
-            for i, c in enumerate(val):
-                source_seq.append((c, orig_idx + i, ctype))
-                if is_ascii_bypass:
-                    bypass_indices.add(char_idx)
-                    ascii_overrides[char_idx] = val if i == 0 else LABEL_CONTINUE
-                elif is_symbol_bypass:
-                    bypass_indices.add(char_idx)
-                    ascii_overrides[char_idx] = c  # 記号は1文字ずつそのまま
+            if is_ascii_bypass or is_symbol_bypass:
+                # bypass は従来通り1文字ずつ展開
+                for i, c in enumerate(val):
+                    source_seq.append((c, orig_idx + i, ctype))
+                    if is_ascii_bypass:
+                        bypass_indices.add(char_idx)
+                        ascii_overrides[char_idx] = val if i == 0 else LABEL_CONTINUE
+                    else:
+                        bypass_indices.add(char_idx)
+                        ascii_overrides[char_idx] = c  # 記号は1文字ずつそのまま
+                    char_idx += 1
+            else:
+                # 複合ユニット（拗音・漢字語など）は1エントリとして保持（展開しない）
+                source_seq.append((val, orig_idx, ctype))
                 char_idx += 1
 
         dict_overrides: Dict[int, str] = {}
@@ -798,7 +813,7 @@ class Predictor:
         src_to_kana_index: List[List[int]] = [[] for _ in text]
         kana_pos = 0
 
-        for i, (_char, orig_idx, _) in enumerate(source_seq):
+        for i, (source_char, orig_idx, _) in enumerate(source_seq):
             clean_label = refined_labels[i]
             confidence  = raw_confidences[i]
             decision    = decision_sources[i]
@@ -816,6 +831,7 @@ class Predictor:
                         src_to_kana_index[target_orig_idx].append(kana_pos)
                         kana_pos += 1
                 else:
+                    kana_start = kana_pos
                     for ch in clean_label:
                         translated += ch
                         kana_to_src_index.append(orig_idx)
@@ -823,6 +839,11 @@ class Predictor:
                         final_decision_sources.append(decision)
                         src_to_kana_index[orig_idx].append(kana_pos)
                         kana_pos += 1
+                    # 複合ユニット（きゃ・今日など）の後続文字も同じkana範囲を指す
+                    for k in range(1, len(source_char)):
+                        add_idx = orig_idx + k
+                        if add_idx < len(src_to_kana_index):
+                            src_to_kana_index[add_idx].extend(range(kana_start, kana_pos))
 
             if has_splits[i]:
                 translated += " "

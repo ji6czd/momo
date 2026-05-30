@@ -2,7 +2,7 @@
 set -eu
 raw=../dataset/basic_raw.tsv
 tsv=../dataset/basic_data.tsv
-cmd=momo
+cmd=momopy
 # 学習用関数
 check() {
     echo "Training..."

@@ -21,10 +21,11 @@ server = [
 requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 [project.scripts]
-momo = "momo_py.cli:main"
+momopy = "momo_py.cli:main"
 lookup = "momo_py.lookup:main"
 makedic = "momo_py.makedic:main"
 momo-server = "momo_py.server:main"
+
 [[tool.mypy.overrides]]
 module = ["pycrfsuite.*"]
 ignore_missing_imports = true

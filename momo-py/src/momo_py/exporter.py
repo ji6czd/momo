@@ -119,12 +119,14 @@ class FT:
     BIGRAM_NEXT1_NEXT2            = 0xA3
     BIGRAM_PREV3_PREV2            = 0xA4
     BIGRAM_NEXT2_NEXT3            = 0xA5
+    CHAR_SELF_COMPOUND_2          = 0xA6   # char32_t×2: 2文字複合ユニットの char_s
 
     TRIGRAM_PREV2_PREV1_SELF      = 0xB0   # char32_t×3  (前2-前1-対象)
     TRIGRAM_PREV1_SELF_NEXT1      = 0xB1   # char32_t×3  (前1-対象-後1)
     TRIGRAM_SELF_NEXT1_NEXT2      = 0xB2   # char32_t×3  (対象-後1-後2)
     TRIGRAM_PREV3_PREV2_PREV1     = 0xB3   # char32_t×3  (前3-前2-前1)
     TRIGRAM_NEXT1_NEXT2_NEXT3     = 0xB4   # char32_t×3  (後1-後2-後3)
+    CHAR_SELF_COMPOUND_3          = 0xB5   # char32_t×3: 3文字複合ユニットの char_s
 
     KANJI_RUN_LEN                 = 0xC0   # uint8
     JAPANESE_NUMERIC_RUN_LEN      = 0xC1
@@ -285,10 +287,18 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
     if m:
         return FT.BIGRAM_NEXT2_NEXT3, [], [ord(m.group(1)), ord(m.group(2))], None
 
-    # --- char 系（char32_t×1）---
+    # --- char_s（複合ユニット対応: 1〜3文字）---
+    m = re.fullmatch(r'char_s=(.{3})', key)
+    if m:
+        return FT.CHAR_SELF_COMPOUND_3, [], [ord(c) for c in m.group(1)], None
+    m = re.fullmatch(r'char_s=(.{2})', key)
+    if m:
+        return FT.CHAR_SELF_COMPOUND_2, [], [ord(c) for c in m.group(1)], None
     m = re.fullmatch(r'char_s=(.)', key)
     if m:
         return FT.CHAR_SELF, [], [ord(m.group(1))], None
+
+    # --- char 系（char32_t×1）---
     m = re.fullmatch(r'char_p1=(.)', key)
     if m:
         return FT.CHAR_PREV1, [], [ord(m.group(1))], None
@@ -430,11 +440,21 @@ def export(zip_path: str, out_path: str) -> None:
     boundary_bytes += bytes(b_int8.tobytes())
     boundary_bytes += struct.pack('<ff', b_intercept[0], b_intercept[1])
 
-    # --- ファイルヘッダ ---
+    # --- 複合ユニット辞書（MBM v2）---
+    compound_units: list[str] = version_info.get("compound_units", [])
+    compound_bytes = bytearray()
+    compound_bytes += struct.pack('<I', len(compound_units))
+    for unit in compound_units:
+        encoded = unit.encode("utf-8")
+        assert len(encoded) <= 255, f"複合ユニットが長すぎます: {unit!r}"
+        compound_bytes.append(len(encoded))
+        compound_bytes += encoded
+
+    # --- ファイルヘッダ（v2）---
     header = struct.pack(
         '<4sBBBBII',
         b'MOMO',          # magic
-        0x01,             # version
+        0x02,             # version（複合ユニット辞書対応）
         0x00, 0x00, 0x00, # reserved
         n_classes,
         n_features,
@@ -449,6 +469,7 @@ def export(zip_path: str, out_path: str) -> None:
         f.write(read_weight_bytes)
         f.write(intercept_r_bytes)
         f.write(boundary_bytes)
+        f.write(compound_bytes)
 
     size_mb = os.path.getsize(out_path) / 1024 / 1024
     print(f"✅ 完了: {size_mb:.1f} MB")

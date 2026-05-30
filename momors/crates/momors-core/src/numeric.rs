@@ -167,7 +167,7 @@ mod tests {
 
     /// テキストから SourceEntry 列を作るヘルパ
     fn seq(text: &str) -> Vec<SourceEntry> {
-        to_source_seq(text)
+        to_source_seq(text, None)
     }
 
     // --- digit_table ---
@@ -222,8 +222,11 @@ mod tests {
         // 直接 seq に放り込んでテストする
         let entries = vec![SourceEntry {
             cp: 0x5341,
+            cp2: 0,
+            cp3: 0,
             orig_idx: 0,
             ctype: CharType::JapaneseNumeric,
+            compound_len: 1,
         }];
         assert_eq!(
             convert_japanese_numeric(0, &entries),
@@ -258,8 +261,11 @@ mod tests {
     fn convert_hyaku_alone() {
         let entries = vec![SourceEntry {
             cp: 0x767E,
+            cp2: 0,
+            cp3: 0,
             orig_idx: 0,
             ctype: CharType::JapaneseNumeric,
+            compound_len: 1,
         }];
         assert_eq!(
             convert_japanese_numeric(0, &entries),
@@ -292,8 +298,11 @@ mod tests {
         // 単独の「千」: kurai 単体は昇格しないので直接 entry を作る
         let entries = vec![SourceEntry {
             cp: 0x5343,
+            cp2: 0,
+            cp3: 0,
             orig_idx: 0,
             ctype: CharType::JapaneseNumeric,
+            compound_len: 1,
         }];
         assert_eq!(
             convert_japanese_numeric(0, &entries),

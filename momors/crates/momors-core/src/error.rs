@@ -30,6 +30,21 @@ pub enum Error {
     #[error("未対応のモデルバージョン: {version}")]
     UnsupportedVersion { version: u8 },
 
+    /// モデルファイル中の FeatureType 値が未定義。
+    #[error("不正な FeatureType 値: 0x{value:02X}")]
+    InvalidFeatureType { value: u8 },
+
+    /// モデルファイル中の CharType 値が未定義。
+    #[error("不正な CharType 値: 0x{value:02X}")]
+    InvalidCharType { value: u8 },
+
+    /// モデルファイル中の文字列が妥当な UTF-8 ではない。
+    #[error("ラベル文字列が UTF-8 として不正です")]
+    InvalidLabelUtf8 {
+        #[source]
+        source: std::string::FromUtf8Error,
+    },
+
     /// モデルファイルの構造が壊れている（途中で終端した等）。
     #[error("モデルファイルが壊れています: {reason}")]
     CorruptModel { reason: String },

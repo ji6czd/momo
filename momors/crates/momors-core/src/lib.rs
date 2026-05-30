@@ -33,10 +33,12 @@ pub mod error;
 pub mod prediction;
 
 // 内部モジュール（実装が進んだら追加していく）
-// mod char_type;
-// mod feature;
-// mod loader;
-// mod model;
+mod char_type;
+mod feature;
+mod featurize;
+mod loader;
+mod model;
+mod numeric;
 
 // ============================================================
 // 公開 API の再エクスポート

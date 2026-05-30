@@ -1,8 +1,11 @@
 [package]
 name = "momors-core"
+description = "Core library for converting Japanese mixed-script text into katakana (and braille)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
 
 [dependencies]
 thiserror.workspace = true
+byteorder.workspace = true

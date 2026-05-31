@@ -167,7 +167,7 @@ mod tests {
 
     /// テキストから SourceEntry 列を作るヘルパ
     fn seq(text: &str) -> Vec<SourceEntry> {
-        to_source_seq(text, None)
+        to_source_seq(text)
     }
 
     // --- digit_table ---

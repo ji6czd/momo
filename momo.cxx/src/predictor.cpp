@@ -66,6 +66,38 @@ static char32_t small_kana_to_kana(char32_t cp) {
   return cp;
 }
 
+// ひらがなコードポイントをカタカナに変換する（+0x60）。範囲外はそのまま。
+static char32_t hiragana_to_katakana(char32_t cp) {
+  if (cp >= U'\u3041' && cp <= U'\u3096') return cp + 0x60;
+  return cp;
+}
+
+// ひらがなユニットをカタカナに直接変換する。
+static std::string hiragana_direct(const SourceEntry& entry) {
+  std::string result = char32_to_utf8(hiragana_to_katakana(entry.cp));
+  if (entry.compound_len >= 2) result += char32_to_utf8(hiragana_to_katakana(entry.cp2));
+  return result;
+}
+
+// カタカナユニットを原文のまま文字列化する。
+static std::string katakana_passthrough(const SourceEntry& entry) {
+  std::string result = char32_to_utf8(entry.cp);
+  if (entry.compound_len >= 2) result += char32_to_utf8(entry.cp2);
+  return result;
+}
+
+// モデル予測がひらがなユニットに対して合法的かどうかを判定する。
+// 合法的な逸脱: は(U+306F)→ワ（助詞）、へ(U+3078)→エ（助詞）、う(U+3046)→ー（長音）
+static bool is_valid_kana_prediction(const SourceEntry& entry, const std::string& label, const std::string& direct) {
+  if (label == direct) return true;
+  if (entry.compound_len == 1) {
+    if (entry.cp == U'\u306f' && label == "\xe3\x83\xaf") return true;  // \u306f \u2192 \u30ef
+    if (entry.cp == U'\u3078' && label == "\xe3\x82\xa8") return true;  // \u3078 \u2192 \u30a8
+    if (entry.cp == U'\u3046' && label == "\xe3\x83\xbc") return true;  // \u3046 \u2192 \u30fc
+  }
+  return false;
+}
+
 static bool is_bypass(CharType ct) {
   switch (ct) {
     case CharType::ALPHA:
@@ -319,6 +351,37 @@ PredictionResult Predictor::predict(const std::string& text) const {
       continue;
     }
 
+    // --------------------------------------------------------
+    // カタカナ: 原文のまま出力（モデル不要）
+    // --------------------------------------------------------
+    if (entry.ctype == CharType::KATAKANA) {
+      const std::string direct = katakana_passthrough(entry);
+      const int kana_pos_before = static_cast<int>(result.kana_to_src_index.size());
+      for (const char c : direct) result.kana_text += c;
+      for (std::size_t j = 0; j < direct.size(); ++j) {
+        result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
+        result.confidences.push_back(1.0f);
+      }
+      if (entry.compound_len >= 2) {
+        compound_extra.push_back({static_cast<int>(entry.orig_idx) + 1,
+                                   kana_pos_before,
+                                   static_cast<int>(result.kana_to_src_index.size())});
+      }
+      parent_src_idx = i;
+      parent_is_bypass = false;
+      parent_has_small_kana = entry.compound_len >= 2 && is_small_kana(entry.cp2);
+      parent_kana_char_end = result.kana_to_src_index.size();
+      parent_kana_byte_end = result.kana_text.size();
+      last_fallback.clear();
+      const bool has_split_kat = sigmoid(compute_boundary_score(all_feat_ids[i])) >= 0.5f;
+      if (has_split_kat) {
+        result.kana_text += ' ';
+        result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
+        result.confidences.push_back(1.0f);
+      }
+      continue;
+    }
+
     // 整数スコアを 0 で初期化して CSC アクセスで累積
 #ifdef MOMO_TRACE
     _t0 = TRACE_NOW();
@@ -507,10 +570,16 @@ PredictionResult Predictor::predict(const std::string& text) const {
     // 々 フォールバック（Python の _apply_kanji_fallback と対応）
     // LR低自信度の「々」は直前漢字の読みを繰り返す
     const std::string* eff_label = &label;
-    std::string repeat_buf;
+    std::string fallback_buf;
     if (entry.cp == U'\u3005' /* 々 */ && !last_fallback.empty() && conf < config_.confidence_threshold()) {
-      repeat_buf = last_fallback;
-      eff_label = &repeat_buf;
+      fallback_buf = last_fallback;
+      eff_label = &fallback_buf;
+    } else if (entry.ctype == CharType::HIRAGANA) {
+      const std::string direct = hiragana_direct(entry);
+      if (!is_valid_kana_prediction(entry, label, direct)) {
+        fallback_buf = direct;
+        eff_label = &fallback_buf;
+      }
     }
 
     // かな出力

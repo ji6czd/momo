@@ -12,11 +12,33 @@ from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
 
 from .features import get_units, compute_source_features, SourceEntry, LABEL_CONTINUE, LABEL_SKIP, CharType
-from .utils import split_on_unescaped_slash, CharType, normalize_compat_ideographs
+from .utils import split_on_unescaped_slash, CharType, normalize_compat_ideographs, convert_to_katakana
 from .pybraille import to_braille, to_jp_braille
 
 # 小書き仮名（拗音・促音など）。直前の文字に吸収されるべき文字。
 _SMALL_KANA = frozenset("ぁぃぅぇぉゃゅょっゎァィゥェォャュョッヮ")
+
+# 助詞として読む場合にのみ生じる合法的な逸脱: {ひらがな原文: 許容カタカナ予測}
+_PARTICLE_DEVIATIONS: Dict[str, str] = {
+    'は': 'ワ',
+    'へ': 'エ',
+}
+
+
+def _hiragana_direct(char: str) -> str:
+    """ひらがなユニットをカタカナに直接変換する。"""
+    return ''.join(convert_to_katakana(c) for c in char)
+
+
+def _is_valid_kana_prediction(src_char: str, pred: str, direct: str) -> bool:
+    """モデル予測がひらがなに対して合法的かどうかを判定する。"""
+    if pred == direct:
+        return True
+    if _PARTICLE_DEVIATIONS.get(src_char) == pred:
+        return True
+    if src_char == 'う' and pred == 'ー':
+        return True
+    return False
 
 # bypass（素通し）扱いにする文字種
 _BYPASS_CTYPES = frozenset({
@@ -100,6 +122,7 @@ class DecisionSource:
     FALLBACK_NUMERIC = "FALLBACK_NUM"   # JAPANESE_NUMERICルールベース変換
     FALLBACK_ORPHAN  = "FALLBACK_ORPH"  # 文字消失バグ救済ロジック
     FALLBACK_REPEAT  = "FALLBACK_々"    # 々の繰り返し処理
+    FALLBACK_KANA    = "FALLBACK_KANA"  # かな直接変換フォールバック
     DICT             = "DICT"           # カスタム辞書による強制置換
     BYPASS           = "BYPASS"         # ASCIIバイパス
 
@@ -111,6 +134,7 @@ _ANSI = {
     DecisionSource.FALLBACK_NUMERIC: "\033[36m",   # シアン
     DecisionSource.FALLBACK_ORPHAN:  "\033[31m",   # 赤
     DecisionSource.FALLBACK_REPEAT:  "\033[35m",   # マゼンタ
+    DecisionSource.FALLBACK_KANA:    "\033[96m",   # 明るいシアン
     DecisionSource.DICT:             "\033[34m",   # 青
     DecisionSource.BYPASS:           "\033[90m",   # グレー
 }
@@ -689,6 +713,21 @@ class Predictor:
                         label = char
                     confidence = 0.0
                     decision   = DecisionSource.FALLBACK_ORPHAN
+
+                elif ctype == CharType.KATAKANA:
+                    label = char
+                    confidence = 1.0
+                    decision = DecisionSource.FALLBACK_KANA
+                    last_fallback_reading = ""
+
+                elif ctype == CharType.HIRAGANA:
+                    if label not in (LABEL_CONTINUE, LABEL_SKIP):
+                        direct = _hiragana_direct(char)
+                        if not _is_valid_kana_prediction(char, label, direct):
+                            label = direct
+                            confidence = 1.0
+                            decision = DecisionSource.FALLBACK_KANA
+                    last_fallback_reading = ""
 
                 elif ctype == CharType.JAPANESE_NUMERIC:
                     label, last_fallback_reading, confidence, decision = self._convert_japanese_numeric(

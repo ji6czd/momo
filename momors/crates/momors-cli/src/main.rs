@@ -6,16 +6,38 @@
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use momors_core::{Predictor, PredictorConfig};
+
+/// モデルサイズの選択肢
+#[derive(Debug, Clone, ValueEnum)]
+enum ModelSize {
+    Small,
+    Medium,
+    Large,
+}
+
+impl ModelSize {
+    fn file_path(&self) -> &'static str {
+        match self {
+            ModelSize::Small => "basic_data_4.mbm",
+            ModelSize::Medium => "basic_data_5.mbm",
+            ModelSize::Large => "basic_data_7.mbm",
+        }
+    }
+}
 
 /// 日本語の漢字かな交じり文をかなに変換する。
 #[derive(Debug, Parser)]
 #[command(name = "momo", version, about, long_about = None)]
 struct Cli {
     /// モデルファイル (.mbm) のパス
-    #[arg(long, default_value = "basic_data_7.mbm")]
-    model: String,
+    #[arg(long)]
+    model_file: Option<String>,
+
+    /// 使用するモデルのサイズ (small, medium, large)
+    #[arg(long, default_value = "large")]
+    model: ModelSize,
 
     /// 自信度スコアも一緒に出力する
     #[arg(long)]
@@ -28,13 +50,34 @@ struct Cli {
     /// KANJI フォールバック発動の自信度しきい値
     #[arg(long, default_value_t = 0.3)]
     threshold: f32,
+
+    /// 予測結果を原文の文字ごとに分割して出力する
+    #[arg(long)]
+    segment: bool,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
+    // モデルファイルのパスを決定 (--model-file が優先)
+    let model_path_buf;
+    let model_path: &str = if let Some(ref path) = cli.model_file {
+        path.as_str()
+    } else {
+        // 実行ファイルと同じディレクトリのモデルファイルを使う
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+        model_path_buf = exe_dir
+            .map(|d| d.join(cli.model.file_path()))
+            .unwrap_or_else(|| std::path::PathBuf::from(cli.model.file_path()));
+        model_path_buf.to_str().unwrap_or_else(|| cli.model.file_path())
+    };
+
     // 設定を組み立てる
-    let config = PredictorConfig::new(&cli.model).with_confidence_threshold(cli.threshold);
+    let config = PredictorConfig::new(model_path)
+        .with_confidence_threshold(cli.threshold)
+        .with_segment_output(cli.segment);
 
     // 予測器を読み込む
     let predictor = match Predictor::load(config) {

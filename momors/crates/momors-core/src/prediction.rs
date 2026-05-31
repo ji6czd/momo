@@ -12,12 +12,12 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::Result;
 use crate::char_type::CharType;
 use crate::feature::FeatureKey;
-use crate::featurize::{compute_source_features, to_source_seq, SourceEntry};
+use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
 use crate::model::MomoModel;
-use crate::numeric::{convert_japanese_numeric, NumericFallback};
-use crate::Result;
+use crate::numeric::{NumericFallback, convert_japanese_numeric};
 
 // ============================================================
 // 定数
@@ -77,6 +77,15 @@ impl PredictorConfig {
     /// JAPANESE_NUMERIC ルールベース変換を発動させる自信度の上限を設定する。
     pub fn with_numeric_confidence_threshold(mut self, value: f32) -> Self {
         self.numeric_confidence_threshold = value;
+        self
+    }
+
+    /// 予測結果を原文の文字ごとに分割して出力するかどうかを設定する。
+    pub fn with_segment_output(mut self, value: bool) -> Self {
+        if value {
+            // segment 出力を有効にするための追加設定があればここで行う。
+            // 現状は特に追加の設定はないが、将来的に必要になった場合はこのメソッド内で対応する。
+        }
         self
     }
 
@@ -256,6 +265,32 @@ impl Predictor {
             }
 
             // ============================================================
+            // カタカナ: 原文のまま出力（モデル不要）
+            // ============================================================
+            if entry.ctype == CharType::Katakana {
+                let direct = katakana_passthrough(entry);
+                let kana_before = result.kana_text.len();
+                self.emit_label(entry, &direct, 1.0, &mut result);
+                let kana_after = result.kana_text.len();
+                if entry.compound_len >= 2 {
+                    let cp1_bytes = char::from_u32(entry.cp).map_or(1, |c| c.len_utf8());
+                    compound_extras.push((entry.orig_idx as usize + cp1_bytes, kana_before, kana_after));
+                }
+                parent_src_idx = Some(i);
+                parent_is_bypass = false;
+                parent_has_small_kana = entry.compound_len >= 2 && is_small_kana(entry.cp2);
+                parent_kana_byte_end = result.kana_text.len();
+                last_fallback.clear();
+                let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                if has_split {
+                    result.kana_text.push(' ');
+                    result.kana_to_src_index.push(entry.orig_idx as usize);
+                    result.confidences.push(1.0);
+                }
+                continue;
+            }
+
+            // ============================================================
             // スコア計算 + argmax
             // ============================================================
             int_scores.fill(0);
@@ -317,8 +352,7 @@ impl Predictor {
                     parent_is_bypass = false;
                     parent_has_small_kana = false;
                     parent_kana_byte_end = result.kana_text.len();
-                    let has_split =
-                        sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                    let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
                     if has_split {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -381,6 +415,13 @@ impl Predictor {
                 && conf < self.config.confidence_threshold
             {
                 last_fallback.clone()
+            } else if entry.ctype == CharType::Hiragana {
+                let direct = hiragana_direct(entry);
+                if is_valid_kana_prediction(entry, label, &direct) {
+                    label.to_string()
+                } else {
+                    direct
+                }
             } else {
                 label.to_string()
             };
@@ -479,12 +520,7 @@ impl Predictor {
     }
 
     /// 原文の `entry.cp` をそのまま結果に書き出す (bypass / 救済共通)。
-    fn emit_char_passthrough(
-        &self,
-        entry: &SourceEntry,
-        conf: f32,
-        result: &mut PredictionResult,
-    ) {
+    fn emit_char_passthrough(&self, entry: &SourceEntry, conf: f32, result: &mut PredictionResult) {
         let ch = char::from_u32(entry.cp).unwrap_or('\u{FFFD}');
         let mut buf = [0u8; 4];
         let ch_utf8 = ch.encode_utf8(&mut buf);
@@ -535,7 +571,9 @@ impl Predictor {
         //       kana_to_src_index / confidences も対応する位置に挿入する。
         // (kana_to_src_index の要素数 = kana_text のバイト数なので、
         //  parent_kana_byte_end は両方のインデックスとして使える)
-        result.kana_text.insert_str(*parent_kana_byte_end, &kana_utf8);
+        result
+            .kana_text
+            .insert_str(*parent_kana_byte_end, &kana_utf8);
         for offset in 0..kana_utf8.len() {
             result
                 .kana_to_src_index
@@ -569,6 +607,66 @@ fn lookup_feature_ids(keys: &[FeatureKey], model: &MomoModel) -> Vec<u32> {
     ids
 }
 
+/// ひらがなコードポイントをカタカナに変換する (+0x60)。
+/// ひらがな範囲 (U+3041..=U+3096) 以外はそのまま返す。
+#[inline]
+fn hiragana_to_katakana(cp: u32) -> u32 {
+    if (0x3041..=0x3096).contains(&cp) {
+        cp + 0x60
+    } else {
+        cp
+    }
+}
+
+/// ひらがなユニットをカタカナに直接変換して返す。
+fn hiragana_direct(entry: &SourceEntry) -> String {
+    let mut s = String::new();
+    if let Some(c) = char::from_u32(hiragana_to_katakana(entry.cp)) {
+        s.push(c);
+    }
+    if entry.compound_len >= 2 {
+        if let Some(c) = char::from_u32(hiragana_to_katakana(entry.cp2)) {
+            s.push(c);
+        }
+    }
+    s
+}
+
+/// カタカナユニットを原文のまま文字列化する。
+fn katakana_passthrough(entry: &SourceEntry) -> String {
+    let mut s = String::new();
+    if let Some(c) = char::from_u32(entry.cp) {
+        s.push(c);
+    }
+    if entry.compound_len >= 2 {
+        if let Some(c) = char::from_u32(entry.cp2) {
+            s.push(c);
+        }
+    }
+    s
+}
+
+/// モデル予測がひらがなユニットに対して合法的かどうかを判定する。
+///
+/// 合法的な逸脱:
+/// - は (U+306F) → ワ  (助詞)
+/// - へ (U+3078) → エ  (助詞)
+/// - う (U+3046) → ー  (長音)
+fn is_valid_kana_prediction(entry: &SourceEntry, label: &str, direct: &str) -> bool {
+    if label == direct {
+        return true;
+    }
+    if entry.compound_len == 1 {
+        match entry.cp {
+            0x306F if label == "ワ" => return true,
+            0x3078 if label == "エ" => return true,
+            0x3046 if label == "ー" => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// 小書き仮名 (拗音・促音など) の判定。
 ///
 /// C++ 版 `SMALL_KANA_LIST` および Python 版 `_SMALL_KANA` と一致:
@@ -585,7 +683,7 @@ fn is_small_kana(cp: u32) -> bool {
             | 0x30A1 | 0x30A3 | 0x30A5 | 0x30A7 | 0x30A9  // ァィゥェォ
             | 0x30C3                                  // ッ
             | 0x30E3 | 0x30E5 | 0x30E7                // ャュョ
-            | 0x30EE                                  // ヮ
+            | 0x30EE // ヮ
     )
 }
 
@@ -664,8 +762,7 @@ mod tests {
     // --- predict() の動作確認テスト (ダミーモデルで) ---
 
     fn dummy_model_path() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/dummy.mbm")
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/dummy.mbm")
     }
 
     #[test]

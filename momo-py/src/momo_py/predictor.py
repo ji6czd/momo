@@ -847,7 +847,7 @@ class Predictor:
         src_to_kana_index: List[List[int]] = [[] for _ in text]
         kana_pos = 0
 
-        for i, (source_char, orig_idx, _) in enumerate(source_seq):
+        for i, (_source_char, orig_idx, _) in enumerate(source_seq):
             clean_label = refined_labels[i]
             confidence  = raw_confidences[i]
             decision    = decision_sources[i]
@@ -865,7 +865,6 @@ class Predictor:
                         src_to_kana_index[target_orig_idx].append(kana_pos)
                         kana_pos += 1
                 else:
-                    kana_start = kana_pos
                     for ch in clean_label:
                         translated += ch
                         kana_to_src_index.append(orig_idx)
@@ -873,11 +872,6 @@ class Predictor:
                         final_decision_sources.append(decision)
                         src_to_kana_index[orig_idx].append(kana_pos)
                         kana_pos += 1
-                    # 複合ユニット（きゃ・今日など）の後続文字も同じkana範囲を指す
-                    for k in range(1, len(source_char)):
-                        add_idx = orig_idx + k
-                        if add_idx < len(src_to_kana_index):
-                            src_to_kana_index[add_idx].extend(range(kana_start, kana_pos))
 
             if has_splits[i]:
                 translated += " "

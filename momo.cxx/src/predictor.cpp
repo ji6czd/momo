@@ -323,10 +323,6 @@ PredictionResult Predictor::predict(const std::string& text) const {
   // 々フォールバック用の直前漢字読み記憶（Python の last_fallback 相当）
   std::string last_fallback;
 
-  // 複合ユニットの後続文字 → kana 範囲マッピング（src_to_kana_index 補完用）
-  struct CompoundExtra { int src_idx, kana_begin, kana_end; };
-  std::vector<CompoundExtra> compound_extra;
-
   // 救済ロジック用の親追跡（Python の parent_idx 相当）
   int parent_src_idx = -1;             // source_seq 上の親インデックス（-1 = なし）
   bool parent_is_bypass = false;       // 親が bypass 文字か
@@ -583,22 +579,10 @@ PredictionResult Predictor::predict(const std::string& text) const {
     }
 
     // かな出力
-    const int kana_pos_before = static_cast<int>(result.kana_to_src_index.size());
     for (const char c : *eff_label) result.kana_text += c;
     for (std::size_t j = 0; j < eff_label->size(); ++j) {
       result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
       result.confidences.push_back(conf);
-    }
-    // 複合ユニットの後続文字（orig_idx+1, +2）も同じ kana 範囲に記録
-    if (entry.compound_len >= 2) {
-      compound_extra.push_back({static_cast<int>(entry.orig_idx) + 1,
-                                 kana_pos_before,
-                                 static_cast<int>(result.kana_to_src_index.size())});
-    }
-    if (entry.compound_len >= 3) {
-      compound_extra.push_back({static_cast<int>(entry.orig_idx) + 2,
-                                 kana_pos_before,
-                                 static_cast<int>(result.kana_to_src_index.size())});
     }
 
     // 親情報を更新（境界スペース前）
@@ -634,14 +618,6 @@ PredictionResult Predictor::predict(const std::string& text) const {
       const int src_pos = result.kana_to_src_index[j];
       if (src_pos >= 0 && src_pos < src_size) {
         result.src_to_kana_index[src_pos].push_back(j);
-      }
-    }
-    // 複合ユニットの後続文字（orig_idx+1, +2）も同じ kana 範囲に登録
-    for (const auto& ce : compound_extra) {
-      if (ce.src_idx >= 0 && ce.src_idx < src_size) {
-        for (int j = ce.kana_begin; j < ce.kana_end; ++j) {
-          result.src_to_kana_index[ce.src_idx].push_back(j);
-        }
       }
     }
   }

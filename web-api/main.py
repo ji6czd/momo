@@ -15,9 +15,9 @@ version_info = f"Momo version {version('momo_py')}"
 # モデルファイルのパス定義
 _CUSTOM_DICT = "./dataset/custom_dictionary.tsv"
 _MODEL_FILES = {
-    "small":  "./dataset/basic_data_4.zip",
+    "small": "./dataset/basic_data_4.zip",
     "medium": "./dataset/basic_data_5.zip",
-    "large":  "./dataset/basic_data_7.zip",
+    "large": "./dataset/basic_data_7.zip",
 }
 
 # セマフォで同時実行を1に制限する。
@@ -25,17 +25,21 @@ _MODEL_FILES = {
 # これにより「現在のモデルを1つだけキャッシュ・切り替え時は解放」が安全に動作する。
 _semaphore = threading.Semaphore(1)
 
+
 @app.before_request
 def _acquire_semaphore() -> None:
     _semaphore.acquire()
+
 
 @app.teardown_request
 def _release_semaphore(exc: BaseException | None) -> None:
     _semaphore.release()
 
+
 # 現在キャッシュしているモデル（同時に1つだけ保持）
 _current_model: str = ""
 _current_predictor: Predictor | None = None
+
 
 def _get_predictor(model: str = "large") -> Predictor:
     global _current_model, _current_predictor
@@ -46,10 +50,12 @@ def _get_predictor(model: str = "large") -> Predictor:
         cfg = PredictorConfig(
             model_path=_MODEL_FILES.get(model, _MODEL_FILES["large"]),
             custom_dict_path=_CUSTOM_DICT,
+            use_kanji_fallback=True,
         )
         _current_predictor = Predictor(cfg)
         _current_model = model
     return _current_predictor
+
 
 # アプリ起動時に large モデルを先読みしておく（初回リクエストのコールドスタートを防ぐ）
 _get_predictor("large")
@@ -114,6 +120,7 @@ predict_page = """<!DOCTYPE html>
 </body></html>
 """
 
+
 def make_characters_table(res: PredictionResult) -> str:
     """
     点訳結果の詳細を表示する。
@@ -165,6 +172,7 @@ def predict() -> str:
         model_version=model_version,
         version_info=version_info,
     )
+
 
 @app.route("/api/predict", methods=["GET"])
 def api_predict() -> str:

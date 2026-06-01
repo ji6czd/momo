@@ -49,6 +49,14 @@ pub enum Error {
     #[error("モデルファイルが壊れています: {reason}")]
     CorruptModel { reason: String },
 
+    /// 漢字辞書ファイルが開けなかった、または読めなかった。
+    #[error("漢字辞書ファイルの読み込みに失敗しました: {path}")]
+    DictIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     /// 予測時の内部エラー。
     #[error("予測に失敗しました: {reason}")]
     Prediction { reason: String },

@@ -11,6 +11,7 @@
 //! - 原文位置は **UTF-8 バイト位置** で統一 (C++ 版はコードポイント位置)
 
 use std::path::{Path, PathBuf};
+use crate::Error;
 
 use crate::Result;
 use crate::char_type::CharType;
@@ -56,6 +57,8 @@ pub struct PredictorConfig {
     pub(crate) model_path: PathBuf,
     pub(crate) confidence_threshold: f32,
     pub(crate) numeric_confidence_threshold: f32,
+    pub(crate) use_kanji_fallback: bool,
+    pub(crate) kanji_dict_path: Option<PathBuf>,
 }
 
 impl PredictorConfig {
@@ -65,6 +68,8 @@ impl PredictorConfig {
             model_path: model_path.as_ref().to_path_buf(),
             confidence_threshold: 0.5,
             numeric_confidence_threshold: 0.5,
+            use_kanji_fallback: false,
+            kanji_dict_path: None,
         }
     }
 
@@ -86,6 +91,22 @@ impl PredictorConfig {
             // segment 出力を有効にするための追加設定があればここで行う。
             // 現状は特に追加の設定はないが、将来的に必要になった場合はこのメソッド内で対応する。
         }
+        self
+    }
+
+    /// 漢字辞書フォールバックを有効にするかどうかを設定する。
+    pub fn with_use_kanji_fallback(mut self, value: bool) -> Self {
+        self.use_kanji_fallback = value;
+        self
+    }
+
+    /// 漢字辞書ファイル (.tsv) のパスを設定する。
+    /// このメソッドを呼ぶだけではフォールバックは有効にならない。
+    /// [`with_use_kanji_fallback(true)`] も合わせて呼ぶこと。
+    ///
+    /// [`with_use_kanji_fallback(true)`]: PredictorConfig::with_use_kanji_fallback
+    pub fn with_kanji_dict_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.kanji_dict_path = Some(path.as_ref().to_path_buf());
         self
     }
 
@@ -164,13 +185,24 @@ impl PredictionResult {
 pub struct Predictor {
     config: PredictorConfig,
     model: MomoModel,
+    /// ソート済み漢字辞書。binary_search でルックアップする。
+    kanji_dict: Vec<(char, Vec<String>)>,
 }
 
 impl Predictor {
     /// 設定からモデルを読み込んで予測器を構築する。
     pub fn load(config: PredictorConfig) -> Result<Self> {
         let model = crate::loader::load(config.model_path())?;
-        Ok(Self { config, model })
+        let kanji_dict = if config.use_kanji_fallback {
+            if let Some(ref path) = config.kanji_dict_path {
+                load_kanji_dict(path)?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        Ok(Self { config, model, kanji_dict })
     }
 
     /// 設定を参照する。
@@ -412,6 +444,23 @@ impl Predictor {
                 } else {
                     direct
                 }
+            } else if entry.ctype == CharType::Kanji
+                && self.config.use_kanji_fallback
+                && !self.kanji_dict.is_empty()
+            {
+                if let Some(ch) = char::from_u32(entry.cp) {
+                    if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
+                        if readings.iter().any(|r| r.as_str() == label) {
+                            label.to_string()
+                        } else {
+                            readings[0].clone()
+                        }
+                    } else {
+                        label.to_string()
+                    }
+                } else {
+                    label.to_string()
+                }
             } else {
                 label.to_string()
             };
@@ -552,6 +601,46 @@ impl Predictor {
 // ============================================================
 // 自由関数
 // ============================================================
+
+/// 漢字辞書 TSV を読み込み、char でソートされた Vec を返す。
+///
+/// フォーマット: 漢字[TAB]読み1[TAB]読み2[TAB]...
+/// ロード後に sort_unstable_by_key でソートするので、TSV の行順は問わない。
+fn load_kanji_dict(path: &Path) -> Result<Vec<(char, Vec<String>)>> {
+    let content = std::fs::read_to_string(path).map_err(|e| Error::DictIo {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let mut dict: Vec<(char, Vec<String>)> = content
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|l| {
+            let mut parts = l.splitn(2, '\t');
+            let kanji_str = parts.next()?;
+            let kanji = kanji_str.chars().next()?;
+            let readings: Vec<String> = parts
+                .next()
+                .unwrap_or("")
+                .split('\t')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+            if readings.is_empty() {
+                return None;
+            }
+            Some((kanji, readings))
+        })
+        .collect();
+    dict.sort_unstable_by_key(|(k, _)| *k);
+    Ok(dict)
+}
+
+/// ソート済み漢字辞書から kanji をバイナリサーチで引く。
+fn lookup_kanji_dict<'a>(dict: &'a [(char, Vec<String>)], kanji: char) -> Option<&'a [String]> {
+    dict.binary_search_by_key(&kanji, |(k, _)| *k)
+        .ok()
+        .map(|i| dict[i].1.as_slice())
+}
 
 /// シグモイド関数 σ(x) = 1 / (1 + exp(-x))
 #[inline]

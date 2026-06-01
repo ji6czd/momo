@@ -526,7 +526,7 @@ class Predictor:
                 )
             else:
                 tsv_text = (
-                    resources.files("momo_py") / "single_character_dic.tsv"
+                    resources.files("momo_py") / "resources/single_character_dic.tsv"
                 ).read_text(encoding="utf-8")
                 self._single_kanji_dict = _parse_kanji_dict_tsv(tsv_text)
 

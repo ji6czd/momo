@@ -12,13 +12,13 @@
 static bool is_small_kana_cp(char32_t cp) {
   static const char32_t list[] = {
       U'ぁ', U'ぃ', U'ぅ', U'ぇ', U'ぉ',  // ぁぃぅぇぉ
-      U'っ',                                               // っ
-      U'ゃ', U'ゅ', U'ょ',                         // ゃゅょ
-      U'ゎ',                                               // ゎ
+      U'っ',                              // っ
+      U'ゃ', U'ゅ', U'ょ',                // ゃゅょ
+      U'ゎ',                              // ゎ
       U'ァ', U'ィ', U'ゥ', U'ェ', U'ォ',  // ァィゥェォ
-      U'ッ',                                               // ッ
-      U'ャ', U'ュ', U'ョ',                         // ャュョ
-      U'ヮ',                                               // ヮ
+      U'ッ',                              // ッ
+      U'ャ', U'ュ', U'ョ',                // ャュョ
+      U'ヮ',                              // ヮ
   };
   for (char32_t c : list) {
     if (cp == c) return true;
@@ -30,9 +30,7 @@ static bool is_small_kana_cp(char32_t cp) {
 // 拗音は「基底文字 + 小書き仮名」の2文字セットであり、
 // 小書き仮名自体が基底になることはない。
 static bool is_base_kana(char32_t cp) {
-  return ((cp >= U'ぁ' && cp <= U'ん') ||
-          (cp >= U'ァ' && cp <= U'ヶ')) &&
-         !is_small_kana_cp(cp);
+  return ((cp >= U'ぁ' && cp <= U'ん') || (cp >= U'ァ' && cp <= U'ヶ')) && !is_small_kana_cp(cp);
 }
 
 // ============================================================

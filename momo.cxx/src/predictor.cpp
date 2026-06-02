@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 
 #include "loader.hpp"
 #include "momo_features.hpp"
@@ -207,12 +208,57 @@ static std::string convert_japanese_numeric(int i, const std::vector<SourceEntry
 }
 
 // ============================================================
+// 単一漢字辞書（kanji-fallback 用）
+// TSV形式: 漢字[TAB]読み1[TAB]読み2... をソート済みVecで保持しバイナリサーチ
+// ============================================================
+
+static std::vector<std::pair<char32_t, std::vector<std::string>>> load_kanji_dict(const std::string& path) {
+  std::vector<std::pair<char32_t, std::vector<std::string>>> dict;
+  std::ifstream ifs(path);
+  if (!ifs.is_open()) return dict;
+  std::string line;
+  while (std::getline(ifs, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    const auto tab1 = line.find('\t');
+    if (tab1 == std::string::npos) continue;
+    const std::vector<char32_t> key_cps = utf8_to_utf32(line.substr(0, tab1));
+    if (key_cps.empty()) continue;
+    const char32_t kanji = key_cps[0];
+    std::vector<std::string> readings;
+    std::size_t pos = tab1 + 1;
+    while (pos < line.size()) {
+      const auto tab2 = line.find('\t', pos);
+      const std::string r = line.substr(pos, tab2 == std::string::npos ? std::string::npos : tab2 - pos);
+      if (!r.empty()) readings.push_back(r);
+      if (tab2 == std::string::npos) break;
+      pos = tab2 + 1;
+    }
+    if (!readings.empty()) dict.emplace_back(kanji, std::move(readings));
+  }
+  std::sort(dict.begin(), dict.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+  return dict;
+}
+
+static const std::vector<std::string>* lookup_kanji_dict(
+    const std::vector<std::pair<char32_t, std::vector<std::string>>>& dict, char32_t kanji) {
+  const auto it =
+      std::lower_bound(dict.begin(), dict.end(), kanji, [](const auto& p, char32_t k) { return p.first < k; });
+  if (it != dict.end() && it->first == kanji) return &it->second;
+  return nullptr;
+}
+
+// ============================================================
 // Predictor
 // ============================================================
 
 Predictor::Predictor(PredictorConfig config) : config_(std::move(config)) {}
 
-void Predictor::load() { model_ = ::load_model(config_.model_path()); }
+void Predictor::load() {
+  model_ = ::load_model(config_.model_path());
+  if (config_.use_kanji_fallback() && !config_.kanji_dict_path().empty()) {
+    kanji_dict_ = ::load_kanji_dict(config_.kanji_dict_path());
+  }
+}
 
 float Predictor::sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 
@@ -352,16 +398,10 @@ PredictionResult Predictor::predict(const std::string& text) const {
     // --------------------------------------------------------
     if (entry.ctype == CharType::KATAKANA) {
       const std::string direct = katakana_passthrough(entry);
-      const int kana_pos_before = static_cast<int>(result.kana_to_src_index.size());
       for (const char c : direct) result.kana_text += c;
       for (std::size_t j = 0; j < direct.size(); ++j) {
         result.kana_to_src_index.push_back(static_cast<int>(entry.orig_idx));
         result.confidences.push_back(1.0f);
-      }
-      if (entry.compound_len >= 2) {
-        compound_extra.push_back({static_cast<int>(entry.orig_idx) + 1,
-                                   kana_pos_before,
-                                   static_cast<int>(result.kana_to_src_index.size())});
       }
       parent_src_idx = i;
       parent_is_bypass = false;
@@ -570,6 +610,18 @@ PredictionResult Predictor::predict(const std::string& text) const {
     if (entry.cp == U'\u3005' /* 々 */ && !last_fallback.empty() && conf < config_.confidence_threshold()) {
       fallback_buf = last_fallback;
       eff_label = &fallback_buf;
+    } else if (entry.ctype == CharType::KANJI && config_.use_kanji_fallback() && !kanji_dict_.empty()) {
+      // 単一漢字辞書フォールバック（Python の _apply_kanji_fallback / Rust の kanji_fallback と対応）
+      // モデル予測が辞書の読みリストに含まれない場合、辞書の最頻読みを採用する
+      const auto* readings = lookup_kanji_dict(kanji_dict_, entry.cp);
+      if (readings != nullptr) {
+        const bool in_dict =
+            std::any_of(readings->begin(), readings->end(), [&label](const std::string& r) { return r == label; });
+        if (!in_dict) {
+          fallback_buf = (*readings)[0];
+          eff_label = &fallback_buf;
+        }
+      }
     } else if (entry.ctype == CharType::HIRAGANA) {
       const std::string direct = hiragana_direct(entry);
       if (!is_valid_kana_prediction(entry, label, direct)) {

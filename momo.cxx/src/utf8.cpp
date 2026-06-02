@@ -1,6 +1,7 @@
 #include "utf8.hpp"
 
 #include <cstdint>
+
 #include "char_type_generated.hpp"
 
 // ============================================================

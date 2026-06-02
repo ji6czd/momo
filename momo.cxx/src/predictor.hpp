@@ -34,10 +34,18 @@ class PredictorConfig {
   float numeric_confidence_threshold() const { return numeric_confidence_threshold_; }
   void set_numeric_confidence_threshold(float v) { numeric_confidence_threshold_ = v; }
 
+  bool use_kanji_fallback() const { return use_kanji_fallback_; }
+  void set_use_kanji_fallback(bool v) { use_kanji_fallback_ = v; }
+
+  const std::string& kanji_dict_path() const { return kanji_dict_path_; }
+  void set_kanji_dict_path(std::string v) { kanji_dict_path_ = std::move(v); }
+
  private:
-  std::string model_path_;                     // モデルファイルのパス（.mbm）
-  float confidence_threshold_ = 0.5f;          // KANJIフォールバックを発動させる自信度の上限
-  float numeric_confidence_threshold_ = 0.5f;  // JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
+  std::string model_path_;
+  float confidence_threshold_ = 0.5f;
+  float numeric_confidence_threshold_ = 0.5f;
+  bool use_kanji_fallback_ = false;
+  std::string kanji_dict_path_;
 };
 
 // ============================================================
@@ -59,6 +67,7 @@ class Predictor {
  private:
   MomoModel model_;
   PredictorConfig config_;
+  std::vector<std::pair<char32_t, std::vector<std::string>>> kanji_dict_;
 
   // 特徴量ID列 → 各クラスの生整数スコアに加算（CSC形式でアクセス）
   // scale・intercept の適用は呼び出し側で行う

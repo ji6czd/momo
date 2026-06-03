@@ -55,11 +55,7 @@ struct Cli {
     #[arg(long)]
     segment: bool,
 
-    /// 漢字の読みを単一漢字辞書で補完する
-    #[arg(long)]
-    use_fallback: bool,
-
-    /// 漢字辞書ファイル (.tsv) のパス
+    /// 漢字辞書ファイル (.tsv) のパス（省略時は実行ファイルと同じ場所を自動検索）
     #[arg(long)]
     single_dict: Option<String>,
 }
@@ -88,23 +84,23 @@ fn main() -> ExitCode {
     let mut config = PredictorConfig::new(model_path)
         .with_confidence_threshold(cli.threshold)
         .with_segment_output(cli.segment);
-    if cli.use_fallback {
-        let dict_path = if let Some(ref path) = cli.single_dict {
-            std::path::PathBuf::from(path)
-        } else {
-            let exe_dir = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            exe_dir.join("single_character_dic.tsv")
-        };
-        if !dict_path.exists() {
-            eprintln!("漢字辞書ファイルが見つかりません: {}", dict_path.display());
+    let dict_path = if let Some(ref path) = cli.single_dict {
+        let p = std::path::PathBuf::from(path);
+        if !p.exists() {
+            eprintln!("漢字辞書ファイルが見つかりません: {}", p.display());
             return ExitCode::FAILURE;
         }
-        config = config
-            .with_kanji_dict_path(&dict_path)
-            .with_use_kanji_fallback(true);
+        Some(p)
+    } else {
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let candidate = exe_dir.join("single_character_dic.tsv");
+        if candidate.exists() { Some(candidate) } else { None }
+    };
+    if let Some(ref path) = dict_path {
+        config = config.with_kanji_dict_path(path);
     }
 
     // 予測器を読み込む

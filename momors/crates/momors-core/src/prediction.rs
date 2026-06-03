@@ -57,7 +57,6 @@ pub struct PredictorConfig {
     pub(crate) model_path: PathBuf,
     pub(crate) confidence_threshold: f32,
     pub(crate) numeric_confidence_threshold: f32,
-    pub(crate) use_kanji_fallback: bool,
     pub(crate) kanji_dict_path: Option<PathBuf>,
 }
 
@@ -68,7 +67,6 @@ impl PredictorConfig {
             model_path: model_path.as_ref().to_path_buf(),
             confidence_threshold: 0.5,
             numeric_confidence_threshold: 0.5,
-            use_kanji_fallback: false,
             kanji_dict_path: None,
         }
     }
@@ -94,17 +92,8 @@ impl PredictorConfig {
         self
     }
 
-    /// 漢字辞書フォールバックを有効にするかどうかを設定する。
-    pub fn with_use_kanji_fallback(mut self, value: bool) -> Self {
-        self.use_kanji_fallback = value;
-        self
-    }
-
     /// 漢字辞書ファイル (.tsv) のパスを設定する。
-    /// このメソッドを呼ぶだけではフォールバックは有効にならない。
-    /// [`with_use_kanji_fallback(true)`] も合わせて呼ぶこと。
-    ///
-    /// [`with_use_kanji_fallback(true)`]: PredictorConfig::with_use_kanji_fallback
+    /// 設定すると推論時に辞書の読みに候補が制約される。
     pub fn with_kanji_dict_path(mut self, path: impl AsRef<Path>) -> Self {
         self.kanji_dict_path = Some(path.as_ref().to_path_buf());
         self
@@ -193,12 +182,8 @@ impl Predictor {
     /// 設定からモデルを読み込んで予測器を構築する。
     pub fn load(config: PredictorConfig) -> Result<Self> {
         let model = crate::loader::load(config.model_path())?;
-        let kanji_dict = if config.use_kanji_fallback {
-            if let Some(ref path) = config.kanji_dict_path {
-                load_kanji_dict(path)?
-            } else {
-                Vec::new()
-            }
+        let kanji_dict = if let Some(ref path) = config.kanji_dict_path {
+            load_kanji_dict(path)?
         } else {
             Vec::new()
         };
@@ -323,11 +308,34 @@ impl Predictor {
                 scores[cls] = self.model.intercept_read[cls] + (int_scores[cls] as f32) * scale;
             }
 
-            let (best_cls, &best_score) = scores
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .expect("n_classes >= 1");
+            // 漢字辞書制約付き argmax
+            let (best_cls, best_score): (usize, f32) =
+                if entry.ctype == CharType::Kanji && !self.kanji_dict.is_empty() {
+                    if let Some(ch) = char::from_u32(entry.cp) {
+                        if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
+                            let mut best = 0usize;
+                            let mut best_s = f32::NEG_INFINITY;
+                            for cls in 0..n_cls {
+                                let lbl = self.model.read_class(cls as u32).unwrap_or("");
+                                if (lbl == LABEL_CONTINUE
+                                    || lbl == LABEL_SKIP
+                                    || readings.iter().any(|r| r.as_str() == lbl))
+                                    && scores[cls] > best_s
+                                {
+                                    best_s = scores[cls];
+                                    best = cls;
+                                }
+                            }
+                            (best, best_s)
+                        } else {
+                            unconstrained_argmax(&scores)
+                        }
+                    } else {
+                        unconstrained_argmax(&scores)
+                    }
+                } else {
+                    unconstrained_argmax(&scores)
+                };
 
             let conf = sigmoid(best_score);
             let label = self.model.read_class(best_cls as u32).unwrap_or("");
@@ -443,23 +451,6 @@ impl Predictor {
                     label.to_string()
                 } else {
                     direct
-                }
-            } else if entry.ctype == CharType::Kanji
-                && self.config.use_kanji_fallback
-                && !self.kanji_dict.is_empty()
-            {
-                if let Some(ch) = char::from_u32(entry.cp) {
-                    if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
-                        if readings.iter().any(|r| r.as_str() == label) {
-                            label.to_string()
-                        } else {
-                            readings[0].clone()
-                        }
-                    } else {
-                        label.to_string()
-                    }
-                } else {
-                    label.to_string()
                 }
             } else {
                 label.to_string()
@@ -601,6 +592,16 @@ impl Predictor {
 // ============================================================
 // 自由関数
 // ============================================================
+
+/// スコア配列の argmax を返す。
+fn unconstrained_argmax(scores: &[f32]) -> (usize, f32) {
+    scores
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, &s)| (i, s))
+        .expect("n_classes >= 1")
+}
 
 /// 漢字辞書 TSV を読み込み、char でソートされた Vec を返す。
 ///

@@ -134,7 +134,6 @@ class PredictorConfig:
         confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
         explain_top_n: トレース時に表示する特徴量寄与度の上位件数（0=無効）
-        use_kanji_fallback: 漢字のフォールバックを有効にするかどうか
     """
 
     model_path: Optional[str] = None
@@ -144,7 +143,6 @@ class PredictorConfig:
     confidence_threshold: float = 0.5
     numeric_confidence_threshold: float = 0.5
     explain_top_n: int = 8
-    use_kanji_fallback: bool = False
 
 
 # ==========================================
@@ -517,18 +515,16 @@ class Predictor:
         # 逆引き辞書（explain用）: 実際に explain が呼ばれるまで構築しない
         self._vocab_inv: Optional[Dict[int, str]] = None
 
-        # 単一漢字辞書のロード
-        self._single_kanji_dict: Dict[str, List[str]] = {}
-        if config.use_kanji_fallback:
-            if config.single_kanji_dict_path:
-                self._single_kanji_dict = _load_single_kanji_dict(
-                    config.single_kanji_dict_path
-                )
-            else:
-                tsv_text = (
-                    resources.files("momo_py") / "resources/single_character_dic.tsv"
-                ).read_text(encoding="utf-8")
-                self._single_kanji_dict = _parse_kanji_dict_tsv(tsv_text)
+        # 単一漢字辞書のロード（常にロードし、推論時の候補制約に使う）
+        if config.single_kanji_dict_path:
+            self._single_kanji_dict: Dict[str, List[str]] = _load_single_kanji_dict(
+                config.single_kanji_dict_path
+            )
+        else:
+            tsv_text = (
+                resources.files("momo_py") / "resources/single_character_dic.tsv"
+            ).read_text(encoding="utf-8")
+            self._single_kanji_dict = _parse_kanji_dict_tsv(tsv_text)
 
         # カスタム辞書のロードとインデックス構築
         self._dict_index: Dict[str, List[Tuple[str, List[str]]]] = {}
@@ -716,6 +712,14 @@ class Predictor:
         # scores_T: (n_classes, n_chars) の疎行列のまま計算する
         scores_T = (self._coef_read_sparse @ X_read.T).toarray()  # type: ignore[union-attr]  # (n_classes, n_chars), float32
         scores_T += self._intercept_read[:, np.newaxis]  # intercept を in-place で加算
+        # 漢字辞書制約：辞書に載っている漢字は既知の読み+CONTINUE+SKIPのみを候補とする
+        valid_always = {LABEL_CONTINUE, LABEL_SKIP}
+        for col_idx, (char, _, ctype) in enumerate(source_seq):
+            if ctype == "KANJI" and char in self._single_kanji_dict:
+                valid = set(self._single_kanji_dict[char]) | valid_always
+                mask = np.array([cls not in valid for cls in self._read_classes], dtype=bool)
+                scores_T[mask, col_idx] = -np.inf
+
         predicted_indices = scores_T.argmax(axis=0)  # (n_chars,)
         # 予測クラスのスコアだけを 1D 配列として取り出し、全クラス分の行列は即座に解放する
         n = scores_T.shape[1]
@@ -915,18 +919,6 @@ class Predictor:
         decision = DecisionSource.LR
 
         if (
-            ctype == "KANJI"
-            and label not in (LABEL_CONTINUE, LABEL_SKIP)
-            and self._config.use_kanji_fallback
-            and char in self._single_kanji_dict
-            and label not in self._single_kanji_dict[char]
-        ):
-            new_label = self._single_kanji_dict[char][0]
-            new_last_fallback = new_label
-            is_applied = True
-            decision = DecisionSource.FALLBACK_KANJI
-
-        elif (
             char == "々"
             and last_fallback
             and confidence < self._config.confidence_threshold

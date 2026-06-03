@@ -3,7 +3,6 @@ import sys
 import argparse
 import time
 from importlib.metadata import version
-from importlib import resources
 
 from .trainer import create_data, train
 from .predictor import Predictor, PredictorConfig
@@ -20,6 +19,7 @@ def run_predict(
     show_source: bool = True,
     show_kana: bool = True,
     show_braille: bool = True,
+    create_tsv: bool = False,
 ) -> None:
     """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード。
     show_trace が True の場合、各文字の決定根拠をターミナルにも表示する。
@@ -37,8 +37,10 @@ def run_predict(
             print(
                 f"予測時間: {(time.perf_counter() - t1) * 1000:.2f} ms"
             ) if show_profile else None
-            if show_trace:
-                print(result.to_json())
+
+            if create_tsv:
+                segmented_output = True
+
             kana: str = (
                 result.format_segmented() if segmented_output else result.kana_text
             )
@@ -47,17 +49,21 @@ def run_predict(
                 if segmented_source_output
                 else result.source_text
             )
-            if show_source:
-                print(src)
-            if show_braille:
-                print(to_jp_braille(result.kana_text))
-            if show_kana:
-                print(kana)
 
             if show_trace:
+                print(result.to_json())
                 print("─" * 48, file=sys.stderr)
                 print(result.format_terminal(use_color=use_color), file=sys.stderr)
                 print("─" * 48, file=sys.stderr)
+            elif create_tsv:
+                print(f"{src}\t{kana}")
+            else:
+                if show_source:
+                    print(src)
+                if show_braille:
+                    print(to_jp_braille(result.kana_text))
+                if show_kana:
+                    print(kana)
 
     except KeyboardInterrupt:
         print("\n🛑 予測モード終了。お疲れ様でした！")
@@ -124,13 +130,7 @@ def main():
         help="カスタム辞書ファイルのパス",
     )
     predict_parser.add_argument(
-        "--single-dict", dest="single_dict", help="単一漢字用辞書ファイルのパス"
-    )
-    predict_parser.add_argument(
-        "--use-fallback",
-        action="store_true",
-        help="漢字の読みを単一漢字辞書で補完する",
-        default=False,
+        "--single-dict", dest="single_dict", help="単一漢字用辞書ファイルのパス（省略時は実行ファイルと同じ場所またはパッケージ内蔵の辞書を使用）"
     )
     predict_parser.add_argument(
         "--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する"
@@ -175,7 +175,10 @@ def main():
         choices=[4, 5, 7],
         help="特徴量ウィンドウサイズ（4, 5, 7、デフォルト: 7）",
     )
-
+    predict_parser.add_argument(
+        "--create-momo-tsv",
+        action="store_true",
+    )
     labelscan_parser = subparsers.add_parser("label")
     labelscan_parser.add_argument("--model", default=None)
     labelscan_parser.add_argument(
@@ -232,7 +235,7 @@ def main():
         explain_top_n = args.explain if args.trace else 0
 
         single_dict_path = args.single_dict
-        if single_dict_path is None and args.use_fallback:
+        if single_dict_path is None:
             exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
             candidate = os.path.join(exe_dir, "single_character_dic.tsv")
             if os.path.isfile(candidate):
@@ -244,7 +247,6 @@ def main():
             single_kanji_dict_path=single_dict_path,
             explain_top_n=explain_top_n,
             window=args.window,
-            use_kanji_fallback=args.use_fallback,
         )
         run_predict(
             config,
@@ -252,6 +254,7 @@ def main():
             show_profile=args.profile,
             segmented_output=args.segment,
             segmented_source_output=args.segment_source,
+            create_tsv=args.create_momo_tsv,
             show_source=not args.no_source,
             show_kana=not args.no_kana,
             show_braille=not args.no_braille,

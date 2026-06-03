@@ -1,3 +1,6 @@
 target/
 testdata/
 
+# cbindgen 生成物
+crates/momors-ffi/momo.h
+

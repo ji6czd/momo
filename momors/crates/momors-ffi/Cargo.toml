@@ -1,6 +1,13 @@
 [package]
 name = "momors-ffi"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition = "2021"  # cbindgen が #[unsafe(no_mangle)] (2024 構文) 未対応のため
+
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
+momors-core = { workspace = true }
+
+[build-dependencies]
+cbindgen = "0.27"

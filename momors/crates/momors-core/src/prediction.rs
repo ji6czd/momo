@@ -157,6 +157,142 @@ impl PredictionResult {
     pub fn source_to_kana(&self) -> &[Vec<usize>] {
         &self.src_to_kana_index
     }
+
+    // ============================================================
+    // Python 互換: セグメント分割 / フォーマット
+    // ============================================================
+
+    /// 境界スペースで原文を分割したスライスのリストを返す。
+    ///
+    /// 境界がまったくない場合は原文全体を含む 1 要素のスライスを返す。
+    /// Python の `get_source_segments()` に相当する。
+    pub fn get_source_segments(&self) -> Vec<&str> {
+        if self.source_text.is_empty() {
+            return Vec::new();
+        }
+
+        let mut segments: Vec<&str> = Vec::new();
+        let mut current_start: usize = 0;
+
+        for (k, ch) in self.kana_text.char_indices() {
+            if ch == ' ' {
+                let src_byte = self.kana_to_src_index[k];
+                let char_end = src_byte
+                    + self.source_text[src_byte..]
+                        .chars()
+                        .next()
+                        .map_or(0, |c| c.len_utf8());
+                let seg = &self.source_text[current_start..char_end];
+                if !seg.is_empty() {
+                    segments.push(seg);
+                }
+                current_start = char_end;
+            }
+        }
+
+        let remaining = &self.source_text[current_start..];
+        if !remaining.is_empty() {
+            segments.push(remaining);
+        }
+
+        segments
+    }
+
+    /// 点字の分かち書きに沿って原文を `/` で区切って返す。
+    ///
+    /// Python の `format_source_segmented()` に相当する。
+    pub fn format_source_segmented(&self) -> String {
+        self.get_source_segments().join("/")
+    }
+
+    /// 各ソース文字に対応するかな部分を `/` で区切って返す。
+    ///
+    /// Python の `format_segmented()` に相当する。
+    pub fn format_segmented(&self) -> String {
+        // かな列: バイト位置 → コードポイントインデックス の逆引き
+        let kana_char_starts: std::collections::HashMap<usize, usize> = self
+            .kana_text
+            .char_indices()
+            .enumerate()
+            .map(|(ci, (byte, _))| (byte, ci))
+            .collect();
+        let kana_chars: Vec<char> = self.kana_text.chars().collect();
+
+        let mut segments: Vec<String> = Vec::new();
+
+        for (src_byte, _) in self.source_text.char_indices() {
+            let kana_bytes = &self.src_to_kana_index[src_byte];
+            if kana_bytes.is_empty() {
+                continue;
+            }
+
+            let mut current = String::new();
+            for &kb in kana_bytes {
+                // バイト位置がコードポイント先頭のときのみ処理（重複排除）
+                if let Some(&ci) = kana_char_starts.get(&kb) {
+                    let ch = kana_chars[ci];
+                    if ch == ' ' {
+                        if !current.is_empty() {
+                            segments.push(std::mem::take(&mut current));
+                        }
+                        segments.push(" ".to_string());
+                    } else {
+                        current.push(ch);
+                    }
+                }
+            }
+            if !current.is_empty() {
+                segments.push(current);
+            }
+        }
+
+        segments.join("/")
+    }
+
+    // ============================================================
+    // Python 互換: コードポイント単位のインデックス変換
+    // ============================================================
+
+    /// かなのコードポイント位置 → 原文のコードポイント位置 のマッピング。
+    ///
+    /// Python の `kana_to_src_index` と互換性がある。
+    /// 内部では UTF-8 バイト位置を使っているためこのメソッドで変換する。
+    pub fn kana_to_source_char(&self) -> Vec<usize> {
+        let src_char_starts: Vec<usize> =
+            self.source_text.char_indices().map(|(b, _)| b).collect();
+
+        let mut result = Vec::with_capacity(self.kana_text.chars().count());
+        let mut kana_byte = 0;
+        for ch in self.kana_text.chars() {
+            let src_byte = self.kana_to_src_index[kana_byte];
+            let char_idx = src_char_starts.binary_search(&src_byte).unwrap_or(0);
+            result.push(char_idx);
+            kana_byte += ch.len_utf8();
+        }
+        result
+    }
+
+    /// 原文のコードポイント位置 → かなのコードポイント位置のリスト。
+    ///
+    /// Python の `src_to_kana_index` と互換性がある。
+    pub fn source_to_kana_char(&self) -> Vec<Vec<usize>> {
+        let kana_byte_to_char: std::collections::HashMap<usize, usize> = self
+            .kana_text
+            .char_indices()
+            .enumerate()
+            .map(|(ci, (byte, _))| (byte, ci))
+            .collect();
+
+        self.source_text
+            .char_indices()
+            .map(|(src_byte, _)| {
+                self.src_to_kana_index[src_byte]
+                    .iter()
+                    .filter_map(|&kb| kana_byte_to_char.get(&kb).copied())
+                    .collect()
+            })
+            .collect()
+    }
 }
 
 // ============================================================
@@ -878,6 +1014,107 @@ mod tests {
         let inputs = ["きょう", "学校々", "三百二十一円。", "abc、漢字!"];
         for text in &inputs {
             let _ = predictor.predict(text).expect("crash しないこと");
+        }
+    }
+
+    // ============================================================
+    // get_source_segments / format_source_segmented / format_segmented
+    // ============================================================
+
+    #[test]
+    fn get_source_segments_no_boundary() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // ASCII バイパスのみ → 境界スペースなし → 全体が 1 セグメント
+        let result = predictor.predict("abc").unwrap();
+        assert_eq!(result.get_source_segments(), vec!["abc"]);
+    }
+
+    #[test]
+    fn get_source_segments_empty() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("").unwrap();
+        assert!(result.get_source_segments().is_empty());
+    }
+
+    #[test]
+    fn format_source_segmented_no_boundary() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("abc").unwrap();
+        assert_eq!(result.format_source_segmented(), "abc");
+    }
+
+    #[test]
+    fn format_segmented_ascii() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // ASCII バイパス: 各文字が 1:1 でかなに対応
+        let result = predictor.predict("abc").unwrap();
+        assert_eq!(result.format_segmented(), "a/b/c");
+    }
+
+    #[test]
+    fn format_segmented_symbol() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("、").unwrap();
+        assert_eq!(result.format_segmented(), "、");
+    }
+
+    // ============================================================
+    // kana_to_source_char / source_to_kana_char
+    // ============================================================
+
+    #[test]
+    fn kana_to_source_char_ascii() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("abc").unwrap();
+        // a→0, b→1, c→2 のコードポイントインデックス
+        assert_eq!(result.kana_to_source_char(), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn source_to_kana_char_ascii() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("abc").unwrap();
+        // 原文 a(0)→かな 0, b(1)→1, c(2)→2
+        assert_eq!(
+            result.source_to_kana_char(),
+            vec![vec![0], vec![1], vec![2]]
+        );
+    }
+
+    #[test]
+    fn kana_to_source_char_and_source_to_kana_char_roundtrip() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // 記号 (マルチバイト) でも整合性が取れること
+        let result = predictor.predict("a、b").unwrap();
+        let k2s = result.kana_to_source_char();
+        let s2k = result.source_to_kana_char();
+
+        // k2s の長さ = かな文字数 (コードポイント数)
+        assert_eq!(k2s.len(), result.kana_text().chars().count());
+        // s2k の長さ = 原文文字数
+        assert_eq!(s2k.len(), result.source_text().chars().count());
+
+        // 往復整合性: s2k[s][j] = i ならば k2s[i] = s
+        for (s, kana_positions) in s2k.iter().enumerate() {
+            for &kana_char_idx in kana_positions {
+                assert_eq!(k2s[kana_char_idx], s);
+            }
         }
     }
 }

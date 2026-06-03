@@ -1,0 +1,5 @@
+language = "C"
+include_guard = "MOMO_H"
+documentation = true
+style = "type"
+tab_width = 2

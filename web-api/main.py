@@ -50,7 +50,6 @@ def _get_predictor(model: str = "large") -> Predictor:
         cfg = PredictorConfig(
             model_path=_MODEL_FILES.get(model, _MODEL_FILES["large"]),
             custom_dict_path=_CUSTOM_DICT,
-            use_kanji_fallback=True,
         )
         _current_predictor = Predictor(cfg)
         _current_model = model

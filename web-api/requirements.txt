@@ -5,16 +5,17 @@ click==8.4.1
 colorama==0.4.6
 flask==3.1.3
 gunicorn==26.0.0
-idna==3.17
+idna==3.18
 itsdangerous==2.2.0
 jinja2==3.1.6
 joblib==1.5.3
 markupsafe==3.0.3
-momo-py @ git+https://github.com/ji6czd/momo@45641451846de4a8d11a6833978c4289cd9b08ab#subdirectory=momo-py
+momo-py @ git+https://github.com/ji6czd/momo@cc5f9f23528e050cd2219b185722343dc074f733#subdirectory=momo-py
+narwhals==2.22.0
 numpy==2.4.6
 packaging==26.2
 requests==2.34.2
-scikit-learn==1.8.0
+scikit-learn==1.9.0
 scipy==1.17.1
 threadpoolctl==3.6.0
 urllib3==2.7.0

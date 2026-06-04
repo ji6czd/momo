@@ -20,7 +20,11 @@ def makedic(tsv_file: str, dic_file: str) -> None:
                     continue
 
                 surface = parts[0]
-                reading = re.sub(r"\+S", "", parts[1])
+                # +S（境界マーカー）を除去し、前後の空白も除く
+                # _（SKIP）と---（CONTINUE）も有効なラベルとして登録する
+                reading = re.sub(r"\+S", "", parts[1]).strip()
+                if not reading:
+                    continue
                 category = get_basic_char_category(surface[0])
                 # 漢字のみを対象とする
                 if category == CharType.KANJI:
@@ -35,7 +39,7 @@ def makedic(tsv_file: str, dic_file: str) -> None:
     try:
         with open(dic_file, "w", encoding="utf-8") as f:
             for kanji, counter in sorted(dic.items()):
-                readings = [r for r, _ in counter.most_common()]
+                readings = [label for label, _count in counter.most_common()]
                 f.write(kanji + "\t" + "\t".join(readings) + "\n")
     except IOError as e:
         print(f"Error: An I/O error occurred while writing to '{dic_file}': {e}")

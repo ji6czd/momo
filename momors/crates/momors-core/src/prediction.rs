@@ -391,6 +391,7 @@ impl Predictor {
         // 「親」とは「現在の文字が CONTINUE のときに、その読みを統合される側」のこと。
         let mut parent_src_idx: Option<usize> = None;
         let mut parent_is_bypass = false;
+        let mut parent_is_kanji = false;
         let mut parent_has_small_kana = false;
         // 親ラベル出力直後の kana_text / kana_to_src_index 末尾位置。
         // 小書き仮名はこの位置に挿入する。
@@ -407,6 +408,7 @@ impl Predictor {
                 self.emit_char_passthrough(entry, 1.0, &mut result);
                 parent_src_idx = Some(i);
                 parent_is_bypass = true;
+                parent_is_kanji = false;
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
@@ -415,12 +417,15 @@ impl Predictor {
 
             // ============================================================
             // カタカナ: 原文のまま出力（モデル不要）
+            // ヵ (U+30F5) / ヶ (U+30F6) は助数詞用の小書きカタカナで拗音ではないため
+            // パススルーせずモデルに委ねる。
             // ============================================================
-            if entry.ctype == CharType::Katakana {
+            if entry.ctype == CharType::Katakana && !is_counter_small_kana(entry.cp) {
                 let direct = katakana_passthrough(entry);
                 self.emit_label(entry, &direct, 1.0, &mut result);
                 parent_src_idx = Some(i);
                 parent_is_bypass = false;
+                parent_is_kanji = false;
                 parent_has_small_kana = entry.compound_len >= 2 && is_small_kana(entry.cp2);
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
@@ -453,9 +458,7 @@ impl Predictor {
                             let mut best_s = f32::NEG_INFINITY;
                             for cls in 0..n_cls {
                                 let lbl = self.model.read_class(cls as u32).unwrap_or("");
-                                if (lbl == LABEL_CONTINUE
-                                    || lbl == LABEL_SKIP
-                                    || readings.iter().any(|r| r.as_str() == lbl))
+                                if readings.iter().any(|r| r.as_str() == lbl)
                                     && scores[cls] > best_s
                                 {
                                     best_s = scores[cls];
@@ -493,6 +496,7 @@ impl Predictor {
                         self.emit_label(entry, fallback, conf, &mut result);
                         parent_src_idx = Some(i);
                         parent_is_bypass = false;
+                        parent_is_kanji = false;
                         parent_has_small_kana = false;
                         parent_kana_byte_end = result.kana_text.len();
                         last_fallback.clear();
@@ -510,12 +514,13 @@ impl Predictor {
             // LABEL_CONTINUE 救済
             // ============================================================
             if label == LABEL_CONTINUE {
-                // 1. 孤立 CONTINUE 救済: 親がない or 親が bypass の場合は
+                // 1. 孤立 CONTINUE 救済: 親がない・bypass・KANJI以外が親の場合は
                 //    現在の文字を「親」にして、文字をそのまま出力する。
-                if parent_src_idx.is_none() || parent_is_bypass {
+                if parent_src_idx.is_none() || parent_is_bypass || !parent_is_kanji {
                     self.emit_char_passthrough(entry, conf, &mut result);
                     parent_src_idx = Some(i);
                     parent_is_bypass = false;
+                    parent_is_kanji = entry.ctype == CharType::Kanji;
                     parent_has_small_kana = false;
                     parent_kana_byte_end = result.kana_text.len();
                     let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
@@ -597,6 +602,7 @@ impl Predictor {
             // 親情報更新
             parent_src_idx = Some(i);
             parent_is_bypass = false;
+            parent_is_kanji = entry.ctype == CharType::Kanji;
             // 親ラベルに小書き仮名が含まれているか確認（C++ 版と同じ判定）
             parent_has_small_kana = effective_label.chars().any(|c| is_small_kana(c as u32));
             parent_kana_byte_end = result.kana_text.len();
@@ -854,6 +860,15 @@ fn is_valid_kana_prediction(entry: &SourceEntry, label: &str, direct: &str) -> b
         }
     }
     false
+}
+
+/// 助数詞用小書きカタカナの判定。
+///
+/// ヵ (U+30F5) と ヶ (U+30F6) は拗音形成に使わないため、
+/// カタカナパススルーの対象から除外してモデルに委ねる。
+#[inline]
+fn is_counter_small_kana(cp: u32) -> bool {
+    matches!(cp, 0x30F5 | 0x30F6)
 }
 
 /// 小書き仮名 (拗音・促音など) の判定。

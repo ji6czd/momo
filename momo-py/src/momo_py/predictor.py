@@ -30,6 +30,10 @@ from .pybraille import to_braille, to_jp_braille
 # 小書き仮名（拗音・促音など）。直前の文字に吸収されるべき文字。
 _SMALL_KANA = frozenset("ぁぃぅぇぉゃゅょっゎァィゥェォャュョッヮ")
 
+# カタカナでもパススルーせずモデルに委ねる文字（助数詞用小書きカタカナ）
+# ヵ (U+30F5), ヶ (U+30F6): 「1ヵ月」「1ヶ所」など、拗音形成に使わない
+_KATAKANA_NO_PASSTHROUGH = frozenset("ヵヶ")
+
 # 助詞として読む場合にのみ生じる合法的な逸脱: {ひらがな原文: 許容カタカナ予測}
 _PARTICLE_DEVIATIONS: Dict[str, str] = {
     "は": "ワ",
@@ -713,11 +717,12 @@ class Predictor:
         scores_T = (self._coef_read_sparse @ X_read.T).toarray()  # type: ignore[union-attr]  # (n_classes, n_chars), float32
         scores_T += self._intercept_read[:, np.newaxis]  # intercept を in-place で加算
         # 漢字辞書制約：辞書に載っている漢字は既知の読み+CONTINUE+SKIPのみを候補とする
-        valid_always = {LABEL_CONTINUE, LABEL_SKIP}
         for col_idx, (char, _, ctype) in enumerate(source_seq):
             if ctype == "KANJI" and char in self._single_kanji_dict:
-                valid = set(self._single_kanji_dict[char]) | valid_always
-                mask = np.array([cls not in valid for cls in self._read_classes], dtype=bool)
+                valid = set(self._single_kanji_dict[char])
+                mask = np.array(
+                    [cls not in valid for cls in self._read_classes], dtype=bool
+                )
                 scores_T[mask, col_idx] = -np.inf
 
         predicted_indices = scores_T.argmax(axis=0)  # (n_chars,)
@@ -789,9 +794,13 @@ class Predictor:
                 confidence = self._get_read_confidence(max_scores, i)
 
                 # 文字消失バグの救済ロジック
-                if label == LABEL_CONTINUE and (
-                    parent_idx == -1 or parent_idx in bypass_indices
-                ):
+                # 親がいない・バイパス・KANJI以外の場合、CONTINUEは不正
+                parent_is_kanji = (
+                    parent_idx >= 0
+                    and parent_idx not in bypass_indices
+                    and source_seq[parent_idx][2] == "KANJI"
+                )
+                if label == LABEL_CONTINUE and not parent_is_kanji:
                     if ctype == "KANJI" and char in self._single_kanji_dict:
                         label = self._single_kanji_dict[char][0]
                     else:
@@ -800,9 +809,10 @@ class Predictor:
                     decision = DecisionSource.FALLBACK_ORPHAN
 
                 elif ctype == CharType.KATAKANA:
-                    label = char
-                    confidence = 1.0
-                    decision = DecisionSource.FALLBACK_KANA
+                    if char not in _KATAKANA_NO_PASSTHROUGH:
+                        label = char
+                        confidence = 1.0
+                        decision = DecisionSource.FALLBACK_KANA
                     last_fallback_reading = ""
 
                 elif ctype == CharType.HIRAGANA:

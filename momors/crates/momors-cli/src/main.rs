@@ -7,6 +7,7 @@ use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
+use momors_braille::BrailleConverter;
 use momors_core::{Predictor, PredictorConfig};
 
 /// モデルサイズの選択肢
@@ -54,6 +55,10 @@ struct Cli {
     /// 予測結果を原文の文字ごとに分割して出力する
     #[arg(long)]
     segment: bool,
+
+    /// かな変換結果をさらに日本語点字に変換して出力する
+    #[arg(long)]
+    braille: bool,
 
     /// 漢字辞書ファイル (.tsv) のパス（省略時は実行ファイルと同じ場所を自動検索）
     #[arg(long)]
@@ -112,6 +117,19 @@ fn main() -> ExitCode {
         }
     };
 
+    // 点字変換器（--braille が指定されたときのみ初期化）
+    let braille_converter: Option<BrailleConverter> = if cli.braille {
+        match BrailleConverter::from_embedded() {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("点字テーブル読み込みエラー: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+
     // 標準入力ループ
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -138,7 +156,17 @@ fn main() -> ExitCode {
                 if cli.profile {
                     writeln!(out, "予測時間: {:?}", elapsed).ok();
                 }
-                writeln!(out, "{}", result.kana_text()).ok();
+                if let Some(ref converter) = braille_converter {
+                    match converter.convert(result.kana_text()) {
+                        Ok(brl) => writeln!(out, "{}", brl.braille_text()).ok(),
+                        Err(e) => {
+                            eprintln!("点字変換エラー: {e}");
+                            None
+                        }
+                    };
+                } else {
+                    writeln!(out, "{}", result.kana_text()).ok();
+                }
 
                 if cli.confidence {
                     for &c in result.confidences() {

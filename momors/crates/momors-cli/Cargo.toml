@@ -10,4 +10,5 @@ path = "src/main.rs"
 
 [dependencies]
 momors-core.workspace = true
+momors-braille.workspace = true
 clap.workspace = true

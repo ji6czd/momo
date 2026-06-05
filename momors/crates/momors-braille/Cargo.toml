@@ -1,0 +1,13 @@
+[package]
+name = "momors-braille"
+description = "Japanese braille converter for momors."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+momors-core.workspace = true
+thiserror.workspace = true
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

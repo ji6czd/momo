@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/momors-core",
+    "crates/momors-braille",
     "crates/momors-cli",
     "crates/momors-ffi",
 ]
@@ -17,3 +18,4 @@ thiserror = "1.0"
 clap = { version = "4", features = ["derive"] }
 byteorder = "1.5"
 momors-core = { path = "crates/momors-core", version = "0.1.0" }
+momors-braille = { path = "crates/momors-braille", version = "0.1.0" }

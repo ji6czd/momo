@@ -47,7 +47,6 @@ const CHAR_NOMA: u32 = 0x3005;
 /// use momors_core::PredictorConfig;
 ///
 /// let config = PredictorConfig::new("basic_data.mbm")
-///     .with_confidence_threshold(0.3)
 ///     .with_numeric_confidence_threshold(0.5);
 /// ```
 ///
@@ -55,7 +54,6 @@ const CHAR_NOMA: u32 = 0x3005;
 #[derive(Debug, Clone)]
 pub struct PredictorConfig {
     pub(crate) model_path: PathBuf,
-    pub(crate) confidence_threshold: f32,
     pub(crate) numeric_confidence_threshold: f32,
     pub(crate) kanji_dict_path: Option<PathBuf>,
 }
@@ -65,16 +63,9 @@ impl PredictorConfig {
     pub fn new(model_path: impl AsRef<Path>) -> Self {
         Self {
             model_path: model_path.as_ref().to_path_buf(),
-            confidence_threshold: 0.5,
             numeric_confidence_threshold: 0.5,
             kanji_dict_path: None,
         }
-    }
-
-    /// KANJI フォールバック (々など) を発動させる自信度の上限を設定する。
-    pub fn with_confidence_threshold(mut self, value: f32) -> Self {
-        self.confidence_threshold = value;
-        self
     }
 
     /// JAPANESE_NUMERIC ルールベース変換を発動させる自信度の上限を設定する。
@@ -101,10 +92,6 @@ impl PredictorConfig {
 
     pub fn model_path(&self) -> &Path {
         &self.model_path
-    }
-
-    pub fn confidence_threshold(&self) -> f32 {
-        self.confidence_threshold
     }
 
     pub fn numeric_confidence_threshold(&self) -> f32 {
@@ -583,7 +570,7 @@ impl Predictor {
             // 文字列は通常短い (数バイト) のでコピーのオーバーヘッドは小さい。
             let effective_label: String = if entry.cp == CHAR_NOMA
                 && !last_fallback.is_empty()
-                && conf < self.config.confidence_threshold
+                && !is_valid_repeat(label, &last_fallback)
             {
                 last_fallback.clone()
             } else if entry.ctype == CharType::Hiragana {
@@ -847,6 +834,53 @@ fn katakana_passthrough(entry: &SourceEntry) -> String {
 /// - は (U+306F) → ワ  (助詞)
 /// - へ (U+3078) → エ  (助詞)
 /// - う (U+3046) → ー  (長音)
+/// 々の繰り返し判定: 先頭音節の連濁マップ（カタカナ）。
+fn rendaku_first(c: char) -> Option<char> {
+    match c {
+        'カ' => Some('ガ'), 'キ' => Some('ギ'), 'ク' => Some('グ'),
+        'ケ' => Some('ゲ'), 'コ' => Some('ゴ'),
+        'サ' => Some('ザ'), 'シ' => Some('ジ'), 'ス' => Some('ズ'),
+        'セ' => Some('ゼ'), 'ソ' => Some('ゾ'),
+        'タ' => Some('ダ'), 'チ' => Some('ヂ'), 'ツ' => Some('ヅ'),
+        'テ' => Some('デ'), 'ト' => Some('ド'),
+        'ハ' => Some('バ'), 'ヒ' => Some('ビ'), 'フ' => Some('ブ'),
+        'ヘ' => Some('ベ'), 'ホ' => Some('ボ'),
+        _ => None,
+    }
+}
+
+/// ライマンの法則チェック用: 有声阻害音（濁音）の判定。
+fn is_voiced_obstruent(c: char) -> bool {
+    matches!(
+        c,
+        'ガ' | 'ギ' | 'グ' | 'ゲ' | 'ゴ'
+        | 'ザ' | 'ジ' | 'ズ' | 'ゼ' | 'ゾ'
+        | 'ダ' | 'ヂ' | 'ヅ' | 'デ' | 'ド'
+        | 'バ' | 'ビ' | 'ブ' | 'ベ' | 'ボ'
+    )
+}
+
+/// 々の予測として妥当かどうかを検証する。
+///
+/// `label` が `last_fallback` そのまま、または連濁形（ライマンの法則に反しない場合）なら true。
+fn is_valid_repeat(label: &str, last_fallback: &str) -> bool {
+    if label == last_fallback {
+        return true;
+    }
+    let mut chars = last_fallback.chars();
+    if let Some(first) = chars.next() {
+        if let Some(voiced) = rendaku_first(first) {
+            if !last_fallback.chars().any(is_voiced_obstruent) {
+                let rendaku: String = std::iter::once(voiced).chain(chars).collect();
+                if label == rendaku {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn is_valid_kana_prediction(entry: &SourceEntry, label: &str, direct: &str) -> bool {
     if label == direct {
         return true;
@@ -918,11 +952,9 @@ mod tests {
     #[test]
     fn config_builder_chains() {
         let config = PredictorConfig::new("dummy.mbm")
-            .with_confidence_threshold(0.3)
             .with_numeric_confidence_threshold(0.4);
 
         assert_eq!(config.model_path(), Path::new("dummy.mbm"));
-        assert!((config.confidence_threshold() - 0.3).abs() < 1e-6);
         assert!((config.numeric_confidence_threshold() - 0.4).abs() < 1e-6);
     }
 

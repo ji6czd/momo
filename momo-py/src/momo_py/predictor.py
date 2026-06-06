@@ -34,11 +34,35 @@ _SMALL_KANA = frozenset("ぁぃぅぇぉゃゅょっゎァィゥェォャュョ�
 # ヵ (U+30F5), ヶ (U+30F6): 「1ヵ月」「1ヶ所」など、拗音形成に使わない
 _KATAKANA_NO_PASSTHROUGH = frozenset("ヵヶ")
 
+# 々繰り返し判定: 先頭音節の連濁マップ（カタカナ）
+_RENDAKU_MAP: Dict[str, str] = {
+    "カ": "ガ", "キ": "ギ", "ク": "グ", "ケ": "ゲ", "コ": "ゴ",
+    "サ": "ザ", "シ": "ジ", "ス": "ズ", "セ": "ゼ", "ソ": "ゾ",
+    "タ": "ダ", "チ": "ヂ", "ツ": "ヅ", "テ": "デ", "ト": "ド",
+    "ハ": "バ", "ヒ": "ビ", "フ": "ブ", "ヘ": "ベ", "ホ": "ボ",
+}
+
+# ライマンの法則: 読みにこれらの文字が含まれていれば連濁しない
+_VOICED_OBSTRUENTS = frozenset("ガギグゲゴザジズゼゾダヂヅデドバビブベボ")
+
+# LR_LOW 表示用: この自信度未満を「低自信度LR」として色分けする
+_LR_LOW_THRESHOLD = 0.5
+
 # 助詞として読む場合にのみ生じる合法的な逸脱: {ひらがな原文: 許容カタカナ予測}
 _PARTICLE_DEVIATIONS: Dict[str, str] = {
     "は": "ワ",
     "へ": "エ",
 }
+
+
+def _repeat_rendaku_form(reading: str) -> Optional[str]:
+    """々連濁形を返す。連濁できない場合（対象外行・ライマンの法則）は None。"""
+    voiced = _RENDAKU_MAP.get(reading[0] if reading else "")
+    if voiced is None:
+        return None
+    if any(c in _VOICED_OBSTRUENTS for c in reading):
+        return None
+    return voiced + reading[1:]
 
 
 def _hiragana_direct(char: str) -> str:
@@ -135,7 +159,6 @@ class PredictorConfig:
         window: 特徴量ウィンドウサイズ（4, 5, 7）
         single_kanji_dict_path: 単一漢字辞書jsonのパス（省略可）
         custom_dict_path: カスタム辞書ファイルのパス（省略可）
-        confidence_threshold: KANJIフォールバックを発動させる自信度の上限
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
         explain_top_n: トレース時に表示する特徴量寄与度の上位件数（0=無効）
     """
@@ -144,7 +167,6 @@ class PredictorConfig:
     window: int = 7
     single_kanji_dict_path: Optional[str] = None
     custom_dict_path: Optional[str] = None
-    confidence_threshold: float = 0.5
     numeric_confidence_threshold: float = 0.5
     explain_top_n: int = 8
 
@@ -841,13 +863,12 @@ class Predictor:
                             char,
                             ctype,
                             label,
-                            confidence,
                             last_fallback_reading,
                         )
                     )
                     if decision == DecisionSource.LR:
                         if (
-                            confidence < self._config.confidence_threshold
+                            confidence < _LR_LOW_THRESHOLD
                             and ctype == "KANJI"
                         ):
                             decision = DecisionSource.LR_LOW
@@ -920,7 +941,6 @@ class Predictor:
         char: str,
         ctype: str,
         label: str,
-        confidence: float,
         last_fallback: str,
     ) -> Tuple[str, str, bool, str]:
         is_applied = False
@@ -928,15 +948,16 @@ class Predictor:
         new_last_fallback = last_fallback
         decision = DecisionSource.LR
 
-        if (
-            char == "々"
-            and last_fallback
-            and confidence < self._config.confidence_threshold
-        ):
-            new_label = last_fallback
-            new_last_fallback = last_fallback
-            is_applied = True
-            decision = DecisionSource.FALLBACK_REPEAT
+        if char == "々" and last_fallback:
+            rendaku = _repeat_rendaku_form(last_fallback)
+            valid: Set[str] = {last_fallback}
+            if rendaku is not None:
+                valid.add(rendaku)
+            if label not in valid:
+                new_label = last_fallback
+                new_last_fallback = last_fallback
+                is_applied = True
+                decision = DecisionSource.FALLBACK_REPEAT
 
         if not is_applied and not ctype.startswith("SYMBOL"):
             if ctype == "KANJI":

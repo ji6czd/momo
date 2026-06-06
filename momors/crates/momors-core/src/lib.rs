@@ -8,8 +8,7 @@
 //! use momors_core::{Predictor, PredictorConfig};
 //!
 //! # fn main() -> momors_core::Result<()> {
-//! let config = PredictorConfig::new("basic_data.mbm")
-//!     .with_confidence_threshold(0.3);
+//! let config = PredictorConfig::new("basic_data.mbm");
 //!
 //! let predictor = Predictor::load(config)?;
 //!

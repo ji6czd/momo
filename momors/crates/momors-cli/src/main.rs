@@ -48,10 +48,6 @@ struct Cli {
     #[arg(long)]
     profile: bool,
 
-    /// KANJI フォールバック発動の自信度しきい値
-    #[arg(long, default_value_t = 0.3)]
-    threshold: f32,
-
     /// 予測結果を原文の文字ごとに分割して出力する
     #[arg(long)]
     segment: bool,
@@ -87,7 +83,6 @@ fn main() -> ExitCode {
 
     // 設定を組み立てる
     let mut config = PredictorConfig::new(model_path)
-        .with_confidence_threshold(cli.threshold)
         .with_segment_output(cli.segment);
     let dict_path = if let Some(ref path) = cli.single_dict {
         let p = std::path::PathBuf::from(path);

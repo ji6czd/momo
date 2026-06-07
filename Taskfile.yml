@@ -1,15 +1,9 @@
-version: '3'
-
-vars:
-  DATASET_DIR: '{{.ROOT_DIR}}/dataset'
-
-includes:
-  python: ./momo-py
+version: "3"
 
 tasks:
   default:
     desc: Build all components (rust + python in parallel, then vscode + hugo)
-    deps: [rust, python:default]
+    deps: [rust, python]
     cmds:
       - task: vscode
       - task: hugo
@@ -20,11 +14,29 @@ tasks:
     cmds:
       - cargo build --release
 
+  python:
+    desc: Build Python package
+    dir: momo-py
+    cmds:
+      - task
+
+  python:test:
+    desc: Run Python tests
+    dir: momo-py
+    cmds:
+      - task test
+
+  python:clean:
+    desc: Clean Python build artifacts
+    dir: momo-py
+    cmds:
+      - task clean
+
   vscode:
     desc: Compile VSCode extension
     dir: vscode-momo
     cmds:
-      - pnpm run compile
+      - pnpm vsce package -o out/
 
   hugo:
     desc: Build Hugo site
@@ -39,8 +51,10 @@ tasks:
   test:rust:
     desc: Run Rust tests
     dir: momors
+    vars:
+      DATASET_DIR: "{{.ROOT_DIR}}/dataset"
     env:
-      MOMO_DATASET_DIR: '{{.DATASET_DIR}}'
+      MOMO_DATASET_DIR: "{{.DATASET_DIR}}"
     cmds:
       - cargo test
 
@@ -57,6 +71,22 @@ tasks:
     dir: vscode-momo
     cmds:
       - rm -rf out/
+
+  setup:
+    desc: "git clone・momopy train 後の初期セットアップ"
+    cmds:
+      - task: python
+
+  train:
+    desc: Train the model (Python)
+    dir: momo-py
+    vars:
+      DATASET_DIR: "{{.ROOT_DIR}}/dataset"
+    env:
+      MOMO_DATASET_DIR: "{{.DATASET_DIR}}"
+    cmds:
+      - uv run momopy createdata --raw '{{.DATASET_DIR}}/basic_raw.tsv'
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4
 
   dist:msi:
     desc: Build Windows installer (.msi)

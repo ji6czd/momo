@@ -7,9 +7,11 @@ tasks:
   default:
     desc: Build momo-py package
     cmds:
-      - cp {{.DATASET_DIR}}/japanese_braille.toml src/momo_py/resource/
-      - cp {{.DATASET_DIR}}/basic_data*.zip src/momo_py/resource/
-      - cp {{.DATASET_DIR}}/single_character_dic.tsv src/momo_py/resource/
+      - echo "DATASET_DIR={{.DATASET_DIR}}"
+      - mkdir -p src/momo_py/resources
+      - cp {{.DATASET_DIR}}/japanese_braille.toml src/momo_py/resources/
+      - cp {{.DATASET_DIR}}/basic_data*.zip src/momo_py/resources/
+      - cp {{.DATASET_DIR}}/single_character_dic.tsv src/momo_py/resources/
       - uv build
 
   test:

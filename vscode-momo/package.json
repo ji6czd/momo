@@ -1,10 +1,15 @@
 {
   "name": "momo-translator",
-  "displayName": "momo-translator",
-  "description": "",
+  "displayName": "Japanese Text-to-Braille translator for Visual Studio Code",
+  "description": "日本語のテキストを点字に翻訳する Visual Studio Code 拡張機能です。momo-server をバックエンドに使用しています。",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.116.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ji6czd/momo.git",
+    "directory": "vscode-momo"
   },
   "categories": [
     "Other"

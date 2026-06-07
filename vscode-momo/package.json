@@ -20,22 +20,20 @@
       {
         "command": "momo-translator.to-braille",
         "title": "Translate to braille"
+      },
+      {
+        "command": "momo-translator.to-segmented",
+        "title": "Translate to segmented kana"
       }
     ],
     "configuration": {
       "title": "Momo Translator Configuration",
       "properties": {
-        "momoTranslator.command": {
-          "title": "Momo Translator Command",
+        "momoTranslator.serverUrl": {
+          "title": "Momo Server URL",
           "type": "string",
-          "default": "momo",
-          "description": "The command to run the momo translator. This can be an absolute path or a command available in the system PATH."
-        },
-        "momoTranslator.model": {
-          "title": "Momo Translator Model",
-          "type": "string",
-          "default": "basic_data_7.zip",
-          "description": "The model to use for translation. This should correspond to a model available in the momo translator."
+          "default": "http://127.0.0.1:8765",
+          "description": "momo-server の URL。デフォルトは http://127.0.0.1:8765。`momo-server` コマンドで起動してください。"
         }
       }
     }

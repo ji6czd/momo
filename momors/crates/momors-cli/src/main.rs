@@ -4,11 +4,22 @@
 //! 標準入力から 1 行ずつ読んで予測し、結果を標準出力に書く。
 
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
 use momors_braille::BrailleConverter;
 use momors_core::{Predictor, PredictorConfig};
+
+fn data_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("MOMO_DATASET_DIR") {
+        return PathBuf::from(dir);
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
 
 /// モデルサイズの選択肢
 #[derive(Debug, Clone, ValueEnum)]
@@ -64,39 +75,25 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // モデルファイルのパスを決定 (--model-file が優先)
-    let model_path_buf;
-    let model_path: &str = if let Some(ref path) = cli.model_file {
-        path.as_str()
+    // モデルファイルのパスを決定 (--model-file が優先、次に MOMO_DATASET_DIR、最後に exe と同じ場所)
+    let model_path = if let Some(ref path) = cli.model_file {
+        PathBuf::from(path)
     } else {
-        // 実行ファイルと同じディレクトリのモデルファイルを使う
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-        model_path_buf = exe_dir
-            .map(|d| d.join(cli.model.file_path()))
-            .unwrap_or_else(|| std::path::PathBuf::from(cli.model.file_path()));
-        model_path_buf
-            .to_str()
-            .unwrap_or_else(|| cli.model.file_path())
+        data_dir().join(cli.model.file_path())
     };
 
     // 設定を組み立てる
-    let mut config = PredictorConfig::new(model_path)
+    let mut config = PredictorConfig::new(&model_path)
         .with_segment_output(cli.segment);
     let dict_path = if let Some(ref path) = cli.single_dict {
-        let p = std::path::PathBuf::from(path);
+        let p = PathBuf::from(path);
         if !p.exists() {
             eprintln!("漢字辞書ファイルが見つかりません: {}", p.display());
             return ExitCode::FAILURE;
         }
         Some(p)
     } else {
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let candidate = exe_dir.join("single_character_dic.tsv");
+        let candidate = data_dir().join("single_character_dic.tsv");
         if candidate.exists() { Some(candidate) } else { None }
     };
     if let Some(ref path) = dict_path {
@@ -113,8 +110,15 @@ fn main() -> ExitCode {
     };
 
     // 点字変換器（--braille が指定されたときのみ初期化）
+    // MOMO_DATASET_DIR または exe と同じ場所の toml を優先し、なければ埋め込みを使う
     let braille_converter: Option<BrailleConverter> = if cli.braille {
-        match BrailleConverter::from_embedded() {
+        let toml_path = data_dir().join("japanese_braille.toml");
+        let result = if toml_path.exists() {
+            BrailleConverter::from_file(&toml_path)
+        } else {
+            BrailleConverter::from_embedded()
+        };
+        match result {
             Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("点字テーブル読み込みエラー: {e}");

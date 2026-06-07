@@ -1,0 +1,25 @@
+version: "3"
+
+vars:
+  DATASET_DIR: "{{.TASKFILE_DIR}}/../dataset"
+
+tasks:
+  default:
+    desc: Build momo-py package
+    cmds:
+      - cp {{.DATASET_DIR}}/japanese_braille.toml src/momo_py/resource/
+      - cp {{.DATASET_DIR}}/basic_data*.zip src/momo_py/resource/
+      - cp {{.DATASET_DIR}}/single_character_dic.tsv src/momo_py/resource/
+      - uv build
+
+  test:
+    desc: Run Python tests
+    env:
+      MOMO_DATASET_DIR: "{{.DATASET_DIR}}"
+    cmds:
+      - uv run pytest
+
+  clean:
+    desc: Clean Python build artifacts
+    cmds:
+      - rm -rf dist/

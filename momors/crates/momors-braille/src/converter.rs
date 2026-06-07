@@ -61,6 +61,11 @@ impl BrailleConverter {
         Ok(Self::new(BrailleTable::embedded()?))
     }
 
+    /// ファイルからテーブルを読み込んで変換器を作る。
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Ok(Self::new(BrailleTable::from_file(path)?))
+    }
+
     /// かな文字列を点字に変換する。
     ///
     /// `kana_text` には [`momors_core::PredictionResult::kana_text`] の出力を渡す。

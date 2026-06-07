@@ -130,6 +130,12 @@ impl BrailleTable {
         Self::from_toml(include_str!("../data/japanese_braille.toml"))
     }
 
+    /// ファイルからテーブルを読み込む。
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let toml_str = std::fs::read_to_string(path)?;
+        Self::from_toml(&toml_str)
+    }
+
     fn from_raw(raw: RawBrailleFile) -> Self {
         let to_punct = |map: HashMap<String, PunctEntry>| -> HashMap<String, (String, usize)> {
             map.into_iter()

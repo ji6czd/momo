@@ -3,6 +3,11 @@ name = "momors-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+description = "Japanese text to Braille converter"
+
+[package.metadata.wix]
+eula = false
 
 [[bin]]
 name = "momo"

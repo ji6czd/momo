@@ -1,0 +1,65 @@
+version: '3'
+
+vars:
+  DATASET_DIR: '{{.ROOT_DIR}}/dataset'
+
+includes:
+  python: ./momo-py
+
+tasks:
+  default:
+    desc: Build all components (rust + python in parallel, then vscode + hugo)
+    deps: [rust, python:default]
+    cmds:
+      - task: vscode
+      - task: hugo
+
+  rust:
+    desc: Build Rust workspace (release)
+    dir: momors
+    cmds:
+      - cargo build --release
+
+  vscode:
+    desc: Compile VSCode extension
+    dir: vscode-momo
+    cmds:
+      - pnpm run compile
+
+  hugo:
+    desc: Build Hugo site
+    dir: web
+    cmds:
+      - hugo --minify
+
+  test:
+    desc: Run all tests
+    deps: [test:rust, python:test]
+
+  test:rust:
+    desc: Run Rust tests
+    dir: momors
+    env:
+      MOMO_DATASET_DIR: '{{.DATASET_DIR}}'
+    cmds:
+      - cargo test
+
+  clean:
+    desc: Clean all build artifacts
+    deps: [clean:rust, python:clean, clean:vscode]
+
+  clean:rust:
+    dir: momors
+    cmds:
+      - cargo clean
+
+  clean:vscode:
+    dir: vscode-momo
+    cmds:
+      - rm -rf out/
+
+  dist:msi:
+    desc: Build Windows installer (.msi)
+    dir: momors
+    cmds:
+      - cargo wix --package momors-cli --nocapture

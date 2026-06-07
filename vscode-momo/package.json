@@ -4,7 +4,7 @@
   "description": "日本語のテキストを点字に翻訳する Visual Studio Code 拡張機能です。momo-server をバックエンドに使用しています。",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.116.0"
+    "vscode": "^1.120.0"
   },
   "repository": {
     "type": "git",
@@ -53,13 +53,13 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "@types/vscode": "^1.116.0",
+    "@types/node": "~22.19.20",
+    "@types/vscode": "^1.120.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^3.9.1",
-    "eslint": "^9.39.3",
+    "@vscode/vsce": "^3.9.2",
+    "eslint": "^9.39.4",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.1"
+    "typescript-eslint": "^8.60.1"
   }
 }

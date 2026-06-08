@@ -25,3 +25,9 @@ tasks:
     desc: Clean Python build artifacts
     cmds:
       - rm -rf dist/
+  publish:google:
+    desc: Publish the package to Google Artifact Registry
+    deps:
+      - default
+    cmds:
+      - uv publish --publish-url https://asia-northeast1-python.pkg.dev/neomomo/momo-py/ --username oauth2accesstoken --keyring-provider subprocess

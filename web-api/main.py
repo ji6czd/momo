@@ -4,7 +4,8 @@ import threading
 import sys
 from types import FrameType
 from importlib.metadata import version
-from flask import Flask, request
+from flask import Flask, request, abort
+from markupsafe import escape
 from momo_py import PredictionResult, Predictor, PredictorConfig
 from momo_py import pybraille
 
@@ -13,11 +14,10 @@ app = Flask(__name__)
 version_info = f"Momo version {version('momo_py')}"
 
 # モデルファイルのパス定義
-_CUSTOM_DICT = "./dataset/custom_dictionary.tsv"
-_MODEL_FILES = {
-    "small": "./dataset/basic_data_4.zip",
-    "medium": "./dataset/basic_data_5.zip",
-    "large": "./dataset/basic_data_7.zip",
+_MODELS = {
+    "small": 4,
+    "medium": 5,
+    "large": 7,
 }
 
 # セマフォで同時実行を1に制限する。
@@ -25,15 +25,6 @@ _MODEL_FILES = {
 # これにより「現在のモデルを1つだけキャッシュ・切り替え時は解放」が安全に動作する。
 _semaphore = threading.Semaphore(1)
 
-
-@app.before_request
-def _acquire_semaphore() -> None:
-    _semaphore.acquire()
-
-
-@app.teardown_request
-def _release_semaphore(exc: BaseException | None) -> None:
-    _semaphore.release()
 
 
 # 現在キャッシュしているモデル（同時に1つだけ保持）
@@ -48,8 +39,7 @@ def _get_predictor(model: str = "large") -> Predictor:
         _current_predictor = None
         gc.collect()
         cfg = PredictorConfig(
-            model_path=_MODEL_FILES.get(model, _MODEL_FILES["large"]),
-            custom_dict_path=_CUSTOM_DICT,
+            window=_MODELS.get(model, _MODELS["large"]),
         )
         _current_predictor = Predictor(cfg)
         _current_model = model
@@ -156,15 +146,19 @@ def hello() -> str:
 @app.route("/predict", methods=["GET"])
 def predict() -> str:
     source = request.args.get("source")
-    model = request.args.get("model", "large")
-    prd = _get_predictor(model)
-    model_version = (prd.get_version_info() or {}).get("trained_at", "不明")
+    if not source:
+        abort(400, "source パラメータが必要です")
 
-    res = prd.predict(source)
+    model = request.args.get("model", "large")
+    with _semaphore:
+        prd = _get_predictor(model)
+        model_version = (prd.get_version_info() or {}).get("trained_at", "不明")
+        res = prd.predict(source)
+
     braille = pybraille.to_jp_braille(res.kana_text)
 
     return predict_page.format(
-        source=source,
+        source=escape(source),
         result=res.kana_text,
         confidences_table=make_characters_table(res),
         braille_result=braille,
@@ -176,8 +170,11 @@ def predict() -> str:
 @app.route("/api/predict", methods=["GET"])
 def api_predict() -> str:
     source = request.args.get("source")
+    if not source:
+        abort(400, "source パラメータが必要です")
     model = request.args.get("model", "large")
-    return _get_predictor(model).predict(source).to_json()
+    with _semaphore:
+        return _get_predictor(model).predict(source).to_json()
 
 
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:

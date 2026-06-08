@@ -1,0 +1,10 @@
+version: "3"
+
+vars:
+  DATASET_DIR: "{{.TASKFILE_DIR}}/../dataset"
+
+tasks:
+  default:
+    desc: Deploy the web API to Google Cloud Run
+    cmds:
+      - gcloud run deploy neomomo --region=asia-northeast1 --memory=768Mi --concurrency=1 --source=.

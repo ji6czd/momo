@@ -221,10 +221,19 @@ wheels = [
 [[package]]
 name = "momo-py"
 version = "0.6.1"
-source = { git = "https://github.com/ji6czd/momo?subdirectory=momo-py&branch=LR_feature#6269619c7c0c74d63192b45cf8da38a040b37fb8" }
+source = { path = "../momo-py/dist/momo_py-0.6.1.tar.gz" }
 dependencies = [
     { name = "scikit-learn" },
 ]
+sdist = { hash = "sha256:7a053ac552527f0df677f8f57e490ee063ada2d15febde4a2e0e8d3b74978399" }
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0" },
+    { name = "scikit-learn" },
+    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.20.0" },
+]
+provides-extras = ["server"]
 
 [[package]]
 name = "narwhals"
@@ -250,7 +259,7 @@ dependencies = [
 requires-dist = [
     { name = "flask", specifier = ">=3.1.3" },
     { name = "gunicorn", specifier = ">=25.1.0" },
-    { name = "momo-py", git = "https://github.com/ji6czd/momo?subdirectory=momo-py&branch=LR_feature" },
+    { name = "momo-py", path = "../momo-py/dist/momo_py-0.6.1.tar.gz" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
 

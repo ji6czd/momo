@@ -130,7 +130,9 @@ def main():
         help="カスタム辞書ファイルのパス",
     )
     predict_parser.add_argument(
-        "--single-dict", dest="single_dict", help="単一漢字用辞書ファイルのパス（省略時は実行ファイルと同じ場所またはパッケージ内蔵の辞書を使用）"
+        "--single-dict",
+        dest="single_dict",
+        help="単一漢字用辞書ファイルのパス（省略時は実行ファイルと同じ場所またはパッケージ内蔵の辞書を使用）",
     )
     predict_parser.add_argument(
         "--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する"
@@ -207,9 +209,6 @@ def main():
         help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する",
     )
     args = parser.parse_args()
-    if args.command == "train":
-        args.model = args.model
-
     if args.command is None:
         parser.print_help()
         return

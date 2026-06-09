@@ -208,6 +208,11 @@ def main():
         action="store_true",
         help="特徴量の抽出とモデルの初期化まで行い、学習はせずに終了する",
     )
+    trainer_parser.add_argument(
+        "--sgd",
+        action="store_true",
+        help="読みモデルに SGDClassifier(loss=hinge) を使用する（メモリ節約、精度やや低下）",
+    )
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -227,6 +232,7 @@ def main():
             model_file=args.model,
             window=args.window,
             dry_run=args.dry_run,
+            use_svc=not args.sgd,
         )
 
     elif args.command == "predict":

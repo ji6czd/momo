@@ -281,16 +281,19 @@ def _split_labels(raw_labels: List[str]) -> tuple:
 # 🌟 7. train()
 # ==========================================
 def train(
-    tsvdata: str, model_file: str | None, window: int = 7, dry_run: bool = False
+    tsvdata: str,
+    model_file: str | None,
+    window: int = 7,
+    dry_run: bool = False,
+    use_svc: bool = True,
 ) -> None:
     """
-    TSVから読みモデル（LinearSVC）と境界モデル（SGDClassifier）を学習し、
-    1つのZIPにまとめる。
+    TSVから読みモデルと境界モデル（SGDClassifier）を学習し、1つのZIPにまとめる。
 
     モデル構成:
-        読みモデル  : LinearSVC
-            - 多クラス分類（ラベル数1000超）でも高速な推論が可能
-            - predict_proba は使えないが decision_function でスコアを取得できる
+        読みモデル  : LinearSVC (use_svc=True) または SGDClassifier/hinge (use_svc=False)
+            - LinearSVC: 精度優先。メモリが (クラス数×特徴量次元)×float64 必要
+            - SGDClassifier: メモリ節約。大規模データで LinearSVC がOOMになる場合に使用
         境界モデル  : SGDClassifier(loss='modified_huber')
             - 2値分類（0/1）
             - predict_proba が使える（漢数字フォールバック判定に使用）
@@ -343,23 +346,23 @@ def train(
     print("\n🏋️  [読みモデル] ベクトル化中...")
     vect_read = DictVectorizer(sparse=True)
     X_read = vect_read.fit_transform(X_dicts)
-    X_read.indices = X_read.indices.astype(np.int32, copy=False)
-    X_read.indptr = X_read.indptr.astype(np.int32, copy=False)
+    X_read.data = X_read.data.astype(np.float32, copy=False)  # type: ignore[union-attr]
+    X_read.indices = X_read.indices.astype(np.int32, copy=False)  # type: ignore[union-attr]
+    X_read.indptr = X_read.indptr.astype(np.int32, copy=False)  # type: ignore[union-attr]
     print(f"   特徴量ベクトル次元数: {X_read.shape[1]}")
     print(f"   読みラベル種類数: {len(set(Y_read))}")
     if dry_run:
         print("⚠️  dry_run=True のため、ここまでで終了します。")
         return
 
-    print("🏋️  [読みモデル] 学習中 (LinearSVC)...")
-    # windowに応じてパラメータだけ切り替え
-    params = {
-        7: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
-        5: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
-        4: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
-    }
-
-    model_read = LinearSVC(**params[window])
+    if use_svc:
+        print("🏋️  [読みモデル] 学習中 (LinearSVC)...")
+        model_read = LinearSVC(C=1.0, max_iter=2000, tol=1e-4, verbose=0)
+    else:
+        print("🏋️  [読みモデル] 学習中 (SGDClassifier loss=hinge)...")
+        model_read = SGDClassifier(
+            loss="hinge", max_iter=2000, tol=1e-4, random_state=42, verbose=0
+        )
     model_read.fit(X_read, Y_read)
     model_read.coef_ = model_read.coef_.astype(np.float32)
     model_read.intercept_ = model_read.intercept_.astype(np.float32)
@@ -378,8 +381,9 @@ def train(
     print("\n🏋️  [境界モデル] ベクトル化中...")
     vect_boundary = DictVectorizer(sparse=True)
     X_boundary = vect_boundary.fit_transform(X_dicts)
-    X_boundary.indices = X_boundary.indices.astype(np.int32, copy=False)
-    X_boundary.indptr = X_boundary.indptr.astype(np.int32, copy=False)
+    X_boundary.data = X_boundary.data.astype(np.float32, copy=False)  # type: ignore[union-attr]
+    X_boundary.indices = X_boundary.indices.astype(np.int32, copy=False)  # type: ignore[union-attr]
+    X_boundary.indptr = X_boundary.indptr.astype(np.int32, copy=False)  # type: ignore[union-attr]
 
     print("🏋️  [境界モデル] 学習中 (SGDClassifier)...")
     model_boundary = SGDClassifier(

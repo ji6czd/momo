@@ -11,7 +11,7 @@ itsdangerous==2.2.0
 jinja2==3.1.6
 joblib==1.5.3
 markupsafe==3.0.3
-momo-py==0.6.1
+momo-py==0.6.3
 narwhals==2.22.1
 numpy==2.4.6
 packaging==26.2

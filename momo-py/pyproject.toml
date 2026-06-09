@@ -1,6 +1,6 @@
 [project]
 name = "momo-py"
-version = "0.6.1"
+version = "0.6.3"
 description = "A tool to convert Japanese text to Braille using machine learning."
 readme = "README.md"
 authors = [

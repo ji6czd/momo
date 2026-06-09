@@ -7,12 +7,26 @@ tasks:
   default:
     desc: Build momo-py package
     cmds:
-      - echo "DATASET_DIR={{.DATASET_DIR}}"
       - mkdir -p src/momo_py/resources
       - cp {{.DATASET_DIR}}/japanese_braille.toml src/momo_py/resources/
       - cp {{.DATASET_DIR}}/basic_data*.zip src/momo_py/resources/
       - cp {{.DATASET_DIR}}/single_character_dic.tsv src/momo_py/resources/
       - uv build
+
+  createdata:
+    desc: Create training data from raw TSV
+    cmds:
+      - uv run momopy createdata --raw '{{.DATASET_DIR}}/basic_raw.tsv'
+      - uv run makedic {{.DATASET_DIR}}/basic_data.tsv {{.DATASET_DIR}}/single_character_dic.tsv
+      - uv run momopy train --dry-run --tsv '{{.DATASET_DIR}}/basic_data.tsv'
+
+  train:
+    desc: Train the model (Python)
+    deps: [createdata]
+    cmds:
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 5
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 7
 
   test:
     desc: Run Python tests

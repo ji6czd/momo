@@ -21,7 +21,11 @@
 pub mod error;
 pub mod table;
 pub mod converter;
+pub mod formatter;
+pub mod writer;
 
 pub use error::{Error, Result};
 pub use converter::{BrailleConverter, BrailleResult};
 pub use table::BrailleTable;
+pub use formatter::{BrailleFormatter, FormatterConfig, FormattedDocument};
+pub use writer::BrailleWriter;

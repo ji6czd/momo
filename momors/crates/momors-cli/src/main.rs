@@ -1,14 +1,14 @@
 //! `momo` コマンドの実装。
 //!
-//! 現 C++ 版の `main.cpp` 相当。
-//! 標準入力から 1 行ずつ読んで予測し、結果を標準出力に書く。
+//! 標準入力から 1 行ずつ読んで予測し、結果を標準出力に書く（デフォルト動作）。
+//! `--input` を指定するとファイル整形モードに切り替わる。
 
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
-use momors_braille::BrailleConverter;
+use momors_braille::{BrailleConverter, BrailleFormatter, BrailleWriter, FormatterConfig};
 use momors_core::{Predictor, PredictorConfig};
 
 fn data_dir() -> PathBuf {
@@ -51,6 +51,12 @@ struct Cli {
     #[arg(long, default_value = "large")]
     model: ModelSize,
 
+    /// 漢字辞書ファイル (.tsv) のパス（省略時は実行ファイルと同じ場所を自動検索）
+    #[arg(long)]
+    single_dict: Option<String>,
+
+    // ---- 標準入力モード専用 ----------------------------------------
+
     /// 自信度スコアも一緒に出力する
     #[arg(long)]
     confidence: bool,
@@ -67,22 +73,38 @@ struct Cli {
     #[arg(long)]
     braille: bool,
 
-    /// 漢字辞書ファイル (.tsv) のパス（省略時は実行ファイルと同じ場所を自動検索）
+    // ---- ファイル整形モード専用 ------------------------------------
+
+    /// 入力ファイル（指定するとファイル整形モードに切り替わる）
+    #[arg(long, short)]
+    input: Option<PathBuf>,
+
+    /// 出力ファイル（省略時は標準出力）
+    #[arg(long, short)]
+    output: Option<PathBuf>,
+
+    /// 1行あたりのマス数（ファイル整形モード）
+    #[arg(long, default_value_t = 32)]
+    line_width: usize,
+
+    /// 1ページあたりの行数（ファイル整形モード）
+    #[arg(long, default_value_t = 22)]
+    lines_per_page: usize,
+
+    /// ページヘッダのタイトル（日本語テキスト、ファイル整形モード）
     #[arg(long)]
-    single_dict: Option<String>,
+    title: Option<String>,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // モデルファイルのパスを決定 (--model-file が優先、次に MOMO_DATASET_DIR、最後に exe と同じ場所)
     let model_path = if let Some(ref path) = cli.model_file {
         PathBuf::from(path)
     } else {
         data_dir().join(cli.model.file_path())
     };
 
-    // 設定を組み立てる
     let mut config = PredictorConfig::new(&model_path)
         .with_segment_output(cli.segment);
     let dict_path = if let Some(ref path) = cli.single_dict {
@@ -100,7 +122,6 @@ fn main() -> ExitCode {
         config = config.with_kanji_dict_path(path);
     }
 
-    // 予測器を読み込む
     let predictor = match Predictor::load(config) {
         Ok(p) => p,
         Err(e) => {
@@ -109,16 +130,99 @@ fn main() -> ExitCode {
         }
     };
 
-    // 点字変換器（--braille が指定されたときのみ初期化）
-    // MOMO_DATASET_DIR または exe と同じ場所の toml を優先し、なければ埋め込みを使う
+    if cli.input.is_some() {
+        match run_format(&cli, &predictor) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(msg) => {
+                eprintln!("{msg}");
+                ExitCode::FAILURE
+            }
+        }
+    } else {
+        run_stdin(&cli, &predictor)
+    }
+}
+
+// ============================================================
+// ファイル整形モード
+// ============================================================
+
+fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
+    let converter = make_braille_converter()
+        .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
+
+    // 1. ファイル読み込み → 段落リスト
+    let text = std::fs::read_to_string(cli.input.as_ref().unwrap())
+        .map_err(|e| format!("ファイル読み込みエラー: {e}"))?;
+    let paragraphs: Vec<String> = text.lines().map(str::to_owned).collect();
+
+    // 2. 段落ごとに仮名変換 → 点字変換
+    let braille_list: Vec<String> = paragraphs
+        .iter()
+        .map(|p| to_braille(p, predictor, &converter))
+        .collect::<Result<_, _>>()?;
+
+    // 3. タイトルを点字に変換
+    let title_braille = cli.title.as_ref()
+        .map(|t| to_braille(t, predictor, &converter))
+        .transpose()?;
+
+    // 4. フォーマット
+    let formatter = BrailleFormatter::new(FormatterConfig {
+        line_width: cli.line_width,
+        lines_per_page: cli.lines_per_page,
+        page_header: true,
+        title: title_braille,
+    });
+    let doc = formatter.format(&braille_list);
+
+    // 5. 出力
+    let out = BrailleWriter::braille_text(&doc);
+
+    match &cli.output {
+        Some(path) => std::fs::write(path, out)
+            .map_err(|e| format!("ファイル書き込みエラー: {e}")),
+        None => {
+            print!("{out}");
+            Ok(())
+        }
+    }
+}
+
+/// テキストを仮名に変換してからさらに点字に変換する。空文字列は空文字列のまま返す。
+fn to_braille(
+    text: &str,
+    predictor: &Predictor,
+    converter: &BrailleConverter,
+) -> Result<String, String> {
+    if text.is_empty() {
+        return Ok(String::new());
+    }
+    let kana = predictor
+        .predict(text)
+        .map_err(|e| format!("仮名変換エラー: {e}"))?;
+    converter
+        .convert(kana.kana_text())
+        .map(|b| b.braille_text().to_owned())
+        .map_err(|e| format!("点字変換エラー: {e}"))
+}
+
+fn make_braille_converter() -> momors_braille::Result<BrailleConverter> {
+    let toml_path = data_dir().join("japanese_braille.toml");
+    if toml_path.exists() {
+        BrailleConverter::from_file(&toml_path)
+    } else {
+        BrailleConverter::from_embedded()
+    }
+}
+
+// ============================================================
+// 標準入力モード
+// ============================================================
+
+fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
     let braille_converter: Option<BrailleConverter> = if cli.braille {
-        let toml_path = data_dir().join("japanese_braille.toml");
-        let result = if toml_path.exists() {
-            BrailleConverter::from_file(&toml_path)
-        } else {
-            BrailleConverter::from_embedded()
-        };
-        match result {
+        match make_braille_converter() {
             Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("点字テーブル読み込みエラー: {e}");
@@ -129,7 +233,6 @@ fn main() -> ExitCode {
         None
     };
 
-    // 標準入力ループ
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();

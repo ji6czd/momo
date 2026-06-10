@@ -23,7 +23,8 @@ mod table;
 ///   - `0x2_` : 予約
 ///   - `0x3_` : 記号系
 ///   - `0x4_` : 日本語文字系
-///   - `0xF_` : その他・不明
+///   - `0x5_` : スキップ系（NBSP・ZWJ など、仮名に現れず原文位置のみ保持）
+///   - `0xF_` : その他・不明（バイパス）
 ///
 /// モデルファイル（.mbm）にこの値が `u8` として書き込まれている。
 /// `#[repr(u8)]` でメモリ表現を明示し、`as u8` で値を取得できる。
@@ -62,6 +63,12 @@ pub enum CharType {
     Kanji = 0x42,
     JapaneseNumeric = 0x43,
 
+    /// スキップ系（NBSP・ZWJ など）。
+    /// 仮名テキストには現れず、`src_to_kana_index` のエントリだけ保持される。
+    Skip = 0x50,
+
+    /// 未定義文字。バイパス扱いで原文のまま仮名に出力し、
+    /// momors-braille 側で 1:1 変換する。
     Other = 0xFF,
 }
 
@@ -96,20 +103,29 @@ impl CharType {
 
     /// 素通し (bypass) 扱いにすべき文字種か。
     ///
-    /// `Alpha` および記号系 (`Symbol`, `SymbolClose`, `SymbolOpen`,
-    /// `SymbolStop`, `SymbolPause`) は推論を行わず、原文をそのまま
-    /// 出力する。C++ 版の `is_bypass()` と一致。
+    /// `Space`・`Alpha`・記号系・`Other` は推論を行わず、原文をそのまま出力する。
+    /// C++ 版の `is_bypass()` に `Space` と `Other` を追加した拡張版。
     #[inline]
     pub fn is_bypass(self) -> bool {
         matches!(
             self,
-            CharType::Alpha
+            CharType::Space
+                | CharType::Alpha
                 | CharType::Symbol
                 | CharType::SymbolClose
                 | CharType::SymbolOpen
                 | CharType::SymbolStop
                 | CharType::SymbolPause
+                | CharType::Other
         )
+    }
+
+    /// スキップ扱いにすべき文字種か。
+    ///
+    /// 仮名テキストには現れないが、`src_to_kana_index` のエントリは保持される。
+    #[inline]
+    pub fn is_skip(self) -> bool {
+        self.category() == 0x50
     }
 
     /// `u8` 値から [`CharType`] を構築する。
@@ -131,6 +147,7 @@ impl CharType {
             0x41 => Katakana,
             0x42 => Kanji,
             0x43 => JapaneseNumeric,
+            0x50 => Skip,
             0xFF => Other,
             _ => return None,
         })
@@ -158,6 +175,11 @@ pub fn get_char_type(c: char) -> CharType {
     }
 
     let cp = c as u32;
+
+    // --- スキップ文字（NBSP・ゼロ幅・フォーマット制御）---
+    if is_skip_cp(cp) {
+        return CharType::Skip;
+    }
 
     // --- 数字（ASCII・全角）---
     if c.is_ascii_digit() || (0xFF10..=0xFF19).contains(&cp) {
@@ -201,6 +223,27 @@ pub fn get_char_type(c: char) -> CharType {
     }
 
     CharType::Other
+}
+
+/// スキップすべきコードポイントか。
+///
+/// NBSP・ゼロ幅文字・Unicode フォーマット制御文字など、
+/// 仮名・点字出力には現れるべきでない文字を列挙する。
+fn is_skip_cp(cp: u32) -> bool {
+    matches!(
+        cp,
+        0x00A0 // NO-BREAK SPACE (NBSP)
+        | 0x00AD // SOFT HYPHEN
+        | 0x200B // ZERO WIDTH SPACE
+        | 0x200C // ZERO WIDTH NON-JOINER
+        | 0x200D // ZERO WIDTH JOINER
+        | 0x2060 // WORD JOINER
+        | 0x2061 // FUNCTION APPLICATION
+        | 0x2062 // INVISIBLE TIMES
+        | 0x2063 // INVISIBLE SEPARATOR
+        | 0x2064 // INVISIBLE PLUS
+        | 0xFEFF // ZERO WIDTH NO-BREAK SPACE (BOM)
+    )
 }
 
 /// 常に [`CharType::JapaneseNumeric`] となる漢数字。
@@ -250,6 +293,30 @@ mod tests {
         assert!(CharType::Alpha.is_latin());
         assert!(CharType::Numeric.is_latin());
         assert!(!CharType::Symbol.is_latin());
+    }
+
+    #[test]
+    fn space_is_bypass() {
+        assert!(CharType::Space.is_bypass());
+        assert!(!CharType::Numeric.is_bypass());
+        assert!(!CharType::Hiragana.is_bypass());
+    }
+
+    #[test]
+    fn other_is_bypass() {
+        assert!(CharType::Other.is_bypass());
+    }
+
+    #[test]
+    fn skip_chars() {
+        assert_eq!(get_char_type('\u{00A0}'), CharType::Skip); // NBSP
+        assert_eq!(get_char_type('\u{200B}'), CharType::Skip); // ZERO WIDTH SPACE
+        assert_eq!(get_char_type('\u{200D}'), CharType::Skip); // ZWJ
+        assert_eq!(get_char_type('\u{2060}'), CharType::Skip); // WORD JOINER
+        assert_eq!(get_char_type('\u{FEFF}'), CharType::Skip); // BOM
+        assert!(CharType::Skip.is_skip());
+        assert!(!CharType::Space.is_skip());
+        assert!(!CharType::Other.is_skip());
     }
 
     #[test]

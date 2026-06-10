@@ -84,11 +84,13 @@ def _is_valid_kana_prediction(src_char: str, pred: str, direct: str) -> bool:
 # bypass（素通し）扱いにする文字種
 _BYPASS_CTYPES = frozenset(
     {
+        CharType.SPACE,
         CharType.SYMBOL,
         CharType.SYMBOL_CLOSE,
         CharType.SYMBOL_OPEN,
         CharType.SYMBOL_STOP,
         CharType.SYMBOL_PAUSE,
+        CharType.OTHER,
     }
 )
 
@@ -674,7 +676,16 @@ class Predictor:
 
         char_idx = 0
         for val, orig_idx, ctype in units_info:
-            # 英数字ブロック、または記号類は bypass 扱い
+            # スキップ文字（NBSP・ZWJ など）: 仮名に現れず原文インデックスのみ保持
+            if ctype == CharType.SKIP:
+                for i, c in enumerate(val):
+                    source_seq.append((c, orig_idx + i, ctype))
+                    bypass_indices.add(char_idx)
+                    ascii_overrides[char_idx] = LABEL_SKIP
+                    char_idx += 1
+                continue
+
+            # 英数字ブロック、または記号類・空白・未定義文字は bypass 扱い
             is_ascii_bypass = ctype == "ALPHA"
             is_symbol_bypass = ctype in _BYPASS_CTYPES
 

@@ -18,7 +18,8 @@ class CharType(str, Enum):
     KATAKANA = "KATAKANA"
     KANJI = "KANJI"
     JAPANESE_NUMERIC = "JAPANESE_NUMERIC"
-    OTHER = "OTHER"
+    SKIP = "SKIP"  # NBSP・ZWJ など: 仮名に現れず原文位置のみ保持
+    OTHER = "OTHER"  # 未定義文字: バイパスして momors-braille 側で処理
 
     def __str__(self) -> str:
         return self.value
@@ -26,6 +27,22 @@ class CharType(str, Enum):
 
 # 常に JAPANESE_NUMERIC となる漢数字
 JAPANESE_NUMERIC_CHARS = frozenset("〇一二三四五六七八九")
+
+# 仮名・点字に現れるべきでないスキップ文字
+# （NBSP は Python の isspace() で True になるため、SPACE より先に判定する）
+_SKIP_CHARS = frozenset({
+    " ",  # NO-BREAK SPACE (NBSP)
+    "­",  # SOFT HYPHEN
+    "​",  # ZERO WIDTH SPACE
+    "‌",  # ZERO WIDTH NON-JOINER
+    "‍",  # ZERO WIDTH JOINER
+    "⁠",  # WORD JOINER
+    "⁡",  # FUNCTION APPLICATION
+    "⁢",  # INVISIBLE TIMES
+    "⁣",  # INVISIBLE SEPARATOR
+    "⁤",  # INVISIBLE PLUS
+    "﻿",  # ZERO WIDTH NO-BREAK SPACE (BOM)
+})
 
 # 隣接文脈次第で JAPANESE_NUMERIC に昇格する位取り文字
 KURAI_CHARS = frozenset("十百千万億兆")
@@ -75,6 +92,8 @@ def get_char_type(c: str) -> CharType:
     位取り文字（十百千万億兆）の JAPANESE_NUMERIC への昇格は
     get_units() の文脈判定で行われるため、この関数では KANJI を返す。
     """
+    if c in _SKIP_CHARS:
+        return CharType.SKIP
     if not c or c.isspace():
         return CharType.SPACE
     if c.isdigit() or ("0" <= c <= "9"):

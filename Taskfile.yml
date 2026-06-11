@@ -113,6 +113,7 @@ tasks:
     env:
       VIRTUAL_ENV: "{{.ROOT_DIR}}/momo-py/.venv"
     cmds:
+      - echo "{{.VIRTUAL_ENV}}"
       - maturin build --release
 
   pyo3:dev:
@@ -140,8 +141,11 @@ tasks:
     cmds:
       - rm -rf "{{.STAGE}}"
       - mkdir -p "{{.STAGE}}/bin" "{{.STAGE}}/data"
-      - cp "{{.RUST_BIN}}/momo.exe"                   "{{.STAGE}}/bin/"
+      - cp "{{.RUST_BIN}}/momo.exe"                        "{{.STAGE}}/bin/"
       - cp "{{.GUI_BIN}}/momo-gui.exe"                    "{{.STAGE}}/bin/"
+      - cp "{{.GUI_BIN}}/momo-gui.dll"                    "{{.STAGE}}/bin/"
+      - cp "{{.GUI_BIN}}/momo-gui.deps.json"              "{{.STAGE}}/bin/"
+      - cp "{{.GUI_BIN}}/momo-gui.runtimeconfig.json"     "{{.STAGE}}/bin/"
       - cp "{{.DATA}}/basic_data_4.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"
@@ -157,9 +161,11 @@ tasks:
       WXS: "{{.ROOT_DIR}}/momo-installer/main.wxs"
       OBJ: "{{.ROOT_DIR}}/momo-installer/momo.wixobj"
       OUT: "{{.ROOT_DIR}}/dist"
-    deps: [rust, gui]
+    deps:
+      - rust
+      - gui
     cmds:
       - task: dist:stage
       - mkdir -p "{{.OUT}}"
-      - candle -arch x64 -dVersion={{.VERSION}} "-dStageDir={{.STAGE}}" -out "{{.OBJ}}" "{{.WXS}}"
-      - light -ext WixUIExtension -out "{{.OUT}}/Momo-{{.VERSION}}-x64.msi" "{{.OBJ}}"
+      - candle -arch x64 "-dVersion={{.VERSION}}" "-dStageDir={{.STAGE}}" -out "{{.OBJ}}" "{{.WXS}}"
+      - light -ext WixUIExtension -loc "C:/Program Files (x86)/WiX Toolset v3.14/SDK/wixui/WixUI_ja-jp.wxl" -out "{{.OUT}}/Momo-{{.VERSION}}-x64.msi" "{{.OBJ}}"

@@ -124,8 +124,42 @@ tasks:
     cmds:
       - maturin develop --release
 
-  dist:msi:
-    desc: Build Windows installer (.msi)
-    dir: momors
+  gui:
+    desc: Build .NET GUI (release)
+    dir: momo-gui
     cmds:
-      - cargo wix --package momors-cli --nocapture
+      - dotnet publish -c Release
+
+  dist:stage:
+    desc: Stage artifacts for installer (rust + gui must be built first)
+    vars:
+      STAGE: "{{.ROOT_DIR}}/momo-installer/stage"
+      RUST_BIN: "{{.ROOT_DIR}}/momors/target/release"
+      GUI_BIN: "{{.ROOT_DIR}}/momo-gui/bin/Release/net10.0-windows/publish"
+      DATA: "{{.ROOT_DIR}}/dataset"
+    cmds:
+      - rm -rf "{{.STAGE}}"
+      - mkdir -p "{{.STAGE}}/bin" "{{.STAGE}}/data"
+      - cp "{{.RUST_BIN}}/momo.exe"                   "{{.STAGE}}/bin/"
+      - cp "{{.GUI_BIN}}/momo-gui.exe"                    "{{.STAGE}}/bin/"
+      - cp "{{.DATA}}/basic_data_4.mbm"               "{{.STAGE}}/data/"
+      - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
+      - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"
+      - cp "{{.DATA}}/japanese_braille.toml"           "{{.STAGE}}/data/"
+      - cp "{{.DATA}}/single_character_dic.tsv"        "{{.STAGE}}/data/"
+
+  dist:msi:
+    desc: Build Windows installer (.msi) — requires WiX Toolset v3
+    vars:
+      VERSION:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+      STAGE: "{{.ROOT_DIR}}/momo-installer/stage"
+      WXS: "{{.ROOT_DIR}}/momo-installer/main.wxs"
+      OBJ: "{{.ROOT_DIR}}/momo-installer/momo.wixobj"
+      OUT: "{{.ROOT_DIR}}/dist"
+    deps: [rust, gui]
+    cmds:
+      - task: dist:stage
+      - mkdir -p "{{.OUT}}"
+      - candle -arch x64 -dVersion={{.VERSION}} "-dStageDir={{.STAGE}}" -out "{{.OBJ}}" "{{.WXS}}"
+      - light -ext WixUIExtension -out "{{.OUT}}/Momo-{{.VERSION}}-x64.msi" "{{.OBJ}}"

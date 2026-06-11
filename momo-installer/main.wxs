@@ -1,0 +1,180 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  $(var.Version)   - バージョン番号 (例: 0.1.0)。candle に -dVersion=x.y.z で渡す。
+  $(var.StageDir)  - ステージングディレクトリ (stage/)。candle に -dStageDir=<path> で渡す。
+-->
+<?if $(sys.BUILDARCH) = x64 or $(sys.BUILDARCH) = arm64 ?>
+    <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
+<?else ?>
+    <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
+<?endif ?>
+
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+
+    <Product
+        Id='*'
+        Name='Momo'
+        UpgradeCode='B4C7E921-3F5A-4D8B-9E1C-6A2D8F0B4E73'
+        Manufacturer='KIRIAKE Masanori'
+        Language='1041'
+        Codepage='932'
+        Version='$(var.Version)'>
+
+        <Package Id='*'
+            Keywords='Installer'
+            Manufacturer='KIRIAKE Masanori'
+            InstallerVersion='450'
+            Languages='1041'
+            Compressed='yes'
+            InstallScope='perMachine'
+            SummaryCodepage='932'
+            />
+
+        <MajorUpgrade
+            Schedule='afterInstallInitialize'
+            DowngradeErrorMessage='新しいバージョンの [ProductName] がすでにインストールされています。'/>
+
+        <Media Id='1' Cabinet='media1.cab' EmbedCab='yes'/>
+
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+
+            <!-- スタートメニュー -->
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='ApplicationProgramsFolder' Name='Momo'>
+                    <Component Id='ApplicationShortcut' Guid='*'>
+                        <Shortcut Id='StartMenuShortcut'
+                                  Name='Momo 点字変換'
+                                  Description='日本語テキストを点字に変換します'
+                                  Target='[Bin]momo-gui.exe'
+                                  WorkingDirectory='Bin'/>
+                        <RemoveFolder Id='CleanUpShortCut'
+                                      Directory='ApplicationProgramsFolder'
+                                      On='uninstall'/>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\Momo'
+                            Name='installed'
+                            Type='integer'
+                            Value='1'
+                            KeyPath='yes'/>
+                    </Component>
+                </Directory>
+            </Directory>
+
+            <!-- Program Files\Momo\ -->
+            <Directory Id='$(var.PlatformProgramFilesFolder)'>
+                <Directory Id='APPLICATIONFOLDER' Name='Momo'>
+
+                    <Directory Id='Bin' Name='bin'>
+                        <!-- PATH に bin\ を追加 -->
+                        <Component Id='Path'
+                                   Guid='E5F6A7B8-C9D0-1E2F-3A4B-5C6D7E8F9012'
+                                   KeyPath='yes'>
+                            <Environment
+                                Id='PATH'
+                                Name='PATH'
+                                Value='[Bin]'
+                                Permanent='no'
+                                Part='last'
+                                Action='set'
+                                System='yes'/>
+                        </Component>
+                        <!-- momo.exe (Rust CLI) -->
+                        <Component Id='MomoCli' Guid='*'>
+                            <File Id='MomoCliExe'
+                                  Name='momo.exe'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\momo.exe'
+                                  KeyPath='yes'/>
+                        </Component>
+                        <!-- momo-gui.exe (.NET GUI) -->
+                        <Component Id='MomoGui' Guid='*'>
+                            <File Id='MomoGuiExe'
+                                  Name='momo-gui.exe'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\momo-gui.exe'
+                                  KeyPath='yes'/>
+                        </Component>
+                    </Directory>
+
+                    <Directory Id='Data' Name='data'>
+                        <!-- 学習済みモデルと変換テーブル -->
+                        <Component Id='DataFiles' Guid='*'>
+                            <File Id='model4'
+                                  Name='basic_data_4.mbm'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\data\basic_data_4.mbm'
+                                  KeyPath='yes'/>
+                            <File Id='model5'
+                                  Name='basic_data_5.mbm'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\data\basic_data_5.mbm'/>
+                            <File Id='model7'
+                                  Name='basic_data_7.mbm'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\data\basic_data_7.mbm'/>
+                            <File Id='braille_table'
+                                  Name='japanese_braille.toml'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\data\japanese_braille.toml'/>
+                            <File Id='single_dict'
+                                  Name='single_character_dic.tsv'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\data\single_character_dic.tsv'/>
+                        </Component>
+                        <!-- MOMO_DATASET_DIR 環境変数 -->
+                        <Component Id='DatasetEnv'
+                                   Guid='F6A7B8C9-D0E1-2F3A-4B5C-6D7E8F901234'
+                                   KeyPath='yes'>
+                            <Environment
+                                Id='MOMO_DATASET_DIR'
+                                Name='MOMO_DATASET_DIR'
+                                Value='[Data]'
+                                Permanent='no'
+                                Action='set'
+                                System='yes'/>
+                        </Component>
+                    </Directory>
+
+                </Directory>
+            </Directory>
+        </Directory>
+
+        <Feature
+            Id='Application'
+            Title='Momo 点字変換'
+            Description='点字変換エンジン (CLI + GUI) とモデルデータをインストールします。'
+            Level='1'
+            ConfigurableDirectory='APPLICATIONFOLDER'
+            AllowAdvertise='no'
+            Display='expand'
+            Absent='disallow'>
+
+            <ComponentRef Id='MomoCli'/>
+            <ComponentRef Id='MomoGui'/>
+            <ComponentRef Id='DataFiles'/>
+            <ComponentRef Id='DatasetEnv'/>
+            <ComponentRef Id='ApplicationShortcut'/>
+
+            <Feature
+                Id='EnvironmentPath'
+                Title='PATH 環境変数'
+                Description='momo コマンドをどこからでも呼び出せるように PATH に追加します。'
+                Level='1'
+                Absent='allow'>
+                <ComponentRef Id='Path'/>
+            </Feature>
+
+        </Feature>
+
+        <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+
+        <UI>
+            <UIRef Id='WixUI_FeatureTree'/>
+            <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='CustomizeDlg' Order='99'>1</Publish>
+            <Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='99'>1</Publish>
+        </UI>
+
+    </Product>
+
+</Wix>

@@ -5,6 +5,7 @@ members = [
     "crates/momors-braille",
     "crates/momors-cli",
     "crates/momors-ffi",
+    "crates/momors-pyo3",
 ]
 
 [workspace.package]

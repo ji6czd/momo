@@ -24,7 +24,7 @@ tasks:
     desc: Train the model (Python)
     deps: [createdata]
     cmds:
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4 --sgd
       - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 5
       - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 7
 

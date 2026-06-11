@@ -357,7 +357,13 @@ def train(
 
     if use_svc:
         print("🏋️  [読みモデル] 学習中 (LinearSVC)...")
-        model_read = LinearSVC(C=1.0, max_iter=2000, tol=1e-4, verbose=0)
+        # windowに応じてパラメータだけ切り替え
+        params = {
+            7: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
+            5: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
+            4: dict(C=0.1, max_iter=2000, tol=1e-2, verbose=0),
+        }
+        model_read = LinearSVC(**params[window])
     else:
         print("🏋️  [読みモデル] 学習中 (SGDClassifier loss=hinge)...")
         model_read = SGDClassifier(

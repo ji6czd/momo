@@ -6,7 +6,8 @@ tasks:
     deps: [rust, python]
     cmds:
       - task: vscode
-      - task: hugo
+      # まだ Hugo サイトは公開していないため、ビルドはスキップする
+      # - task: hugo
 
   rust:
     desc: Build Rust workspace (release)
@@ -72,23 +73,56 @@ tasks:
     cmds:
       - rm -rf out/
 
-  setup:
-    desc: "git clone・momopy train 後の初期セットアップ"
-    cmds:
-      - task: python
-
   train:
-    desc: Train the model (Python)
+    desc: Train model
     dir: momo-py
-    vars:
-      DATASET_DIR: "{{.ROOT_DIR}}/dataset"
-    env:
-      MOMO_DATASET_DIR: "{{.DATASET_DIR}}"
     cmds:
-      - uv run momopy createdata --raw '{{.DATASET_DIR}}/basic_raw.tsv'
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 5
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 7
+      - task train
+
+  pyo3:venv:
+    desc: Ensure momo-py venv exists (uv sync)
+    dir: momo-py
+    cmds:
+      - uv sync
+
+  pyo3:sync:
+    desc: Copy trained model files from dataset/ to momors-pyo3 crate
+    vars:
+      SRC: "{{.ROOT_DIR}}/dataset"
+      DST: "{{.ROOT_DIR}}/momors/crates/momors-pyo3"
+    sources:
+      - "{{.SRC}}/basic_data_4.mbm"
+      - "{{.SRC}}/basic_data_5.mbm"
+      - "{{.SRC}}/basic_data_7.mbm"
+      - "{{.SRC}}/single_character_dic.tsv"
+    generates:
+      - "{{.DST}}/basic_data_4.mbm"
+      - "{{.DST}}/basic_data_5.mbm"
+      - "{{.DST}}/basic_data_7.mbm"
+      - "{{.DST}}/single_character_dic.tsv"
+    cmds:
+      - cp "{{.SRC}}/basic_data_4.mbm" "{{.DST}}/"
+      - cp "{{.SRC}}/basic_data_5.mbm" "{{.DST}}/"
+      - cp "{{.SRC}}/basic_data_7.mbm" "{{.DST}}/"
+      - cp "{{.SRC}}/single_character_dic.tsv" "{{.DST}}/"
+
+  pyo3:
+    desc: Build Python wheel from Rust bindings (maturin)
+    deps: [pyo3:venv, pyo3:sync]
+    dir: momors/crates/momors-pyo3
+    env:
+      VIRTUAL_ENV: "{{.ROOT_DIR}}/momo-py/.venv"
+    cmds:
+      - maturin build --release
+
+  pyo3:dev:
+    desc: Install Rust bindings into momo-py venv (maturin develop)
+    deps: [pyo3:venv, pyo3:sync]
+    dir: momors/crates/momors-pyo3
+    env:
+      VIRTUAL_ENV: "{{.ROOT_DIR}}/momo-py/.venv"
+    cmds:
+      - maturin develop --release
 
   dist:msi:
     desc: Build Windows installer (.msi)

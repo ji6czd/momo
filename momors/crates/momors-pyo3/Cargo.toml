@@ -1,0 +1,15 @@
+[package]
+name = "momors-pyo3"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "momors_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+momors-core = { workspace = true }
+momors-braille = { workspace = true }

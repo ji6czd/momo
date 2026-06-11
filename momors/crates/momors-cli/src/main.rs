@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
-use momors_braille::{BrailleConverter, BrailleFormatter, BrailleWriter, FormatterConfig};
+use momors_braille::{BrailleConverter, BrailleFormatter, FormatterConfig, OutputFormat};
 use momors_core::{Predictor, PredictorConfig};
 
 fn data_dir() -> PathBuf {
@@ -56,7 +56,6 @@ struct Cli {
     single_dict: Option<String>,
 
     // ---- 標準入力モード専用 ----------------------------------------
-
     /// 自信度スコアも一緒に出力する
     #[arg(long)]
     confidence: bool,
@@ -74,7 +73,6 @@ struct Cli {
     braille: bool,
 
     // ---- ファイル整形モード専用 ------------------------------------
-
     /// 入力ファイル（指定するとファイル整形モードに切り替わる）
     #[arg(long, short)]
     input: Option<PathBuf>,
@@ -105,8 +103,7 @@ fn main() -> ExitCode {
         data_dir().join(cli.model.file_path())
     };
 
-    let mut config = PredictorConfig::new(&model_path)
-        .with_segment_output(cli.segment);
+    let mut config = PredictorConfig::new(&model_path).with_segment_output(cli.segment);
     let dict_path = if let Some(ref path) = cli.single_dict {
         let p = PathBuf::from(path);
         if !p.exists() {
@@ -116,7 +113,11 @@ fn main() -> ExitCode {
         Some(p)
     } else {
         let candidate = data_dir().join("single_character_dic.tsv");
-        if candidate.exists() { Some(candidate) } else { None }
+        if candidate.exists() {
+            Some(candidate)
+        } else {
+            None
+        }
     };
     if let Some(ref path) = dict_path {
         config = config.with_kanji_dict_path(path);
@@ -148,45 +149,67 @@ fn main() -> ExitCode {
 // ============================================================
 
 fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
-    let converter = make_braille_converter()
-        .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
+    let ext = cli.output.as_ref()
+        .and_then(|p| p.extension())
+        .and_then(|e| e.to_str());
+    let braille_format = match ext {
+        Some("brf") => Some(OutputFormat::BrailleText),
+        Some("bse") => Some(OutputFormat::Base),
+        _ => None,
+    };
 
-    // 1. ファイル読み込み → 段落リスト
     let text = std::fs::read_to_string(cli.input.as_ref().unwrap())
         .map_err(|e| format!("ファイル読み込みエラー: {e}"))?;
     let paragraphs: Vec<String> = text.lines().map(str::to_owned).collect();
 
-    // 2. 段落ごとに仮名変換 → 点字変換
-    let braille_list: Vec<String> = paragraphs
-        .iter()
-        .map(|p| to_braille(p, predictor, &converter))
-        .collect::<Result<_, _>>()?;
-
-    // 3. タイトルを点字に変換
-    let title_braille = cli.title.as_ref()
-        .map(|t| to_braille(t, predictor, &converter))
-        .transpose()?;
-
-    // 4. フォーマット
-    let formatter = BrailleFormatter::new(FormatterConfig {
-        line_width: cli.line_width,
-        lines_per_page: cli.lines_per_page,
-        page_header: true,
-        title: title_braille,
-    });
-    let doc = formatter.format(&braille_list);
-
-    // 5. 出力
-    let out = BrailleWriter::braille_text(&doc);
+    let out = match braille_format {
+        Some(format) => {
+            let converter =
+                make_braille_converter().map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
+            let braille_list: Vec<String> = paragraphs
+                .iter()
+                .map(|p| to_braille(p, predictor, &converter))
+                .collect::<Result<_, _>>()?;
+            let title_braille = cli
+                .title
+                .as_ref()
+                .map(|t| to_braille(t, predictor, &converter))
+                .transpose()?;
+            let formatter = BrailleFormatter::new(FormatterConfig {
+                line_width: cli.line_width,
+                lines_per_page: cli.lines_per_page,
+                page_header: true,
+                title: title_braille,
+            });
+            format.write(&formatter.format(&braille_list))
+        }
+        None => {
+            let kana_lines: Vec<String> = paragraphs
+                .iter()
+                .map(|p| to_kana(p, predictor))
+                .collect::<Result<_, _>>()?;
+            kana_lines.join("\n") + "\n"
+        }
+    };
 
     match &cli.output {
-        Some(path) => std::fs::write(path, out)
-            .map_err(|e| format!("ファイル書き込みエラー: {e}")),
+        Some(path) => std::fs::write(path, out).map_err(|e| format!("ファイル書き込みエラー: {e}")),
         None => {
             print!("{out}");
             Ok(())
         }
     }
+}
+
+/// テキストを仮名に変換する。空文字列は空文字列のまま返す。
+fn to_kana(text: &str, predictor: &Predictor) -> Result<String, String> {
+    if text.is_empty() {
+        return Ok(String::new());
+    }
+    predictor
+        .predict(text)
+        .map(|r| r.kana_text().to_owned())
+        .map_err(|e| format!("仮名変換エラー: {e}"))
 }
 
 /// テキストを仮名に変換してからさらに点字に変換する。空文字列は空文字列のまま返す。

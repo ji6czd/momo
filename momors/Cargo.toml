@@ -7,6 +7,13 @@ members = [
     "crates/momors-ffi",
     "crates/momors-pyo3",
 ]
+# momors-pyo3 は maturin 経由でビルドするため通常の cargo build から除外する
+default-members = [
+    "crates/momors-core",
+    "crates/momors-braille",
+    "crates/momors-cli",
+    "crates/momors-ffi",
+]
 
 [workspace.package]
 version = "0.1.0"

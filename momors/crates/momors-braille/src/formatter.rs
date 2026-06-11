@@ -55,6 +55,8 @@ impl Default for FormatterConfig {
 #[derive(Debug, Clone)]
 pub struct FormattedDocument {
     pages: Vec<Vec<String>>,
+    line_width: usize,
+    lines_per_page: usize,
 }
 
 impl FormattedDocument {
@@ -66,6 +68,16 @@ impl FormattedDocument {
     /// 総ページ数。
     pub fn page_count(&self) -> usize {
         self.pages.len()
+    }
+
+    /// 1行あたりのマス数（点字セル数）。
+    pub fn line_width(&self) -> usize {
+        self.line_width
+    }
+
+    /// 1ページあたりの行数（ヘッダ行を含む）。
+    pub fn lines_per_page(&self) -> usize {
+        self.lines_per_page
     }
 }
 
@@ -99,7 +111,11 @@ impl BrailleFormatter {
         }
 
         if physical_lines.is_empty() {
-            return FormattedDocument { pages: vec![] };
+            return FormattedDocument {
+                pages: vec![],
+                line_width: self.config.line_width,
+                lines_per_page: self.config.lines_per_page,
+            };
         }
 
         // ヘッダ行がある場合はコンテンツ用の行数を1減らす
@@ -125,7 +141,11 @@ impl BrailleFormatter {
             })
             .collect();
 
-        FormattedDocument { pages }
+        FormattedDocument {
+            pages,
+            line_width: self.config.line_width,
+            lines_per_page: self.config.lines_per_page,
+        }
     }
 
     /// 1段落をワードラップして物理行のリストに変換する。
@@ -153,6 +173,10 @@ impl BrailleFormatter {
                     lines.push(chars[start..end].iter().collect());
                     start = end;
                 }
+            }
+            // 次行の先頭スペースを削除
+            while start < chars.len() && chars[start] == BRAILLE_SPACE {
+                start += 1;
             }
         }
 
@@ -232,6 +256,36 @@ mod tests {
         assert_eq!(page.len(), 2);
         assert_eq!(page[0].chars().count(), 10);
         assert_eq!(page[1].chars().count(), 10);
+    }
+
+    #[test]
+    fn word_wrap_no_leading_space_after_wrap() {
+        // 連続スペース後のセグメントが次行の先頭にスペースを持たないことを確認
+        // "AAAA⠀⠀BBBB" (4+space+space+4=10), width=6
+        // → wrap at first space (pos 4): line1="AAAA", start=5
+        //   chars[5]='⠀' → skip → start=6, chars[6..]="BBBB"
+        // → line2="BBBB" (no leading space)
+        let para = format!("{}⠀⠀{}", braille_str(4), braille_str(4));
+        let doc = fmt(6, 25).format(&[para]);
+        let page = &doc.pages()[0];
+        assert_eq!(page.len(), 2);
+        assert!(!page[1].starts_with(BRAILLE_SPACE), "2行目の先頭がスペースになっている");
+        assert_eq!(page[1].chars().count(), 4);
+    }
+
+    #[test]
+    fn word_wrap_hard_break_no_leading_space() {
+        // 強制分割後、次の先頭がスペースの場合も削除される
+        // "AAAAAAAAAA⠀⠀BBBB" (10+space+space+4=16), width=10
+        // → no space in 0..10 → hard break: line1="AAAAAAAAAA", start=10
+        //   chars[10]='⠀' → skip → chars[11]='⠀' → skip → start=12, "BBBB"
+        // → line2="BBBB"
+        let para = format!("{}⠀⠀{}", braille_str(10), braille_str(4));
+        let doc = fmt(10, 25).format(&[para]);
+        let page = &doc.pages()[0];
+        assert_eq!(page.len(), 2);
+        assert!(!page[1].starts_with(BRAILLE_SPACE), "強制分割後の2行目の先頭がスペースになっている");
+        assert_eq!(page[1].chars().count(), 4);
     }
 
     #[test]

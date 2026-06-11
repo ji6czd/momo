@@ -57,6 +57,7 @@ def run_predict(
                 print("─" * 48, file=sys.stderr)
             elif create_tsv:
                 print(f"{src}\t{kana}")
+                print(to_jp_braille(result.kana_text))
             else:
                 if show_source:
                     print(src)

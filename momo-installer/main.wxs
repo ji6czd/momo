@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='windows-1252'?>
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
   $(var.Version)   - バージョン番号 (例: 0.1.0)。candle に -dVersion=x.y.z で渡す。
   $(var.StageDir)  - ステージングディレクトリ (stage/)。candle に -dStageDir=<path> で渡す。
@@ -88,38 +88,39 @@
                                   KeyPath='yes'/>
                         </Component>
                         <!-- momo-gui.exe (.NET GUI) -->
-                        <Component Id='MomoGui' Guid='*'>
+                        <Component Id='MomoGui' Guid='97EA0808-62CA-4FF3-8C59-31CDC0D16CD8'>
                             <File Id='MomoGuiExe'
                                   Name='momo-gui.exe'
                                   DiskId='1'
                                   Source='$(var.StageDir)\bin\momo-gui.exe'
                                   KeyPath='yes'/>
+                            <File Id='MomoGuiDll'
+                                  Name='momo-gui.dll'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\momo-gui.dll'/>
+                            <File Id='MomoGuiDepsJson'
+                                  Name='momo-gui.deps.json'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\momo-gui.deps.json'/>
+                            <File Id='MomoGuiRuntimeConfig'
+                                  Name='momo-gui.runtimeconfig.json'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\momo-gui.runtimeconfig.json'/>
                         </Component>
                     </Directory>
 
                     <Directory Id='Data' Name='data'>
                         <!-- 学習済みモデルと変換テーブル -->
-                        <Component Id='DataFiles' Guid='*'>
-                            <File Id='model4'
-                                  Name='basic_data_4.mbm'
-                                  DiskId='1'
-                                  Source='$(var.StageDir)\data\basic_data_4.mbm'
-                                  KeyPath='yes'/>
-                            <File Id='model5'
-                                  Name='basic_data_5.mbm'
-                                  DiskId='1'
+                        <Component Id='DataFiles' Guid='F6FAD1D0-6CFD-49B9-AAFE-84705CF0BFC4'>
+                            <File Id='model4' Name='basic_data_4.mbm' DiskId='1'
+                                  Source='$(var.StageDir)\data\basic_data_4.mbm' KeyPath='yes'/>
+                            <File Id='model5' Name='basic_data_5.mbm' DiskId='1'
                                   Source='$(var.StageDir)\data\basic_data_5.mbm'/>
-                            <File Id='model7'
-                                  Name='basic_data_7.mbm'
-                                  DiskId='1'
+                            <File Id='model7' Name='basic_data_7.mbm' DiskId='1'
                                   Source='$(var.StageDir)\data\basic_data_7.mbm'/>
-                            <File Id='braille_table'
-                                  Name='japanese_braille.toml'
-                                  DiskId='1'
+                            <File Id='braille_table' Name='japanese_braille.toml' DiskId='1'
                                   Source='$(var.StageDir)\data\japanese_braille.toml'/>
-                            <File Id='single_dict'
-                                  Name='single_character_dic.tsv'
-                                  DiskId='1'
+                            <File Id='single_dict' Name='single_character_dic.tsv' DiskId='1'
                                   Source='$(var.StageDir)\data\single_character_dic.tsv'/>
                         </Component>
                         <!-- MOMO_DATASET_DIR 環境変数 -->
@@ -168,6 +169,18 @@
         </Feature>
 
         <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+
+        <!-- .NET Windows Desktop Runtime (x64) の検出 -->
+        <!-- Depth='0' で Microsoft.WindowsDesktop.App ディレクトリの存在を確認。 -->
+        <!-- バージョン不一致は .NET ランタイム自身が適切なエラーを表示するため、ここでは未インストールのみを弾く。 -->
+        <Property Id='DOTNET_DESKTOP_INSTALLED'>
+            <DirectorySearch Id='DotNetDesktopSearch'
+                             Path='[ProgramFiles64Folder]dotnet\shared\Microsoft.WindowsDesktop.App'
+                             Depth='0'/>
+        </Property>
+        <Condition Message='.NET 10 Windows Desktop Runtime (x64) がインストールされていません。&#xA;https://dotnet.microsoft.com/ja-jp/download/dotnet/10.0 からダウンロードしてインストールしてください。'>
+            <![CDATA[Installed OR DOTNET_DESKTOP_INSTALLED]]>
+        </Condition>
 
         <UI>
             <UIRef Id='WixUI_FeatureTree'/>

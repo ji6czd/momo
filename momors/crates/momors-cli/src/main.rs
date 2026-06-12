@@ -188,15 +188,15 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
                 .iter()
                 .map(|p| to_kana(p, predictor))
                 .collect::<Result<_, _>>()?;
-            kana_lines.join("\n") + "\n"
+            (kana_lines.join("\n") + "\n").into_bytes()
         }
     };
 
     match &cli.output {
-        Some(path) => std::fs::write(path, out).map_err(|e| format!("ファイル書き込みエラー: {e}")),
+        Some(path) => std::fs::write(path, &out).map_err(|e| format!("ファイル書き込みエラー: {e}")),
         None => {
-            print!("{out}");
-            Ok(())
+            use std::io::Write;
+            std::io::stdout().write_all(&out).map_err(|e| format!("標準出力エラー: {e}"))
         }
     }
 }

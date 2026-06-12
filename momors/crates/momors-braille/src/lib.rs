@@ -28,5 +28,5 @@ mod nabcc;
 pub use error::{Error, Result};
 pub use converter::{BrailleConverter, BrailleResult};
 pub use table::BrailleTable;
-pub use formatter::{BrailleFormatter, FormatterConfig, FormattedDocument};
+pub use formatter::{BrailleFormatter, FormatterConfig, FormattedDocument, PhysicalLine};
 pub use writer::OutputFormat;

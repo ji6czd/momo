@@ -17,5 +17,9 @@
 		"node",
 		"mocha"
 		]
-	}
+	},
+	"exclude": [
+		"node_modules",
+		"wasm"
+	]
 }

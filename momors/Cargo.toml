@@ -6,8 +6,10 @@ members = [
     "crates/momors-cli",
     "crates/momors-ffi",
     "crates/momors-pyo3",
+    "crates/momors-wasm",
 ]
 # momors-pyo3 は maturin 経由でビルドするため通常の cargo build から除外する
+# momors-wasm は wasm-pack 経由でビルドするため通常の cargo build から除外する
 default-members = [
     "crates/momors-core",
     "crates/momors-braille",

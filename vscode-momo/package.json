@@ -1,8 +1,8 @@
 {
   "name": "momo-translator",
   "displayName": "Japanese Text-to-Braille translator for Visual Studio Code",
-  "description": "日本語のテキストを点字に翻訳する Visual Studio Code 拡張機能です。momo-server をバックエンドに使用しています。",
-  "version": "0.0.1",
+  "description": "日本語のテキストを点字に翻訳する Visual Studio Code 拡張機能です。WebAssembly による組み込みエンジンを使用しています。",
+  "version": "0.7.0",
   "engines": {
     "vscode": "^1.120.0"
   },
@@ -30,18 +30,7 @@
         "command": "momo-translator.to-segmented",
         "title": "Translate to segmented kana"
       }
-    ],
-    "configuration": {
-      "title": "Momo Translator Configuration",
-      "properties": {
-        "momoTranslator.serverUrl": {
-          "title": "Momo Server URL",
-          "type": "string",
-          "default": "http://127.0.0.1:8765",
-          "description": "momo-server の URL。デフォルトは http://127.0.0.1:8765。`momo-server` コマンドで起動してください。"
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "pnpm run compile",

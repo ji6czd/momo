@@ -80,6 +80,12 @@ pub(crate) fn load(path: impl AsRef<Path>) -> Result<MomoModel> {
     load_from_reader(&mut reader, path)
 }
 
+/// バイト列から [`MomoModel`] を構築する (WASM / インメモリ用)。
+pub(crate) fn load_from_bytes(bytes: &[u8]) -> Result<MomoModel> {
+    let mut cursor = std::io::Cursor::new(bytes);
+    load_from_reader(&mut cursor, Path::new("<memory>"))
+}
+
 // ============================================================
 // メインロジック
 // ============================================================

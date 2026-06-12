@@ -2,8 +2,8 @@ version: "3"
 
 tasks:
   default:
-    desc: Build all components (rust + python in parallel, then vscode + hugo)
-    deps: [rust, python]
+    desc: Build all components (rust + python + wasm in parallel, then vscode + hugo)
+    deps: [rust, python, wasm]
     cmds:
       - task: vscode
       # まだ Hugo サイトは公開していないため、ビルドはスキップする
@@ -33,8 +33,27 @@ tasks:
     cmds:
       - task clean
 
+  wasm:
+    desc: Build WebAssembly bindings and copy model for VS Code extension
+    vars:
+      WASM_OUT: "{{.ROOT_DIR}}/vscode-momo/wasm"
+      MODEL_SRC: "{{.ROOT_DIR}}/dataset/basic_data_7.mbm"
+      MODEL_DST: "{{.ROOT_DIR}}/vscode-momo/resources/model.mbm"
+    sources:
+      - momors/crates/momors-wasm/src/**/*.rs
+      - momors/crates/momors-core/src/**/*.rs
+      - momors/crates/momors-braille/src/**/*.rs
+    generates:
+      - vscode-momo/wasm/momors_wasm_bg.wasm
+      - vscode-momo/resources/model.mbm
+    cmds:
+      - mkdir -p "{{.WASM_OUT}}"
+      - mkdir -p "{{.ROOT_DIR}}/vscode-momo/resources"
+      - wasm-pack build momors/crates/momors-wasm --target nodejs --out-dir "{{.WASM_OUT}}"
+      - cp "{{.MODEL_SRC}}" "{{.MODEL_DST}}"
+
   vscode:
-    desc: Compile VSCode extension
+    desc: Compile VSCode extension (requires wasm task to have run first)
     dir: vscode-momo
     cmds:
       - pnpm vsce package -o out/

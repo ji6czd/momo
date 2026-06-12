@@ -1,113 +1,38 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
-import * as cp from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
+import { MomoWasm } from "../wasm/momors_wasm.js";
 
-let momoServerProcess: cp.ChildProcess | null = null;
+let momo: MomoWasm | undefined;
 
-// サーバーのURLを設定から取得する
-function getServerUrl(): string {
-  const config = vscode.workspace.getConfiguration("momoTranslator");
-  return (config.get<string>("serverUrl") || "http://127.0.0.1:8765").replace(
-    /\/$/,
-    "",
-  );
-}
-
-// momo-server が起動していなければ自動起動し、応答を待つ
-async function ensureServerRunning(): Promise<void> {
-  const baseUrl = getServerUrl();
-  try {
-    await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
-    return;
-  } catch {
-    // 応答なし → 起動を試みる
-  }
-  if (!momoServerProcess || momoServerProcess.exitCode !== null) {
-    momoServerProcess = cp.spawn("momo-server", [], { stdio: "ignore" });
-  }
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 500));
-    try {
-      await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
-      return;
-    } catch {
-      // まだ未応答
-    }
-  }
-  throw new Error("momo-server の起動がタイムアウトしました (10秒)。");
-}
-
-// momo-server の /predict/kana エンドポイントを呼び出し、仮名文字列を返す
-async function translateToKana(text: string): Promise<string> {
-  await ensureServerRunning();
-  const url = `${getServerUrl()}/predict/kana`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-  } catch (err) {
-    throw new Error(
-      `momo-server に接続できません (${url})。サーバーが起動しているか確認してください。\n${err}`,
+function getMomo(context: vscode.ExtensionContext): MomoWasm {
+  if (!momo) {
+    const modelPath = path.join(
+      context.extensionPath,
+      "resources",
+      "model.mbm",
     );
+    const modelBytes = fs.readFileSync(modelPath);
+    momo = new MomoWasm(new Uint8Array(modelBytes));
   }
-  if (!response.ok) {
-    const detail = await response.text().catch(() => `HTTP ${response.status}`);
-    throw new Error(`momo-server エラー (${response.status}): ${detail}`);
-  }
-  const data = (await response.json()) as { kana_text: string };
-  return data.kana_text;
+  return momo;
 }
 
-// momo-server の /predict/predict エンドポイントを呼び出し、点字文字列を返す
-async function translateToBraille(text: string): Promise<string> {
-  await ensureServerRunning();
-  const url = `${getServerUrl()}/predict/predict`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-  } catch (err) {
-    throw new Error(
-      `momo-server に接続できません (${url})。サーバーが起動しているか確認してください。\n${err}`,
-    );
-  }
-  if (!response.ok) {
-    const detail = await response.text().catch(() => `HTTP ${response.status}`);
-    throw new Error(`momo-server エラー (${response.status}): ${detail}`);
-  }
-  const data = (await response.json()) as { braille: string };
-  return data.braille;
+// 現在行の直後に1行挿入するヘルパー
+function insertLineAfterCurrent(
+  editor: vscode.TextEditor,
+  line: number,
+  text: string,
+): Thenable<boolean> {
+  return editor.edit((editBuilder: vscode.TextEditorEdit) => {
+    const insertPosition = new vscode.Position(line + 1, 0);
+    editBuilder.insert(insertPosition, text + "\n");
+  });
 }
 
-// momo-server の /predict/predict エンドポイントを呼び出し、分割された仮名文字列を返す
-async function translateToSegmentedKana(text: string): Promise<string> {
-  await ensureServerRunning();
-  const url = `${getServerUrl()}/predict/predict`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-  } catch (err) {
-    throw new Error(
-      `momo-server に接続できません (${url})。サーバーが起動しているか確認してください。\n${err}`,
-    );
-  }
-  if (!response.ok) {
-    const detail = await response.text().catch(() => `HTTP ${response.status}`);
-    throw new Error(`momo-server エラー (${response.status}): ${detail}`);
-  }
-  const data = (await response.json()) as {
+// predict_segmented の JSON から分かち書きかな文字列を組み立てる
+function buildSegmentedString(text: string, jsonStr: string): string {
+  const data = JSON.parse(jsonStr) as {
     braille: string;
     kana: string;
     kana_to_src_index: number[];
@@ -139,20 +64,6 @@ async function translateToSegmentedKana(text: string): Promise<string> {
   return data.braille + "\n" + segments.join("/");
 }
 
-// 現在行の直後に1行挿入するヘルパー
-function insertLineAfterCurrent(
-  editor: vscode.TextEditor,
-  line: number,
-  text: string,
-): Thenable<boolean> {
-  return editor.edit((editBuilder: vscode.TextEditorEdit) => {
-    const insertPosition = new vscode.Position(line + 1, 0);
-    editBuilder.insert(insertPosition, text + "\n");
-  });
-}
-
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
   const disposableKana = vscode.commands.registerCommand(
     "momo-translator.to-kana",
@@ -162,16 +73,17 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage("No active editor found.");
         return;
       }
-      const currentLine = editor.selection.active.line;
-      const lineText = editor.document.lineAt(currentLine).text;
-
-      translateToKana(lineText)
-        .then((translation) =>
-          insertLineAfterCurrent(editor, currentLine, translation),
-        )
-        .catch((error: Error) => {
-          vscode.window.showErrorMessage(String(error.message ?? error));
-        });
+      try {
+        const currentLine = editor.selection.active.line;
+        const lineText = editor.document.lineAt(currentLine).text;
+        const kana = getMomo(context).predictKana(lineText);
+        insertLineAfterCurrent(editor, currentLine, kana).then(
+          undefined,
+          (err: Error) => vscode.window.showErrorMessage(String(err)),
+        );
+      } catch (err) {
+        vscode.window.showErrorMessage(String(err));
+      }
     },
   );
 
@@ -183,16 +95,17 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage("No active editor found.");
         return;
       }
-      const currentLine = editor.selection.active.line;
-      const lineText = editor.document.lineAt(currentLine).text;
-
-      translateToBraille(lineText)
-        .then((translation) =>
-          insertLineAfterCurrent(editor, currentLine, translation),
-        )
-        .catch((error: Error) => {
-          vscode.window.showErrorMessage(String(error.message ?? error));
-        });
+      try {
+        const currentLine = editor.selection.active.line;
+        const lineText = editor.document.lineAt(currentLine).text;
+        const braille = getMomo(context).predictBraille(lineText);
+        insertLineAfterCurrent(editor, currentLine, braille).then(
+          undefined,
+          (err: Error) => vscode.window.showErrorMessage(String(err)),
+        );
+      } catch (err) {
+        vscode.window.showErrorMessage(String(err));
+      }
     },
   );
 
@@ -204,16 +117,18 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage("No active editor found.");
         return;
       }
-      const currentLine = editor.selection.active.line;
-      const lineText = editor.document.lineAt(currentLine).text;
-
-      translateToSegmentedKana(lineText)
-        .then((translation) =>
-          insertLineAfterCurrent(editor, currentLine, translation),
-        )
-        .catch((error: Error) => {
-          vscode.window.showErrorMessage(String(error.message ?? error));
-        });
+      try {
+        const currentLine = editor.selection.active.line;
+        const lineText = editor.document.lineAt(currentLine).text;
+        const jsonStr = getMomo(context).predictSegmented(lineText);
+        const result = buildSegmentedString(lineText, jsonStr);
+        insertLineAfterCurrent(editor, currentLine, result).then(
+          undefined,
+          (err: Error) => vscode.window.showErrorMessage(String(err)),
+        );
+      } catch (err) {
+        vscode.window.showErrorMessage(String(err));
+      }
     },
   );
 
@@ -222,7 +137,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(disposableSegmented);
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {
-  momoServerProcess?.kill();
+  momo?.free();
+  momo = undefined;
 }

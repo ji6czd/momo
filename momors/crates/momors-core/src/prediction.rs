@@ -313,6 +313,19 @@ impl Predictor {
         Ok(Self { config, model, kanji_dict })
     }
 
+    /// バイト列からモデルを読み込んで予測器を構築する (WASM / インメモリ用)。
+    ///
+    /// デフォルト設定 (numeric_confidence_threshold=0.5、漢字辞書なし) を使用する。
+    pub fn from_model_bytes(bytes: &[u8]) -> Result<Self> {
+        let model = crate::loader::load_from_bytes(bytes)?;
+        let config = PredictorConfig {
+            model_path: PathBuf::from("<memory>"),
+            numeric_confidence_threshold: 0.5,
+            kanji_dict_path: None,
+        };
+        Ok(Self { config, model, kanji_dict: Vec::new() })
+    }
+
     /// 設定を参照する。
     pub fn config(&self) -> &PredictorConfig {
         &self.config

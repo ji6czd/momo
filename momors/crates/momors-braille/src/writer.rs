@@ -1,4 +1,5 @@
 use crate::formatter::FormattedDocument;
+use crate::nabcc::braille_to_nabcc_capital;
 
 /// フォーマット済み点字ドキュメントの出力形式。
 pub enum OutputFormat {
@@ -48,7 +49,9 @@ fn write_base_file(doc: &FormattedDocument) -> String {
     for page in doc.pages() {
         for i in 0..lines_per_page {
             if let Some(line) = page.get(i) {
-                out.push_str(line);
+                for c in line.chars() {
+                    out.push(braille_to_nabcc_capital(c) as char);
+                }
             }
             out.push('\n');
         }

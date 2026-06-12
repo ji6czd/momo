@@ -23,6 +23,7 @@ pub mod table;
 pub mod converter;
 pub mod formatter;
 pub mod writer;
+mod nabcc;
 
 pub use error::{Error, Result};
 pub use converter::{BrailleConverter, BrailleResult};

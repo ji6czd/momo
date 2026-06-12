@@ -16,7 +16,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.6.3"
 edition = "2024"
 authors = ["KIRIAKE Masanori <seiken@rd01.net>"]
 license = "BSD-3-Clause"
@@ -25,5 +25,5 @@ license = "BSD-3-Clause"
 thiserror = "1.0"
 clap = { version = "4", features = ["derive"] }
 byteorder = "1.5"
-momors-core = { path = "crates/momors-core", version = "0.1.0" }
-momors-braille = { path = "crates/momors-braille", version = "0.1.0" }
+momors-core = { path = "crates/momors-core"}
+momors-braille = { path = "crates/momors-braille"}

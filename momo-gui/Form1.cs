@@ -18,12 +18,32 @@ public partial class MainForm : Form
             txtInput.Text = dlg.FileName;
     }
 
+    private string SelectedOutputExtension => cmbOutputFormat.SelectedIndex switch
+    {
+        0 => ".txt",
+        2 => ".brf",
+        _ => ".bse"
+    };
+
+    private void cmbOutputFormat_SelectedIndexChanged(object sender, EventArgs e)
+    {
+        if (!string.IsNullOrEmpty(txtOutput.Text))
+            txtOutput.Text = Path.ChangeExtension(txtOutput.Text, SelectedOutputExtension);
+    }
+
     private void btnBrowseOutput_Click(object sender, EventArgs e)
     {
+        var filter = cmbOutputFormat.SelectedIndex switch
+        {
+            0 => "テキストファイル (*.txt)|*.txt",
+            2 => "フォーマット済み点字ファイル (*.brf)|*.brf",
+            _ => "BASE ファイル (*.bse)|*.bse"
+        };
         using var dlg = new SaveFileDialog
         {
-            Filter = "点字ファイル (*.brl)|*.brl|テキストファイル (*.txt)|*.txt|すべてのファイル (*.*)|*.*",
+            Filter = filter + "|すべてのファイル (*.*)|*.*",
             Title = "出力ファイルを選択",
+            DefaultExt = SelectedOutputExtension.TrimStart('.'),
             FileName = Path.GetFileNameWithoutExtension(txtInput.Text)
         };
         if (dlg.ShowDialog() == DialogResult.OK)
@@ -62,10 +82,19 @@ public partial class MainForm : Form
             var psi = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = momoExe,
+                WorkingDirectory = Path.GetDirectoryName(momoExe)!,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardError = true
             };
+            // インストール直後など現セッションに未反映の場合に備え、
+            // レジストリから直接読んで子プロセスへ注入する
+            var datasetDir =
+                Environment.GetEnvironmentVariable("MOMO_DATASET_DIR") ??
+                Environment.GetEnvironmentVariable("MOMO_DATASET_DIR", EnvironmentVariableTarget.Machine) ??
+                Environment.GetEnvironmentVariable("MOMO_DATASET_DIR", EnvironmentVariableTarget.User);
+            if (datasetDir != null)
+                psi.Environment["MOMO_DATASET_DIR"] = datasetDir;
             psi.ArgumentList.Add("--braille");
             psi.ArgumentList.Add("--model");
             psi.ArgumentList.Add(model);

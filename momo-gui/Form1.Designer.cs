@@ -19,6 +19,8 @@ partial class MainForm
         lblOutput = new Label();
         txtOutput = new TextBox();
         btnBrowseOutput = new Button();
+        lblOutputFormat = new Label();
+        cmbOutputFormat = new ComboBox();
         grpModel = new GroupBox();
         rdoSmall = new RadioButton();
         rdoMedium = new RadioButton();
@@ -69,8 +71,26 @@ partial class MainForm
         btnBrowseOutput.Text = "参照...";
         btnBrowseOutput.Click += btnBrowseOutput_Click;
 
+        // lblOutputFormat
+        lblOutputFormat.AutoSize = true;
+        lblOutputFormat.Location = new Point(12, 79);
+        lblOutputFormat.Text = "出力形式:";
+
+        // cmbOutputFormat
+        cmbOutputFormat.DropDownStyle = ComboBoxStyle.DropDownList;
+        cmbOutputFormat.Location = new Point(104, 76);
+        cmbOutputFormat.Size = new Size(316, 23);
+        cmbOutputFormat.Items.AddRange(new object[]
+        {
+            "仮名テキスト (.txt)",
+            "BASE ファイル (.bse)",
+            "フォーマット済み点字 (.brf)"
+        });
+        cmbOutputFormat.SelectedIndex = 1;
+        cmbOutputFormat.SelectedIndexChanged += cmbOutputFormat_SelectedIndexChanged;
+
         // grpModel
-        grpModel.Location = new Point(12, 78);
+        grpModel.Location = new Point(12, 110);
         grpModel.Size = new Size(200, 54);
         grpModel.Text = "モデル";
         grpModel.Controls.Add(rdoSmall);
@@ -94,7 +114,7 @@ partial class MainForm
         rdoLarge.Text = "Large";
 
         // grpFormat
-        grpFormat.Location = new Point(220, 78);
+        grpFormat.Location = new Point(220, 110);
         grpFormat.Size = new Size(294, 88);
         grpFormat.Text = "フォーマット";
         grpFormat.Controls.Add(lblLineWidth);
@@ -138,14 +158,14 @@ partial class MainForm
         txtTitle.Size = new Size(222, 23);
 
         // btnOk
-        btnOk.Location = new Point(346, 178);
+        btnOk.Location = new Point(346, 210);
         btnOk.Size = new Size(80, 28);
         btnOk.Text = "OK";
         btnOk.Click += btnOk_Click;
 
         // btnCancel
         btnCancel.DialogResult = DialogResult.Cancel;
-        btnCancel.Location = new Point(434, 178);
+        btnCancel.Location = new Point(434, 210);
         btnCancel.Size = new Size(80, 28);
         btnCancel.Text = "キャンセル";
         btnCancel.Click += (_, _) => Close();
@@ -160,13 +180,15 @@ partial class MainForm
         // Form
         AcceptButton = btnOk;
         CancelButton = btnCancel;
-        ClientSize = new Size(526, 218);
+        ClientSize = new Size(526, 250);
         Controls.Add(lblInput);
         Controls.Add(txtInput);
         Controls.Add(btnBrowseInput);
         Controls.Add(lblOutput);
         Controls.Add(txtOutput);
         Controls.Add(btnBrowseOutput);
+        Controls.Add(lblOutputFormat);
+        Controls.Add(cmbOutputFormat);
         Controls.Add(grpModel);
         Controls.Add(grpFormat);
         Controls.Add(btnOk);
@@ -187,6 +209,8 @@ partial class MainForm
     private Label lblOutput;
     private TextBox txtOutput;
     private Button btnBrowseOutput;
+    private Label lblOutputFormat;
+    private ComboBox cmbOutputFormat;
     private GroupBox grpModel;
     private RadioButton rdoSmall;
     private RadioButton rdoMedium;

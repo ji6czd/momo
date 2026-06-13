@@ -155,6 +155,7 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
     let braille_format = match ext {
         Some("brf") => Some(OutputFormat::BrailleText),
         Some("bse") => Some(OutputFormat::Base),
+        Some("bes") => Some(OutputFormat::Bes),
         _ => None,
     };
 

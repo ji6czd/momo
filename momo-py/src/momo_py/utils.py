@@ -54,6 +54,10 @@ _STOP_SYMBOLS = frozenset("。！？.!?")
 _PAUSE_SYMBOLS = frozenset("、・,")
 
 
+# 漢字繰り返し符号（CJK Symbols and Punctuation ブロック内のため範囲判定では拾えない）
+_KANJI_ITERATION_MARKS = frozenset("々〻")
+
+
 def get_basic_char_category(c: str) -> CharType:
     """
     1文字を受け取り、基本カテゴリ（かな/漢字/英字/その他）を返す。
@@ -67,6 +71,8 @@ def get_basic_char_category(c: str) -> CharType:
     if c in JAPANESE_NUMERIC_CHARS:
         return CharType.JAPANESE_NUMERIC
     if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF:
+        return CharType.KANJI
+    if c in _KANJI_ITERATION_MARKS:
         return CharType.KANJI
     if (
         0x0041 <= cp <= 0x005A

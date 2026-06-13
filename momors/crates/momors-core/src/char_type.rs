@@ -214,6 +214,12 @@ pub fn get_char_type(c: char) -> CharType {
         return CharType::Kanji;
     }
 
+    // --- 漢字繰り返し符号 (U+3005 々, U+303B 〻) ---
+    // CJK Symbols and Punctuation ブロック内のため範囲判定では拾えない。
+    if matches!(c, '々' | '〻') {
+        return CharType::Kanji;
+    }
+
     // --- ラテン文字（ASCII・全角）---
     if c.is_ascii_alphabetic() {
         return CharType::Alpha;
@@ -398,6 +404,12 @@ mod tests {
         // その他の記号
         assert_eq!(get_char_type('+'), CharType::Symbol);
         assert_eq!(get_char_type('='), CharType::Symbol);
+    }
+
+    #[test]
+    fn kanji_iteration_marks() {
+        assert_eq!(get_char_type('々'), CharType::Kanji); // U+3005
+        assert_eq!(get_char_type('〻'), CharType::Kanji); // U+303B
     }
 
     #[test]

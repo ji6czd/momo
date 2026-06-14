@@ -13,12 +13,12 @@
 use crate::Error;
 use std::path::{Path, PathBuf};
 
+use crate::Result;
 use crate::char_type::CharType;
 use crate::feature::FeatureKey;
-use crate::featurize::{compute_source_features, to_source_seq, SourceEntry};
+use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
 use crate::model::MomoModel;
-use crate::numeric::{convert_japanese_numeric, NumericFallback};
-use crate::Result;
+use crate::numeric::{NumericFallback, convert_japanese_numeric};
 
 // ============================================================
 // 定数
@@ -54,8 +54,8 @@ const CHAR_NOMA: u32 = 0x3005;
 #[derive(Debug, Clone)]
 pub struct PredictorConfig {
     pub(crate) model_path: PathBuf,
-    pub(crate) numeric_confidence_threshold: f32,
     pub(crate) kanji_dict_path: Option<PathBuf>,
+    pub(crate) numeric_confidence_threshold: f32,
 }
 
 impl PredictorConfig {
@@ -71,15 +71,6 @@ impl PredictorConfig {
     /// JAPANESE_NUMERIC ルールベース変換を発動させる自信度の上限を設定する。
     pub fn with_numeric_confidence_threshold(mut self, value: f32) -> Self {
         self.numeric_confidence_threshold = value;
-        self
-    }
-
-    /// 予測結果を原文の文字ごとに分割して出力するかどうかを設定する。
-    pub fn with_segment_output(self, value: bool) -> Self {
-        if value {
-            // segment 出力を有効にするための追加設定があればここで行う。
-            // 現状は特に追加の設定はないが、将来的に必要になった場合はこのメソッド内で対応する。
-        }
         self
     }
 

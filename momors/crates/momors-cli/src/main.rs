@@ -103,7 +103,7 @@ fn main() -> ExitCode {
         data_dir().join(cli.model.file_path())
     };
 
-    let mut config = PredictorConfig::new(&model_path).with_segment_output(cli.segment);
+    let mut config = PredictorConfig::new(&model_path);
     let dict_path = if let Some(ref path) = cli.single_dict {
         let p = PathBuf::from(path);
         if !p.exists() {
@@ -296,6 +296,8 @@ fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
                             None
                         }
                     };
+                } else if cli.segment {
+                    writeln!(out, "{}", result.format_segmented()).ok();
                 } else {
                     writeln!(out, "{}", result.kana_text()).ok();
                 }

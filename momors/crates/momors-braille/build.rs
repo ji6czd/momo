@@ -2,10 +2,8 @@ use std::path::Path;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let dataset_src = Path::new(&manifest_dir)
-        .join("../../../dataset/japanese_braille.toml");
-    let local_dst = Path::new(&manifest_dir)
-        .join("data/japanese_braille.toml");
+    let dataset_src = Path::new(&manifest_dir).join("../../../dataset/japanese_braille.toml");
+    let local_dst = Path::new(&manifest_dir).join("data/japanese_braille.toml");
 
     if dataset_src.exists() {
         std::fs::create_dir_all(local_dst.parent().unwrap()).unwrap();

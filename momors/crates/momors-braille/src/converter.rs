@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use crate::{BrailleTable, Result};
+use std::collections::HashSet;
 
 const BRAILLE_SPACE: char = '⠀'; // U+2800
 
@@ -72,12 +72,15 @@ impl BrailleConverter {
     /// ASCII 文字・数字・句読点が混在していても処理できる。
     pub fn convert(&self, kana_text: &str) -> Result<BrailleResult> {
         // momors-core がバイパスした全角数字・英字を ASCII に正規化する
-        let normalized: String = kana_text.chars().map(|c| match c as u32 {
-            0xFF10..=0xFF19 => char::from_u32(c as u32 - 0xFF10 + 0x30).unwrap_or(c), // ０-９→0-9
-            0xFF21..=0xFF3A => char::from_u32(c as u32 - 0xFF21 + 0x41).unwrap_or(c), // Ａ-Ｚ→A-Z
-            0xFF41..=0xFF5A => char::from_u32(c as u32 - 0xFF41 + 0x61).unwrap_or(c), // ａ-ｚ→a-z
-            _ => c,
-        }).collect();
+        let normalized: String = kana_text
+            .chars()
+            .map(|c| match c as u32 {
+                0xFF10..=0xFF19 => char::from_u32(c as u32 - 0xFF10 + 0x30).unwrap_or(c), // ０-９→0-9
+                0xFF21..=0xFF3A => char::from_u32(c as u32 - 0xFF21 + 0x41).unwrap_or(c), // Ａ-Ｚ→A-Z
+                0xFF41..=0xFF5A => char::from_u32(c as u32 - 0xFF41 + 0x61).unwrap_or(c), // ａ-ｚ→a-z
+                _ => c,
+            })
+            .collect();
         let chars: Vec<char> = normalized.chars().collect();
         let n = chars.len();
 
@@ -85,7 +88,7 @@ impl BrailleConverter {
         let mut kana_to_braille: Vec<usize> = Vec::with_capacity(n);
 
         // フラグ状態
-        let mut in_digit = false;       // ⠼ が有効な数字モード
+        let mut in_digit = false; // ⠼ が有効な数字モード
         let mut in_foreign_word = false; // ⠰ が有効な外来語モード
         let mut in_capital_word = false; // 大文字モード（先頭 ⠠ 済み）
         let mut in_double_capital = false; // 全大文字モード（⠠⠠ 済み）
@@ -131,7 +134,11 @@ impl BrailleConverter {
 
                     // ラテン文字テーブルを引く（小文字キーで統一）
                     let key = c.to_ascii_lowercase().to_string();
-                    let cell = self.table.latin.get(&key).map_or(BRAILLE_SPACE.to_string(), |s| s.clone());
+                    let cell = self
+                        .table
+                        .latin
+                        .get(&key)
+                        .map_or(BRAILLE_SPACE.to_string(), |s| s.clone());
                     braille.push_str(&cell);
                 } else if c.is_ascii_digit() {
                     // 外来語モード終了（exit_suffix なし: ⠼ がモード変更を示す）
@@ -146,7 +153,11 @@ impl BrailleConverter {
                     }
 
                     let key = c.to_string();
-                    let cell = self.table.digit.get(&key).map_or(BRAILLE_SPACE.to_string(), |s| s.clone());
+                    let cell = self
+                        .table
+                        .digit
+                        .get(&key)
+                        .map_or(BRAILLE_SPACE.to_string(), |s| s.clone());
                     braille.push_str(&cell);
                 } else if c == '.' || c == ',' {
                     // 数字の小数点・桁区切りの可能性: 数字モードをリセットしない。
@@ -155,7 +166,10 @@ impl BrailleConverter {
                     let entry = if in_foreign_word {
                         self.table.punct_latin.get(&key)
                     } else {
-                        self.table.punct_jp.get(&key).or_else(|| self.table.punct_latin.get(&key))
+                        self.table
+                            .punct_jp
+                            .get(&key)
+                            .or_else(|| self.table.punct_latin.get(&key))
                     };
                     self.emit_punct(&mut braille, entry);
                 } else {

@@ -18,15 +18,15 @@
 //! # }
 //! ```
 
-pub mod error;
-pub mod table;
 pub mod converter;
+pub mod error;
 pub mod formatter;
-pub mod writer;
 mod nabcc;
+pub mod table;
+pub mod writer;
 
-pub use error::{Error, Result};
 pub use converter::{BrailleConverter, BrailleResult};
+pub use error::{Error, Result};
+pub use formatter::{BrailleFormatter, FormattedDocument, FormatterConfig, PhysicalLine};
 pub use table::BrailleTable;
-pub use formatter::{BrailleFormatter, FormatterConfig, FormattedDocument, PhysicalLine};
 pub use writer::OutputFormat;

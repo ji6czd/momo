@@ -18,7 +18,7 @@
 //! 自然に取れること、後段で原文スライスを取るときに変換が不要なこと、
 //! Rust の文字列表現と整合的なことが理由。
 
-use crate::char_type::{get_char_type, CharType};
+use crate::char_type::{CharType, get_char_type};
 use crate::feature::{FeatureKey, FeatureType};
 
 // ============================================================
@@ -126,8 +126,7 @@ pub(crate) fn to_source_seq(text: &str) -> Vec<SourceEntry> {
 /// C++ 版 `is_base_kana()` と対応。
 #[inline]
 fn is_base_kana(c: char) -> bool {
-    matches!(c, '\u{3041}'..='\u{3093}' | '\u{30A1}'..='\u{30F6}')
-        && !is_small_kana(c as u32)
+    matches!(c, '\u{3041}'..='\u{3093}' | '\u{30A1}'..='\u{30F6}') && !is_small_kana(c as u32)
 }
 
 /// 位取り文字 (十・百・千・万・億・兆) か。
@@ -434,11 +433,7 @@ fn numeric_run_length(seq: &[SourceEntry], i: usize) -> u32 {
 /// 学習時の `_RUN_LEN_MAP = {"1": 1, "2": 2, "3": 3, "4": 4, "5+": 5}` に対応。
 #[inline]
 fn clamp_run(run: u32) -> u8 {
-    if run <= 4 {
-        run as u8
-    } else {
-        5
-    }
+    if run <= 4 { run as u8 } else { 5 }
 }
 
 /// 小書き仮名（拗音複合ユニット検出に使用）。
@@ -448,13 +443,11 @@ fn is_small_kana(cp: u32) -> bool {
     matches!(
         cp,
         0x3041 | 0x3043 | 0x3045 | 0x3047 | 0x3049  // ぁぃぅぇぉ
-            | 0x3063                                  // っ
             | 0x3083 | 0x3085 | 0x3087               // ゃゅょ
             | 0x308E                                  // ゎ
             | 0x30A1 | 0x30A3 | 0x30A5 | 0x30A7 | 0x30A9  // ァィゥェォ
-            | 0x30C3                                  // ッ
             | 0x30E3 | 0x30E5 | 0x30E7               // ャュョ
-            | 0x30EE                                  // ヮ
+            | 0x30EE // ヮ
     )
 }
 
@@ -669,13 +662,18 @@ mod tests {
         // 「あ字」の「字」には TypeTransition: Hiragana -> Kanji
         let seq = to_source_seq("あ字");
         let feats = compute_source_features(&seq);
-        let key =
-            FeatureKey::type_2(FeatureType::TypeTransition, CharType::Hiragana, CharType::Kanji);
+        let key = FeatureKey::type_2(
+            FeatureType::TypeTransition,
+            CharType::Hiragana,
+            CharType::Kanji,
+        );
         assert!(feats[1].contains(&key));
         // 最初の「あ」には TypeTransition がない (prev がないため)
-        assert!(!feats[0]
-            .iter()
-            .any(|k| k.feature_type == FeatureType::TypeTransition));
+        assert!(
+            !feats[0]
+                .iter()
+                .any(|k| k.feature_type == FeatureType::TypeTransition)
+        );
     }
 
     #[test]

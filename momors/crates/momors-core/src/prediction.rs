@@ -10,15 +10,15 @@
 //! - [`PredictionResult`] のフィールドは直接公開せず、メソッド経由でアクセス
 //! - 原文位置は **UTF-8 バイト位置** で統一 (C++ 版はコードポイント位置)
 
-use std::path::{Path, PathBuf};
 use crate::Error;
+use std::path::{Path, PathBuf};
 
-use crate::Result;
 use crate::char_type::CharType;
 use crate::feature::FeatureKey;
-use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
+use crate::featurize::{compute_source_features, to_source_seq, SourceEntry};
 use crate::model::MomoModel;
-use crate::numeric::{NumericFallback, convert_japanese_numeric};
+use crate::numeric::{convert_japanese_numeric, NumericFallback};
+use crate::Result;
 
 // ============================================================
 // 定数
@@ -75,7 +75,7 @@ impl PredictorConfig {
     }
 
     /// 予測結果を原文の文字ごとに分割して出力するかどうかを設定する。
-    pub fn with_segment_output(mut self, value: bool) -> Self {
+    pub fn with_segment_output(self, value: bool) -> Self {
         if value {
             // segment 出力を有効にするための追加設定があればここで行う。
             // 現状は特に追加の設定はないが、将来的に必要になった場合はこのメソッド内で対応する。
@@ -245,8 +245,7 @@ impl PredictionResult {
     /// Python の `kana_to_src_index` と互換性がある。
     /// 内部では UTF-8 バイト位置を使っているためこのメソッドで変換する。
     pub fn kana_to_source_char(&self) -> Vec<usize> {
-        let src_char_starts: Vec<usize> =
-            self.source_text.char_indices().map(|(b, _)| b).collect();
+        let src_char_starts: Vec<usize> = self.source_text.char_indices().map(|(b, _)| b).collect();
 
         let mut result = Vec::with_capacity(self.kana_text.chars().count());
         let mut kana_byte = 0;
@@ -310,7 +309,11 @@ impl Predictor {
         } else {
             Vec::new()
         };
-        Ok(Self { config, model, kanji_dict })
+        Ok(Self {
+            config,
+            model,
+            kanji_dict,
+        })
     }
 
     /// バイト列からモデルを読み込んで予測器を構築する (WASM / インメモリ用)。
@@ -323,7 +326,11 @@ impl Predictor {
             numeric_confidence_threshold: 0.5,
             kanji_dict_path: None,
         };
-        Ok(Self { config, model, kanji_dict: Vec::new() })
+        Ok(Self {
+            config,
+            model,
+            kanji_dict: Vec::new(),
+        })
     }
 
     /// 設定を参照する。
@@ -457,31 +464,30 @@ impl Predictor {
             }
 
             // 漢字辞書制約付き argmax
-            let (best_cls, best_score): (usize, f32) =
-                if entry.ctype == CharType::Kanji && !self.kanji_dict.is_empty() {
-                    if let Some(ch) = char::from_u32(entry.cp) {
-                        if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
-                            let mut best = 0usize;
-                            let mut best_s = f32::NEG_INFINITY;
-                            for cls in 0..n_cls {
-                                let lbl = self.model.read_class(cls as u32).unwrap_or("");
-                                if readings.iter().any(|r| r.as_str() == lbl)
-                                    && scores[cls] > best_s
-                                {
-                                    best_s = scores[cls];
-                                    best = cls;
-                                }
+            let (best_cls, best_score): (usize, f32) = if entry.ctype == CharType::Kanji
+                && !self.kanji_dict.is_empty()
+            {
+                if let Some(ch) = char::from_u32(entry.cp) {
+                    if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
+                        let mut best = 0usize;
+                        let mut best_s = f32::NEG_INFINITY;
+                        for cls in 0..n_cls {
+                            let lbl = self.model.read_class(cls as u32).unwrap_or("");
+                            if readings.iter().any(|r| r.as_str() == lbl) && scores[cls] > best_s {
+                                best_s = scores[cls];
+                                best = cls;
                             }
-                            (best, best_s)
-                        } else {
-                            unconstrained_argmax(&scores)
                         }
+                        (best, best_s)
                     } else {
                         unconstrained_argmax(&scores)
                     }
                 } else {
                     unconstrained_argmax(&scores)
-                };
+                }
+            } else {
+                unconstrained_argmax(&scores)
+            };
 
             let conf = sigmoid(best_score);
             let label = self.model.read_class(best_cls as u32).unwrap_or("");
@@ -857,14 +863,26 @@ fn katakana_passthrough(entry: &SourceEntry) -> String {
 /// 々の繰り返し判定: 先頭音節の連濁マップ（カタカナ）。
 fn rendaku_first(c: char) -> Option<char> {
     match c {
-        'カ' => Some('ガ'), 'キ' => Some('ギ'), 'ク' => Some('グ'),
-        'ケ' => Some('ゲ'), 'コ' => Some('ゴ'),
-        'サ' => Some('ザ'), 'シ' => Some('ジ'), 'ス' => Some('ズ'),
-        'セ' => Some('ゼ'), 'ソ' => Some('ゾ'),
-        'タ' => Some('ダ'), 'チ' => Some('ヂ'), 'ツ' => Some('ヅ'),
-        'テ' => Some('デ'), 'ト' => Some('ド'),
-        'ハ' => Some('バ'), 'ヒ' => Some('ビ'), 'フ' => Some('ブ'),
-        'ヘ' => Some('ベ'), 'ホ' => Some('ボ'),
+        'カ' => Some('ガ'),
+        'キ' => Some('ギ'),
+        'ク' => Some('グ'),
+        'ケ' => Some('ゲ'),
+        'コ' => Some('ゴ'),
+        'サ' => Some('ザ'),
+        'シ' => Some('ジ'),
+        'ス' => Some('ズ'),
+        'セ' => Some('ゼ'),
+        'ソ' => Some('ゾ'),
+        'タ' => Some('ダ'),
+        'チ' => Some('ヂ'),
+        'ツ' => Some('ヅ'),
+        'テ' => Some('デ'),
+        'ト' => Some('ド'),
+        'ハ' => Some('バ'),
+        'ヒ' => Some('ビ'),
+        'フ' => Some('ブ'),
+        'ヘ' => Some('ベ'),
+        'ホ' => Some('ボ'),
         _ => None,
     }
 }
@@ -873,10 +891,25 @@ fn rendaku_first(c: char) -> Option<char> {
 fn is_voiced_obstruent(c: char) -> bool {
     matches!(
         c,
-        'ガ' | 'ギ' | 'グ' | 'ゲ' | 'ゴ'
-        | 'ザ' | 'ジ' | 'ズ' | 'ゼ' | 'ゾ'
-        | 'ダ' | 'ヂ' | 'ヅ' | 'デ' | 'ド'
-        | 'バ' | 'ビ' | 'ブ' | 'ベ' | 'ボ'
+        'ガ' | 'ギ'
+            | 'グ'
+            | 'ゲ'
+            | 'ゴ'
+            | 'ザ'
+            | 'ジ'
+            | 'ズ'
+            | 'ゼ'
+            | 'ゾ'
+            | 'ダ'
+            | 'ヂ'
+            | 'ヅ'
+            | 'デ'
+            | 'ド'
+            | 'バ'
+            | 'ビ'
+            | 'ブ'
+            | 'ベ'
+            | 'ボ'
     )
 }
 
@@ -971,8 +1004,7 @@ mod tests {
 
     #[test]
     fn config_builder_chains() {
-        let config = PredictorConfig::new("dummy.mbm")
-            .with_numeric_confidence_threshold(0.4);
+        let config = PredictorConfig::new("dummy.mbm").with_numeric_confidence_threshold(0.4);
 
         assert_eq!(config.model_path(), Path::new("dummy.mbm"));
         assert!((config.numeric_confidence_threshold() - 0.4).abs() < 1e-6);

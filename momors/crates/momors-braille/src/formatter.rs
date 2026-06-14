@@ -3,8 +3,16 @@ const BRAILLE_NUM_PREFIX: char = '⠼';
 
 fn digit_char(d: u8) -> char {
     match d {
-        0 => '⠚', 1 => '⠁', 2 => '⠃', 3 => '⠉', 4 => '⠙', 5 => '⠑',
-        6 => '⠋', 7 => '⠛', 8 => '⠓', 9 => '⠊',
+        0 => '⠚',
+        1 => '⠁',
+        2 => '⠃',
+        3 => '⠉',
+        4 => '⠙',
+        5 => '⠑',
+        6 => '⠋',
+        7 => '⠛',
+        8 => '⠓',
+        9 => '⠊',
         _ => BRAILLE_SPACE,
     }
 }
@@ -60,7 +68,10 @@ pub struct PhysicalLine {
 
 impl PhysicalLine {
     fn new(content: String, logical_end: bool) -> Self {
-        Self { content, logical_end }
+        Self {
+            content,
+            logical_end,
+        }
     }
 }
 
@@ -292,7 +303,10 @@ mod tests {
         let doc = fmt(6, 25).format(&[para]);
         let page = &doc.pages()[0];
         assert_eq!(page.len(), 2);
-        assert!(!page[1].content.starts_with(BRAILLE_SPACE), "2行目の先頭がスペースになっている");
+        assert!(
+            !page[1].content.starts_with(BRAILLE_SPACE),
+            "2行目の先頭がスペースになっている"
+        );
         assert_eq!(page[1].content.chars().count(), 4);
     }
 
@@ -307,7 +321,10 @@ mod tests {
         let doc = fmt(10, 25).format(&[para]);
         let page = &doc.pages()[0];
         assert_eq!(page.len(), 2);
-        assert!(!page[1].content.starts_with(BRAILLE_SPACE), "強制分割後の2行目の先頭がスペースになっている");
+        assert!(
+            !page[1].content.starts_with(BRAILLE_SPACE),
+            "強制分割後の2行目の先頭がスペースになっている"
+        );
         assert_eq!(page[1].content.chars().count(), 4);
     }
 
@@ -387,7 +404,14 @@ mod tests {
         let header = &doc.pages()[0][0].content;
         assert_eq!(header.chars().count(), 28); // 26 + 2
         // 末尾2文字がページ番号 ⠼⠁
-        let tail: String = header.chars().rev().take(2).collect::<Vec<_>>().into_iter().rev().collect();
+        let tail: String = header
+            .chars()
+            .rev()
+            .take(2)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         assert_eq!(tail, "⠼⠁");
     }
 

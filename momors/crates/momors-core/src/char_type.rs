@@ -370,11 +370,7 @@ mod tests {
     #[test]
     fn japanese_numeric() {
         for c in "〇一二三四五六七八九".chars() {
-            assert_eq!(
-                get_char_type(c),
-                CharType::JapaneseNumeric,
-                "char: {c}"
-            );
+            assert_eq!(get_char_type(c), CharType::JapaneseNumeric, "char: {c}");
         }
     }
 

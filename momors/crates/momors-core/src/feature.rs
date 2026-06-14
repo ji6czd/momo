@@ -242,12 +242,7 @@ impl FeatureKey {
     }
 
     /// `CharType × 3` の特徴量キーを作る (`TypeTri*`)。
-    pub fn type_3(
-        feature_type: FeatureType,
-        ct0: CharType,
-        ct1: CharType,
-        ct2: CharType,
-    ) -> Self {
+    pub fn type_3(feature_type: FeatureType, ct0: CharType, ct1: CharType, ct2: CharType) -> Self {
         debug_assert_eq!(feature_type.chartype_count(), 3);
         Self {
             feature_type,
@@ -324,7 +319,10 @@ mod tests {
     fn from_u8_known_values() {
         assert_eq!(FeatureType::from_u8(0x00), Some(FeatureType::Bias));
         assert_eq!(FeatureType::from_u8(0x50), Some(FeatureType::TypeSelf));
-        assert_eq!(FeatureType::from_u8(0xC2), Some(FeatureType::PrevJapaneseNumericRunLen));
+        assert_eq!(
+            FeatureType::from_u8(0xC2),
+            Some(FeatureType::PrevJapaneseNumericRunLen)
+        );
     }
 
     #[test]

@@ -17,10 +17,10 @@ impl MomoWasm {
     /// モデルバイト列 (.mbm) からインスタンスを構築する。
     #[wasm_bindgen(constructor)]
     pub fn new(mbm_data: &[u8]) -> Result<MomoWasm, JsValue> {
-        let predictor = Predictor::from_model_bytes(mbm_data)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let converter = BrailleConverter::from_embedded()
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let predictor =
+            Predictor::from_model_bytes(mbm_data).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let converter =
+            BrailleConverter::from_embedded().map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(MomoWasm {
             predictor,
             converter,

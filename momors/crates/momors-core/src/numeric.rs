@@ -120,9 +120,9 @@ fn kurai_fallback(
     match cp {
         // 十
         0x5341 => match (left_is_numeric, right_is_numeric) {
-            (true, true) => Skip,          // 例: 「三百二十」の「十」
-            (true, false) => Output("0"),  // 例: 「二十」
-            (false, true) => Output("1"),  // 例: 「十一」 ※ to_source_seq で右→左パスで昇格
+            (true, true) => Skip,           // 例: 「三百二十」の「十」
+            (true, false) => Output("0"),   // 例: 「二十」
+            (false, true) => Output("1"),   // 例: 「十一」 ※ to_source_seq で右→左パスで昇格
             (false, false) => Output("10"), // 単独の「十」
         },
 
@@ -211,7 +211,10 @@ mod tests {
     fn convert_simple_digits() {
         // 「三」だけ
         let s = seq("三");
-        assert_eq!(convert_japanese_numeric(0, &s), NumericFallback::Output("3"));
+        assert_eq!(
+            convert_japanese_numeric(0, &s),
+            NumericFallback::Output("3")
+        );
     }
 
     // --- convert_japanese_numeric: 十 ---
@@ -238,14 +241,20 @@ mod tests {
     fn convert_juu_left_numeric() {
         // 「二十」: 二(JapaneseNumeric) - 十
         let s = seq("二十");
-        assert_eq!(convert_japanese_numeric(1, &s), NumericFallback::Output("0"));
+        assert_eq!(
+            convert_japanese_numeric(1, &s),
+            NumericFallback::Output("0")
+        );
     }
 
     #[test]
     fn convert_juu_right_numeric() {
         // 「十一」: 十 - 一(JapaneseNumeric) ← 十は右→左パスで昇格
         let s = seq("十一");
-        assert_eq!(convert_japanese_numeric(0, &s), NumericFallback::Output("1"));
+        assert_eq!(
+            convert_japanese_numeric(0, &s),
+            NumericFallback::Output("1")
+        );
     }
 
     #[test]
@@ -284,11 +293,17 @@ mod tests {
 
         // 「百一」→「百」は "1"
         let s = seq("百一");
-        assert_eq!(convert_japanese_numeric(0, &s), NumericFallback::Output("1"));
+        assert_eq!(
+            convert_japanese_numeric(0, &s),
+            NumericFallback::Output("1")
+        );
 
         // 「三百二」→「百」は "0"
         let s = seq("三百二");
-        assert_eq!(convert_japanese_numeric(1, &s), NumericFallback::Output("0"));
+        assert_eq!(
+            convert_japanese_numeric(1, &s),
+            NumericFallback::Output("0")
+        );
     }
 
     // --- convert_japanese_numeric: 千 ---
@@ -334,7 +349,10 @@ mod tests {
     fn convert_sen_with_right_numeric() {
         // 「千一」→「千」は "0"
         let s = seq("千一");
-        assert_eq!(convert_japanese_numeric(0, &s), NumericFallback::Output("0"));
+        assert_eq!(
+            convert_japanese_numeric(0, &s),
+            NumericFallback::Output("0")
+        );
     }
 
     // --- convert_japanese_numeric: 万・億・兆 ---
@@ -380,11 +398,26 @@ mod tests {
         // これは数字の正しい読みではないが、フォールバックの目的 (モデルが低自信
         // 度のときに数字っぽく出す) としては想定通りの挙動。
         let s = seq("三千二百十一");
-        assert_eq!(convert_japanese_numeric(0, &s), NumericFallback::Output("3"));
-        assert_eq!(convert_japanese_numeric(1, &s), NumericFallback::Output("0"));
-        assert_eq!(convert_japanese_numeric(2, &s), NumericFallback::Output("2"));
-        assert_eq!(convert_japanese_numeric(3, &s), NumericFallback::Output("0"));
+        assert_eq!(
+            convert_japanese_numeric(0, &s),
+            NumericFallback::Output("3")
+        );
+        assert_eq!(
+            convert_japanese_numeric(1, &s),
+            NumericFallback::Output("0")
+        );
+        assert_eq!(
+            convert_japanese_numeric(2, &s),
+            NumericFallback::Output("2")
+        );
+        assert_eq!(
+            convert_japanese_numeric(3, &s),
+            NumericFallback::Output("0")
+        );
         assert_eq!(convert_japanese_numeric(4, &s), NumericFallback::Skip);
-        assert_eq!(convert_japanese_numeric(5, &s), NumericFallback::Output("1"));
+        assert_eq!(
+            convert_japanese_numeric(5, &s),
+            NumericFallback::Output("1")
+        );
     }
 }

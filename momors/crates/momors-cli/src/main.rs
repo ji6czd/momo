@@ -149,7 +149,9 @@ fn main() -> ExitCode {
 // ============================================================
 
 fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
-    let ext = cli.output.as_ref()
+    let ext = cli
+        .output
+        .as_ref()
         .and_then(|p| p.extension())
         .and_then(|e| e.to_str());
     let braille_format = match ext {
@@ -194,10 +196,14 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
     };
 
     match &cli.output {
-        Some(path) => std::fs::write(path, &out).map_err(|e| format!("ファイル書き込みエラー: {e}")),
+        Some(path) => {
+            std::fs::write(path, &out).map_err(|e| format!("ファイル書き込みエラー: {e}"))
+        }
         None => {
             use std::io::Write;
-            std::io::stdout().write_all(&out).map_err(|e| format!("標準出力エラー: {e}"))
+            std::io::stdout()
+                .write_all(&out)
+                .map_err(|e| format!("標準出力エラー: {e}"))
         }
     }
 }

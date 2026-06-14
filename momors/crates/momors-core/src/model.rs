@@ -190,7 +190,10 @@ mod tests {
         // (実装としては loader 側で sort() を呼ぶことになる)
         m.vocab = vec![
             (FeatureKey::no_payload(FeatureType::Bias), 0),
-            (FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji), 1),
+            (
+                FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji),
+                1,
+            ),
             (FeatureKey::char_1(FeatureType::CharSelf, 0x4E00), 2),
             (FeatureKey::char_1(FeatureType::CharSelf, 0x4E01), 3),
         ];

@@ -114,14 +114,19 @@ unsafe fn lpstr_to_string(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
-    unsafe { CStr::from_ptr(ptr) }.to_str().ok().map(str::to_owned)
+    unsafe { CStr::from_ptr(ptr) }
+        .to_str()
+        .ok()
+        .map(str::to_owned)
 }
 
 unsafe fn lpwstr_to_string(ptr: *const u16) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
-    let len = (0usize..).take_while(|&i| unsafe { *ptr.add(i) } != 0).count();
+    let len = (0usize..)
+        .take_while(|&i| unsafe { *ptr.add(i) } != 0)
+        .count();
     let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
     Some(String::from_utf16_lossy(slice).to_owned())
 }
@@ -302,18 +307,11 @@ pub extern "C" fn momo_prediction_src_char_count(handle: *const PredictionHandle
 /// out は kana_char_count 要素以上の領域を確保しておくこと。
 /// handle または out が NULL なら何もしない。
 #[no_mangle]
-pub extern "C" fn momo_prediction_kana_to_src(
-    handle: *const PredictionHandle,
-    out: *mut i32,
-) {
+pub extern "C" fn momo_prediction_kana_to_src(handle: *const PredictionHandle, out: *mut i32) {
     if let Some(h) = unsafe { handle.as_ref() } {
         if !out.is_null() {
             unsafe {
-                std::ptr::copy_nonoverlapping(
-                    h.kana_to_src.as_ptr(),
-                    out,
-                    h.kana_to_src.len(),
-                );
+                std::ptr::copy_nonoverlapping(h.kana_to_src.as_ptr(), out, h.kana_to_src.len());
             }
         }
     }

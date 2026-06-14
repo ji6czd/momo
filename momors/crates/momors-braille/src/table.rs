@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use serde::Deserialize;
 use crate::Result;
+use serde::Deserialize;
+use std::collections::HashMap;
 
 // ============================================================
 // TOML デシリアライズ用の中間型
@@ -182,8 +182,14 @@ mod tests {
         assert_eq!(table.kana_single.get("ア").map(|s| s.as_str()), Some("⠁"));
         assert_eq!(table.kana_single.get("ン").map(|s| s.as_str()), Some("⠴"));
         assert_eq!(table.kana_single.get("ガ").map(|s| s.as_str()), Some("⠐⠡"));
-        assert_eq!(table.kana_compound.get("キャ").map(|s| s.as_str()), Some("⠈⠡"));
-        assert_eq!(table.kana_compound.get("ジョ").map(|s| s.as_str()), Some("⠘⠺"));
+        assert_eq!(
+            table.kana_compound.get("キャ").map(|s| s.as_str()),
+            Some("⠈⠡")
+        );
+        assert_eq!(
+            table.kana_compound.get("ジョ").map(|s| s.as_str()),
+            Some("⠘⠺")
+        );
     }
 
     #[test]

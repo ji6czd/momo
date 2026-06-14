@@ -170,8 +170,8 @@ fn read_vocab<R: Read>(
     let mut vocab = Vec::with_capacity(n_features as usize);
     for _ in 0..n_features {
         let ft_byte = reader.read_u8().map_err(io_err(path))?;
-        let feature_type = FeatureType::from_u8(ft_byte)
-            .ok_or(Error::InvalidFeatureType { value: ft_byte })?;
+        let feature_type =
+            FeatureType::from_u8(ft_byte).ok_or(Error::InvalidFeatureType { value: ft_byte })?;
 
         let mut key = FeatureKey {
             feature_type,
@@ -182,8 +182,7 @@ fn read_vocab<R: Read>(
         let nct = feature_type.chartype_count();
         for i in 0..nct {
             let ct_byte = reader.read_u8().map_err(io_err(path))?;
-            let ct = CharType::from_u8(ct_byte)
-                .ok_or(Error::InvalidCharType { value: ct_byte })?;
+            let ct = CharType::from_u8(ct_byte).ok_or(Error::InvalidCharType { value: ct_byte })?;
             key.ct[i] = ct;
         }
 
@@ -362,8 +361,7 @@ mod tests {
     /// テストは crate ルートから実行される (`cargo test`) ことを前提とする。
     fn dummy_path() -> PathBuf {
         // crates/momors-core から見たプロジェクトルートの testdata
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/dummy.mbm")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/dummy.mbm")
     }
 
     #[test]
@@ -469,7 +467,10 @@ mod tests {
         let bad_data = b"MOMO\x99\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
-        assert!(matches!(result, Err(Error::UnsupportedVersion { version: 0x99 })));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedVersion { version: 0x99 })
+        ));
     }
 
     // --- CSR → CSC 変換の独立テスト ---

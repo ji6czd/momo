@@ -47,6 +47,11 @@
                                   Description='日本語テキストを点字に変換します'
                                   Target='[Bin]momo-gui.exe'
                                   WorkingDirectory='Bin'/>
+                        <Shortcut Id='MomoEditorStartMenuShortcut'
+                                  Name='Momo エディタ'
+                                  Description='点字エディタ'
+                                  Target='[Bin]MomoEditor.exe'
+                                  WorkingDirectory='Bin'/>
                         <RemoveFolder Id='CleanUpShortCut'
                                       Directory='ApplicationProgramsFolder'
                                       On='uninstall'/>
@@ -86,6 +91,26 @@
                                   DiskId='1'
                                   Source='$(var.StageDir)\bin\momo.exe'
                                   KeyPath='yes'/>
+                        </Component>
+                        <!-- MomoEditor.exe (.NET 点字エディタ) -->
+                        <Component Id='MomoEditor' Guid='68C5A748-909B-4DC6-8AE1-A7800CC0808A'>
+                            <File Id='MomoEditorExe'
+                                  Name='MomoEditor.exe'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\MomoEditor.exe'
+                                  KeyPath='yes'/>
+                            <File Id='MomoEditorDll'
+                                  Name='MomoEditor.dll'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\MomoEditor.dll'/>
+                            <File Id='MomoEditorDepsJson'
+                                  Name='MomoEditor.deps.json'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\MomoEditor.deps.json'/>
+                            <File Id='MomoEditorRuntimeConfig'
+                                  Name='MomoEditor.runtimeconfig.json'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\MomoEditor.runtimeconfig.json'/>
                         </Component>
                         <!-- momo-gui.exe (.NET GUI) -->
                         <Component Id='MomoGui' Guid='97EA0808-62CA-4FF3-8C59-31CDC0D16CD8'>
@@ -153,6 +178,7 @@
 
             <ComponentRef Id='MomoCli'/>
             <ComponentRef Id='MomoGui'/>
+            <ComponentRef Id='MomoEditor'/>
             <ComponentRef Id='DataFiles'/>
             <ComponentRef Id='DatasetEnv'/>
             <ComponentRef Id='ApplicationShortcut'/>

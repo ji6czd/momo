@@ -150,21 +150,26 @@ tasks:
     cmds:
       - dotnet publish -c Release
 
+  editor:
+    desc: Build .NET editor (release)
+    dir: momo-editor
+    cmds:
+      - dotnet publish -c Release
+
   dist:stage:
     desc: Stage artifacts for installer (rust + gui must be built first)
     vars:
       STAGE: "{{.ROOT_DIR}}/momo-installer/stage"
       RUST_BIN: "{{.ROOT_DIR}}/momors/target/release"
       GUI_BIN: "{{.ROOT_DIR}}/momo-gui/bin/Release/net10.0-windows/publish"
+      EDITOR_BIN: "{{.ROOT_DIR}}/momo-editor/bin/Release/net10.0-windows/publish"
       DATA: "{{.ROOT_DIR}}/dataset"
     cmds:
       - rm -rf "{{.STAGE}}"
       - mkdir -p "{{.STAGE}}/bin" "{{.STAGE}}/data"
       - cp "{{.RUST_BIN}}/momo.exe"                        "{{.STAGE}}/bin/"
-      - cp "{{.GUI_BIN}}/momo-gui.exe"                    "{{.STAGE}}/bin/"
-      - cp "{{.GUI_BIN}}/momo-gui.dll"                    "{{.STAGE}}/bin/"
-      - cp "{{.GUI_BIN}}/momo-gui.deps.json"              "{{.STAGE}}/bin/"
-      - cp "{{.GUI_BIN}}/momo-gui.runtimeconfig.json"     "{{.STAGE}}/bin/"
+      - cp "{{.GUI_BIN}}"/*.* "{{.STAGE}}/bin/"
+      - cp "{{.EDITOR_BIN}}"/*.* "{{.STAGE}}/bin/"
       - cp "{{.DATA}}/basic_data_4.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"

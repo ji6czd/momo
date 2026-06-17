@@ -168,6 +168,7 @@ tasks:
       - rm -rf "{{.STAGE}}"
       - mkdir -p "{{.STAGE}}/bin" "{{.STAGE}}/data"
       - cp "{{.RUST_BIN}}/momo.exe"                        "{{.STAGE}}/bin/"
+      - cp "{{.RUST_BIN}}/momors_ffi.dll"                 "{{.STAGE}}/bin/"
       - cp "{{.GUI_BIN}}"/*.* "{{.STAGE}}/bin/"
       - cp "{{.EDITOR_BIN}}"/*.* "{{.STAGE}}/bin/"
       - cp "{{.DATA}}/basic_data_4.mbm"               "{{.STAGE}}/data/"
@@ -188,6 +189,7 @@ tasks:
     deps:
       - rust
       - gui
+      - editor
     cmds:
       - task: dist:stage
       - mkdir -p "{{.OUT}}"

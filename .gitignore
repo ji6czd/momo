@@ -1,0 +1,7 @@
+momo-installer/stage/
+momo-installer/*.wixobj
+momo-installer/*.wixpdb
+*.csproj.user
+bin/
+obj/
+

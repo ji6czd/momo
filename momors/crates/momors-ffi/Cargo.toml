@@ -7,7 +7,8 @@ edition = "2021"  # cbindgen が #[unsafe(no_mangle)] (2024 構文) 未対応の
 crate-type = ["cdylib"]
 
 [dependencies]
-momors-core = { workspace = true }
+momors-core    = { workspace = true }
+momors-braille = { workspace = true }
 
 [build-dependencies]
 cbindgen = "0.27"

@@ -158,6 +158,12 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
         Some("brf") => Some(OutputFormat::BrailleText),
         Some("bse") => Some(OutputFormat::Base),
         Some("bes") => Some(OutputFormat::Bes),
+        Some("mbr") => Some(OutputFormat::Mbr(FormatterConfig {
+            line_width: 32,
+            lines_per_page: 22,
+            page_header: true,
+            title: None,
+        })),
         _ => None,
     };
 

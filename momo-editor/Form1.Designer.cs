@@ -85,11 +85,11 @@ partial class Form1
 
         undoMenuItem.Text = "元に戻す(&U)";
         undoMenuItem.ShortcutKeys = Keys.Control | Keys.Z;
-        undoMenuItem.Click += (_, _) => richTextBox.Undo();
+        undoMenuItem.Click += (_, _) => SmartUndo();
 
         cutMenuItem.Text = "切り取り(&T)";
         cutMenuItem.ShortcutKeys = Keys.Control | Keys.X;
-        cutMenuItem.Click += (_, _) => richTextBox.Cut();
+        cutMenuItem.Click += (_, _) => SmartCut();
 
         copyMenuItem.Text = "コピー(&C)";
         copyMenuItem.ShortcutKeys = Keys.Control | Keys.C;
@@ -97,7 +97,7 @@ partial class Form1
 
         pasteMenuItem.Text = "貼り付け(&P)";
         pasteMenuItem.ShortcutKeys = Keys.Control | Keys.V;
-        pasteMenuItem.Click += (_, _) => richTextBox.Paste();
+        pasteMenuItem.Click += (_, _) => SmartPaste();
 
         selectAllMenuItem.Text = "すべて選択(&A)";
         selectAllMenuItem.ShortcutKeys = Keys.Control | Keys.A;

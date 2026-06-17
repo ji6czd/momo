@@ -121,24 +121,50 @@ impl BrailleFormatter {
         Self { config }
     }
 
+    /// 1論理行（段落）を物理行のリストに変換する。
+    ///
+    /// 空文字列は空リストを返す（フォーマットする対象がないため）。
+    /// 最後の物理行は常に `logical_end = true`。
+    pub fn format_logical_line(&self, text: &str) -> Vec<PhysicalLine> {
+        self.format_suffix(text, self.config.line_width)
+    }
+
+    /// 論理行のサフィックスをフォーマットする。
+    ///
+    /// `first_line_remaining`: 現在の物理行の残りマス数。
+    /// - `0` のとき: 先頭に空物理行を1行出力し、以降は通常幅で折り返す。
+    /// - `line_width` のとき: `format_logical_line` と等価。
+    ///
+    /// 空文字列は空リストを返す。最後の物理行は常に `logical_end = true`。
+    pub fn format_suffix(&self, text: &str, first_line_remaining: usize) -> Vec<PhysicalLine> {
+        if text.is_empty() {
+            return vec![];
+        }
+        let mut lines = self.word_wrap_from(text, first_line_remaining);
+        if let Some(last) = lines.last_mut() {
+            last.logical_end = true;
+        }
+        lines
+    }
+
     /// 段落リスト（論理行）をフォーマットして [`FormattedDocument`] を返す。
     ///
     /// - `paragraphs`: 各要素が1論理行（段落）の点字文字列。
-    /// - 空文字列の要素は空行として扱う。
+    /// - 各段落は最低1物理行を占める。空段落（空文字列）は空の物理行1行になる。
+    ///   段落が1つも無い（`paragraphs` が空）場合のみ物理行0個＝完全な空ドキュメント。
     pub fn format(&self, paragraphs: &[String]) -> FormattedDocument {
-        // 各段落を物理行に展開。最後の物理行に logical_end=true を付与。
-        let mut physical_lines: Vec<PhysicalLine> = Vec::new();
-        for para in paragraphs {
-            if para.is_empty() {
-                physical_lines.push(PhysicalLine::new(String::new(), true));
-            } else {
-                let mut wrapped = self.word_wrap(para);
-                if let Some(last) = wrapped.last_mut() {
-                    last.logical_end = true;
+        let physical_lines: Vec<PhysicalLine> = paragraphs
+            .iter()
+            .flat_map(|para| {
+                let mut lines = self.format_logical_line(para);
+                // 空段落も1論理行として存在する以上、空の物理行を1つ占める。
+                // （「空段落」と「段落が1つも無い完全な空」を区別する）
+                if lines.is_empty() {
+                    lines.push(PhysicalLine::new(String::new(), true));
                 }
-                physical_lines.extend(wrapped);
-            }
-        }
+                lines
+            })
+            .collect();
 
         if physical_lines.is_empty() {
             return FormattedDocument {
@@ -178,13 +204,20 @@ impl BrailleFormatter {
         }
     }
 
-    /// 1段落をワードラップして物理行のリストに変換する。
+    /// ワードラップの実装。`first_line_width` マスを最初の行に使い、以降は `line_width` マスを使う。
+    /// `first_line_width == 0` のとき先頭に空行を1行追加して以降は通常幅で処理する。
     /// 返却する各行の `logical_end` はすべて `false`。呼び出し側が最後の行を `true` に設定する。
-    fn word_wrap(&self, text: &str) -> Vec<PhysicalLine> {
-        let width = self.config.line_width;
+    fn word_wrap_from(&self, text: &str, first_line_width: usize) -> Vec<PhysicalLine> {
+        let full_width = self.config.line_width;
         let chars: Vec<char> = text.chars().collect();
         let mut lines = Vec::new();
         let mut start = 0;
+        let mut width = first_line_width;
+
+        if width == 0 {
+            lines.push(PhysicalLine::new(String::new(), false));
+            width = full_width;
+        }
 
         while start < chars.len() {
             if chars.len() - start <= width {
@@ -192,24 +225,33 @@ impl BrailleFormatter {
                 break;
             }
 
-            // start+width より手前の最後のスペースで折る
             let end = start + width;
-            match (start..end).rev().find(|&i| chars[i] == BRAILLE_SPACE) {
-                Some(sp) => {
-                    // 折り返し点のスペースは行末に残す
-                    lines.push(PhysicalLine::new(chars[start..=sp].iter().collect(), false));
-                    start = sp + 1;
-                }
-                None => {
-                    // スペースなし: 強制分割
-                    lines.push(PhysicalLine::new(chars[start..end].iter().collect(), false));
-                    start = end;
+            if chars.get(end) == Some(&BRAILLE_SPACE) {
+                // 内容がwidth埋まり、直後がスペース → trailing spaceとして含める
+                lines.push(PhysicalLine::new(
+                    chars[start..=end].iter().collect(),
+                    false,
+                ));
+                start = end + 1;
+            } else {
+                match (start..end).rev().find(|&i| chars[i] == BRAILLE_SPACE) {
+                    Some(sp) => {
+                        // 折り返し点のスペースは行末に残す
+                        lines.push(PhysicalLine::new(chars[start..=sp].iter().collect(), false));
+                        start = sp + 1;
+                    }
+                    None => {
+                        // スペースなし: 強制分割
+                        lines.push(PhysicalLine::new(chars[start..end].iter().collect(), false));
+                        start = end;
+                    }
                 }
             }
             // 次行の先頭スペースを削除
             while start < chars.len() && chars[start] == BRAILLE_SPACE {
                 start += 1;
             }
+            width = full_width;
         }
 
         lines
@@ -266,6 +308,21 @@ mod tests {
     }
 
     #[test]
+    fn format_logical_line_empty_returns_empty_vec() {
+        let f = fmt(32, 25);
+        assert_eq!(f.format_logical_line(""), vec![]);
+    }
+
+    #[test]
+    fn format_logical_line_sets_logical_end_on_last() {
+        let f = fmt(15, 25);
+        let lines = f.format_logical_line(&braille_with_spaces(&[10, 10]));
+        assert_eq!(lines.len(), 2);
+        assert!(!lines[0].logical_end);
+        assert!(lines[1].logical_end);
+    }
+
+    #[test]
     fn empty_input_returns_empty_document() {
         let doc = fmt(32, 25).format(&[]);
         assert_eq!(doc.page_count(), 0);
@@ -312,11 +369,10 @@ mod tests {
 
     #[test]
     fn word_wrap_hard_break_no_leading_space() {
-        // 強制分割後、次の先頭がスペースの場合も削除される
         // "AAAAAAAAAA⠀⠀BBBB" (10+space+space+4=16), width=10
-        // → no space in 0..10 → hard break: line1="AAAAAAAAAA", start=10
-        //   chars[10]='⠀' → skip → chars[11]='⠀' → skip → start=12, "BBBB"
-        // → line2="BBBB"
+        // → chars[10]='⠀' → trailing space → line1="AAAAAAAAAA⠀" (11chars), start=11
+        //   chars[11]='⠀' → skip → start=12, "BBBB"
+        // → line2="BBBB"（先頭スペースなし）
         let para = format!("{}⠀⠀{}", braille_str(10), braille_str(4));
         let doc = fmt(10, 25).format(&[para]);
         let page = &doc.pages()[0];
@@ -326,6 +382,21 @@ mod tests {
             "強制分割後の2行目の先頭がスペースになっている"
         );
         assert_eq!(page[1].content.chars().count(), 4);
+    }
+
+    #[test]
+    fn word_wrap_trailing_space_at_line_width_boundary() {
+        // 内容がちょうどwidth=10マス、直後がスペース → trailing spaceとして含める
+        // → line1 = 10 content + 1 trailing space = 11 chars (line_width+1)
+        let para = format!("{}⠀{}", braille_str(10), braille_str(5));
+        let doc = fmt(10, 25).format(&[para]);
+        let page = &doc.pages()[0];
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].content.chars().count(), 11); // line_width + trailing space
+        assert_eq!(page[1].content.chars().count(), 5);
+        assert!(!page[1].content.starts_with(BRAILLE_SPACE));
+        assert!(!page[0].logical_end);
+        assert!(page[1].logical_end);
     }
 
     #[test]
@@ -350,9 +421,26 @@ mod tests {
     }
 
     #[test]
-    fn empty_paragraph_has_logical_end() {
+    fn empty_paragraph_occupies_one_empty_line() {
+        // 空段落も1論理行として存在する以上、空の物理行を1行占める。
+        // （段落が1つも無い完全な空ドキュメントとは区別する）
         let doc = fmt(32, 25).format(&[String::new()]);
-        assert!(doc.pages()[0][0].logical_end);
+        assert_eq!(doc.page_count(), 1);
+        assert_eq!(doc.pages()[0], vec![PhysicalLine::new(String::new(), true)]);
+    }
+
+    #[test]
+    fn two_empty_paragraphs_occupy_two_empty_lines() {
+        // "\n" 相当（空段落2つ）は空行2行になり、空リストには潰れない。
+        let doc = fmt(32, 25).format(&[String::new(), String::new()]);
+        assert_eq!(doc.page_count(), 1);
+        assert_eq!(
+            doc.pages()[0],
+            vec![
+                PhysicalLine::new(String::new(), true),
+                PhysicalLine::new(String::new(), true),
+            ]
+        );
     }
 
     #[test]
@@ -369,7 +457,7 @@ mod tests {
     fn pagination_splits_into_pages() {
         // 10段落 × 3行/段落 = 30物理行、lines_per_page=10 → 3ページ
         let para = braille_with_spaces(&[5, 5, 5]); // width=32 内に収まる 17chars → 1物理行
-        // 各paragraphを折り返し後1行にするため、幅を十分大きく
+                                                    // 各paragraphを折り返し後1行にするため、幅を十分大きく
         let paragraphs: Vec<String> = std::iter::repeat(para).take(10).collect();
         let doc = fmt(32, 3).format(&paragraphs);
         // 10行 / 3 = 4ページ (3+3+3+1)
@@ -403,7 +491,7 @@ mod tests {
         let doc = f.format(&[braille_str(1)]);
         let header = &doc.pages()[0][0].content;
         assert_eq!(header.chars().count(), 28); // 26 + 2
-        // 末尾2文字がページ番号 ⠼⠁
+                                                // 末尾2文字がページ番号 ⠼⠁
         let tail: String = header
             .chars()
             .rev()
@@ -420,5 +508,77 @@ mod tests {
         assert_eq!(braille_page_num(1), "⠼⠁");
         assert_eq!(braille_page_num(10), "⠼⠁⠚");
         assert_eq!(braille_page_num(100), "⠼⠁⠚⠚");
+    }
+
+    // ---- format_suffix ----
+
+    #[test]
+    fn format_suffix_full_width_equals_format_logical_line() {
+        // first_line_remaining == line_width → format_logical_line と同じ結果
+        let f = fmt(10, 25);
+        let text = braille_with_spaces(&[4, 4]);
+        assert_eq!(f.format_suffix(&text, 10), f.format_logical_line(&text));
+    }
+
+    #[test]
+    fn format_suffix_fits_in_remaining() {
+        // テキストが first_line_remaining 以内に収まる → 1行のみ
+        let f = fmt(10, 25);
+        let text = braille_str(5);
+        let lines = f.format_suffix(&text, 8);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].content.chars().count(), 5);
+        assert!(lines[0].logical_end);
+    }
+
+    #[test]
+    fn format_suffix_wraps_at_first_line_remaining() {
+        // line_width=10, first_line_remaining=5, "AAAA⠀BBBB" (9文字)
+        // → 1行目 "AAAA⠀" (5文字), 2行目 "BBBB" (4文字, 通常幅=10)
+        let f = fmt(10, 25);
+        let text = braille_with_spaces(&[4, 4]);
+        let lines = f.format_suffix(&text, 5);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].content.chars().count(), 5); // 4 + trailing space
+        assert_eq!(lines[1].content.chars().count(), 4);
+        assert!(!lines[0].logical_end);
+        assert!(lines[1].logical_end);
+    }
+
+    #[test]
+    fn format_suffix_remaining_zero_produces_empty_first_line() {
+        // first_line_remaining=0 → 先頭に空行を出力し、以降は通常幅
+        let f = fmt(10, 25);
+        let text = braille_str(5);
+        let lines = f.format_suffix(&text, 0);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].content, "");
+        assert!(!lines[0].logical_end);
+        assert_eq!(lines[1].content.chars().count(), 5);
+        assert!(lines[1].logical_end);
+    }
+
+    #[test]
+    fn format_suffix_empty_text_returns_empty() {
+        let f = fmt(10, 25);
+        assert!(f.format_suffix("", 5).is_empty());
+        assert!(f.format_suffix("", 0).is_empty());
+    }
+
+    #[test]
+    fn format_suffix_subsequent_lines_use_full_width() {
+        // line_width=10, first_line_remaining=3
+        // "AA⠀BBBBBBBBBB⠀CC" (2+sp+10+sp+2=16文字)
+        // → 1行目: "AA⠀" (first_line_remaining=3)
+        // → 2行目: "BBBBBBBBBB⠀" (full_width=10 + trailing space)
+        // → 3行目: "CC"
+        let f = fmt(10, 25);
+        let text = braille_with_spaces(&[2, 10, 2]);
+        let lines = f.format_suffix(&text, 3);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].content.chars().count(), 3); // "AA⠀"
+        assert_eq!(lines[1].content.chars().count(), 11); // "BBBBBBBBBB⠀"
+        assert_eq!(lines[2].content.chars().count(), 2); // "CC"
+        assert!(lines[2].logical_end);
     }
 }

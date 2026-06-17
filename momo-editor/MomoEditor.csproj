@@ -8,4 +8,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <ItemGroup>
+    <None Include="..\momors\target\release\momors_ffi.dll" Condition="Exists('..\momors\target\release\momors_ffi.dll')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- 漢字かな交じり文の取り込みに使う点字変換モデルと付随データ。
+         momo_predictor_new_w がモデルと同じディレクトリの辞書・点字テーブルを参照する。 -->
+    <None Include="..\dataset\basic_data_7.mbm" Condition="Exists('..\dataset\basic_data_7.mbm')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\dataset\single_character_dic.tsv" Condition="Exists('..\dataset\single_character_dic.tsv')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\dataset\japanese_braille.toml" Condition="Exists('..\dataset\japanese_braille.toml')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

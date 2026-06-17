@@ -22,11 +22,13 @@ pub mod converter;
 pub mod error;
 pub mod formatter;
 mod nabcc;
+pub mod reader;
 pub mod table;
 pub mod writer;
 
 pub use converter::{BrailleConverter, BrailleResult};
 pub use error::{Error, Result};
 pub use formatter::{BrailleFormatter, FormattedDocument, FormatterConfig, PhysicalLine};
+pub use reader::{read_bes_file, BesDocument, BesPhysicalLine};
 pub use table::BrailleTable;
 pub use writer::OutputFormat;

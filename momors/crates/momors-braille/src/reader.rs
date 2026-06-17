@@ -1,10 +1,10 @@
-//! 点字ファイルの読み込み。
+//! 点字ファイルの読み込み。バイト列を正本 [`BrailleDocument`] へ復元する。
 //!
-//! 現在は BES バイナリ形式（[`writer::write_bes_file`](crate::writer) の逆変換）に対応する。
+//! 現在は BES バイナリ形式（[`crate::writer`] の `Bes` 出力の逆変換）に対応する。
 //!
 //! BES は印刷イメージを保持する形式であり、ヘッダ行・強制/暗黙の改ページが
 //! すべてファイル中に焼き込まれている。本リーダはバイト列をデコードし、
-//! 編集可能な物理行リストへ復元する。方針:
+//! 段落（物理行の列）へ復元する。方針:
 //!
 //! - 行末コード: `0x0D 0xFE` = 論理行終端、`0xFE` 単独 = 物理行のみ終端（論理行継続）、
 //!   末尾の `0x0D` 単独 = ドキュメント終端（論理行終端扱い）。
@@ -13,6 +13,8 @@
 //!   いれば**強制改ページ**として直前の物理行に印を付ける。
 //! - ヘッダ行: 各ページ先頭行を位置で落とす。ただし数符 `⠼` を含む行に限定して誤爆を防ぐ。
 //!   （タイトル・ページ番号の中身の復元は点字→数字の逆変換が入ってから。）
+
+use crate::document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
 
 const HEADER_SIZE: usize = 512;
 const EXT_HEADER_SIZE: usize = 512;
@@ -25,30 +27,16 @@ const CELL_MAX: u8 = 0xDF; // 0xA0 + 63
 const BRAILLE_BASE: u32 = 0x2800;
 const NUM_SIGN: char = '⠼'; // U+283C
 
-/// BES から復元した1物理行。
-#[derive(Debug, Clone, PartialEq)]
-pub struct BesPhysicalLine {
-    /// 点字セル文字列。
-    pub content: String,
-    /// この物理行で論理行（段落）が終わるか。
-    pub logical_end: bool,
-    /// この物理行の直後で強制改ページするか。
-    pub page_break: bool,
+/// 復元途中の1物理行（段落へグループ化する前）。
+struct RawLine {
+    content: String,
+    logical_end: bool,
+    page_break: bool,
 }
 
-/// BES から復元したドキュメント。
-#[derive(Debug, Clone, PartialEq)]
-pub struct BesDocument {
-    /// 1行あたりのマス数（xl）。
-    pub line_width: usize,
-    /// 1ページあたりの行数（yl）。
-    pub lines_per_page: usize,
-    /// ヘッダ除去後、全ページ通しの物理行。
-    pub lines: Vec<BesPhysicalLine>,
-}
-
-/// BES バイナリ列を読み込む。マジック不一致や明らかな破損では `None` を返す。
-pub fn read_bes_file(bytes: &[u8]) -> Option<BesDocument> {
+/// BES バイナリ列を読み込んで正本ドキュメントへ復元する。
+/// マジック不一致や明らかな破損では `None` を返す。
+pub fn read_bes(bytes: &[u8]) -> Option<BrailleDocument> {
     if bytes.len() < HEADER_SIZE + EXT_HEADER_SIZE + 2 || &bytes[0..4] != b"%BET" {
         return None;
     }
@@ -67,7 +55,7 @@ pub fn read_bes_file(bytes: &[u8]) -> Option<BesDocument> {
     }
 
     // サイズ前置きのページチャンクを順に読む。
-    let mut pages: Vec<Vec<BesPhysicalLine>> = Vec::new();
+    let mut pages: Vec<Vec<RawLine>> = Vec::new();
     loop {
         if pos >= bytes.len() {
             break;
@@ -95,9 +83,9 @@ pub fn read_bes_file(bytes: &[u8]) -> Option<BesDocument> {
         pos = chunk_end;
     }
 
-    // 改ページの強制/暗黙判定 + ヘッダ行除去。
+    // 改ページの強制/暗黙判定 + ヘッダ行除去 → 通しの物理行へ。
     let page_count = pages.len();
-    let mut lines: Vec<BesPhysicalLine> = Vec::new();
+    let mut raw: Vec<RawLine> = Vec::new();
     for (i, mut page) in pages.into_iter().enumerate() {
         let raw_count = page.len();
 
@@ -118,18 +106,45 @@ pub fn read_bes_file(bytes: &[u8]) -> Option<BesDocument> {
             }
         }
 
-        lines.extend(page);
+        raw.extend(page);
     }
 
-    Some(BesDocument {
+    // 物理行を logical_end で区切って段落へまとめる。
+    let mut paragraphs: Vec<Vec<PhysicalLine>> = Vec::new();
+    let mut current: Vec<PhysicalLine> = Vec::new();
+    for line in raw {
+        let logical_end = line.logical_end;
+        current.push(PhysicalLine {
+            content: line.content,
+            logical_end,
+            page_break: if line.page_break {
+                Some(PageBreak::default())
+            } else {
+                None
+            },
+        });
+        if logical_end {
+            paragraphs.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        paragraphs.push(current);
+    }
+
+    let config = DocumentConfig {
         line_width,
         lines_per_page,
-        lines,
-    })
+        page_header: true,
+        // タイトルは読み込み時に落としている（点字→数字の逆変換が入るまで復元しない）。
+        title: None,
+        number_style: PageNumberStyle::Standard,
+    };
+
+    Some(BrailleDocument { paragraphs, config })
 }
 
 /// ページチャンク（先頭 `0xFD` を除いた本体）を物理行に分解する。
-fn parse_page(body: &[u8]) -> Vec<BesPhysicalLine> {
+fn parse_page(body: &[u8]) -> Vec<RawLine> {
     let mut lines = Vec::new();
     let mut content = String::new();
     let mut saw_cr = false;
@@ -141,7 +156,7 @@ fn parse_page(body: &[u8]) -> Vec<BesPhysicalLine> {
             }
             CR => saw_cr = true,
             LINE_END => {
-                lines.push(BesPhysicalLine {
+                lines.push(RawLine {
                     content: std::mem::take(&mut content),
                     logical_end: saw_cr,
                     page_break: false,
@@ -154,7 +169,7 @@ fn parse_page(body: &[u8]) -> Vec<BesPhysicalLine> {
 
     // 末尾の 0x0D 単独（FE 省略）で終わる行を取りこぼさない。
     if !content.is_empty() || saw_cr {
-        lines.push(BesPhysicalLine {
+        lines.push(RawLine {
             content,
             logical_end: saw_cr,
             page_break: false,
@@ -175,7 +190,6 @@ fn parse_2digit(b: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formatter::{BrailleFormatter, FormatterConfig};
     use crate::writer::OutputFormat;
 
     fn braille_str(n: usize) -> String {
@@ -224,42 +238,41 @@ mod tests {
 
     #[test]
     fn rejects_non_bes() {
-        assert!(read_bes_file(b"not a bes file at all............").is_none());
+        assert!(read_bes(b"not a bes file at all............").is_none());
     }
 
     #[test]
     fn reads_xl_yl_from_header() {
         let bytes = make_bes(32, 22, &[vec![("⠁⠃⠉", true)]]);
-        let doc = read_bes_file(&bytes).unwrap();
-        assert_eq!(doc.line_width, 32);
-        assert_eq!(doc.lines_per_page, 22);
+        let doc = read_bes(&bytes).unwrap();
+        assert_eq!(doc.config.line_width, 32);
+        assert_eq!(doc.config.lines_per_page, 22);
     }
 
     #[test]
-    fn maps_line_terminators() {
-        // 物理行継続(FE) → logical_end=false、論理行終端(0D FE) → true
+    fn groups_physical_lines_into_paragraphs() {
+        // 物理行継続(FE) → 同一段落、論理行終端(0D FE) → 段落確定
         let bytes = make_bes(32, 22, &[vec![("⠁⠃", false), ("⠉⠙", true), ("⠑⠋", true)]]);
-        let doc = read_bes_file(&bytes).unwrap();
-        assert_eq!(doc.lines.len(), 3);
-        assert_eq!(doc.lines[0].content, "⠁⠃");
-        assert!(!doc.lines[0].logical_end); // 物理行のみ終端 → 論理行は継続
-        assert!(doc.lines[1].logical_end);
-        assert!(doc.lines[2].logical_end); // 最終行（0D 単独）も論理行終端
+        let doc = read_bes(&bytes).unwrap();
+        assert_eq!(doc.paragraphs.len(), 2);
+        assert_eq!(doc.paragraphs[0].len(), 2); // 継続 + 終端
+        assert_eq!(doc.paragraphs[0][0].content, "⠁⠃");
+        assert!(!doc.paragraphs[0][0].logical_end);
+        assert!(doc.paragraphs[0][1].logical_end);
+        assert_eq!(doc.paragraphs[1].len(), 1);
     }
 
     #[test]
     fn drops_header_line_with_number_sign() {
-        // 先頭行に数符を含むヘッダを置く → 落とされる
         let header = format!("⠞⠊{}⠼⠁", "⠀".repeat(3));
         let bytes = make_bes(32, 22, &[vec![(header.as_str(), true), ("⠁⠃⠉", true)]]);
-        let doc = read_bes_file(&bytes).unwrap();
-        assert_eq!(doc.lines.len(), 1);
-        assert_eq!(doc.lines[0].content, "⠁⠃⠉");
+        let doc = read_bes(&bytes).unwrap();
+        assert_eq!(doc.paragraphs.len(), 1);
+        assert_eq!(doc.logical_text(0), "⠁⠃⠉");
     }
 
     #[test]
     fn full_page_break_is_implicit() {
-        // ページ0 が lines_per_page=3 行ちょうど（満杯）→ 改ページは暗黙 → page_break なし
         let bytes = make_bes(
             32,
             3,
@@ -268,43 +281,51 @@ mod tests {
                 vec![("⠙", true)],
             ],
         );
-        let doc = read_bes_file(&bytes).unwrap();
-        assert_eq!(doc.lines.len(), 4);
-        assert!(doc.lines.iter().all(|l| !l.page_break));
+        let doc = read_bes(&bytes).unwrap();
+        assert!(doc
+            .paragraphs
+            .iter()
+            .flatten()
+            .all(|l| l.page_break.is_none()));
     }
 
     #[test]
     fn short_page_break_is_forced() {
-        // ページ0 が lines_per_page=5 未満（2行）で終わる → 強制改ページ
         let bytes = make_bes(32, 5, &[vec![("⠁", false), ("⠃", true)], vec![("⠉", true)]]);
-        let doc = read_bes_file(&bytes).unwrap();
-        assert_eq!(doc.lines.len(), 3);
-        assert!(doc.lines[1].page_break); // ページ0最終行に強制改ページ
-        assert!(!doc.lines[0].page_break);
-        assert!(!doc.lines[2].page_break); // 最終ページは対象外
+        let doc = read_bes(&bytes).unwrap();
+        // ページ0 最終行（段落0の末尾）に強制改ページ
+        assert!(doc.paragraphs[0].last().unwrap().page_break.is_some());
+        assert!(doc.paragraphs[1].last().unwrap().page_break.is_none());
     }
 
     #[test]
     fn roundtrip_from_writer_preserves_content() {
-        // writer 出力（ヘッダ込み・自動改ページ）を読み戻し、本文と論理構造が一致する。
-        let config = FormatterConfig {
+        // writer の Bes 出力（ヘッダ無し）を読み戻し、論理テキストが一致する。
+        let config = DocumentConfig {
             line_width: 32,
             lines_per_page: 25,
-            page_header: false, // ヘッダ無しで本文のみを厳密比較
+            page_header: false,
             title: None,
+            number_style: PageNumberStyle::Standard,
         };
         let paras = vec![braille_str(10), braille_str(40), braille_str(5)];
-        let doc = BrailleFormatter::new(config).format(&paras);
+        let doc = BrailleDocument::from_reflowed_paragraphs(&paras, config);
         let bytes = OutputFormat::Bes.write(&doc);
 
-        let read = read_bes_file(&bytes).unwrap();
-        let original: Vec<String> = doc
-            .pages()
+        let read = read_bes(&bytes).unwrap();
+        // 全物理行の内容を連結して比較（折返し位置含め一致するはず）
+        let restored: Vec<String> = read
+            .paragraphs
             .iter()
-            .flat_map(|p| p.iter())
+            .flatten()
             .map(|l| l.content.clone())
             .collect();
-        let restored: Vec<String> = read.lines.iter().map(|l| l.content.clone()).collect();
+        let original: Vec<String> = doc
+            .paragraphs
+            .iter()
+            .flatten()
+            .map(|l| l.content.clone())
+            .collect();
         assert_eq!(restored, original);
     }
 }

@@ -41,7 +41,7 @@ public partial class Form1 : Form
         };
         // 新規ドキュメントで起動
         _document.Paragraphs.Add([new PhysicalLine("", true)]);
-        LoadDocumentToEditor(alreadyFormatted: true);
+        LoadDocumentToEditor();
         IsModified = false;
         UpdateTitle();
         UpdateStatus();
@@ -82,13 +82,13 @@ public partial class Form1 : Form
         _suppressModified = true;
         try
         {
-            using var handle = MomoFfi.FormatDocument(_document);
+            var logical = LogicalText();
+            using var handle = MomoFfi.RenderFromParagraphs(logical, _document.Config);
             if (handle == null)
             {
-                // DLL 未ビルド: 論理行を生テキストとして表示
+                // DLL 未ビルド/モデル不在: 論理行を生テキストとして表示
                 _view = null;
-                richTextBox.Text = string.Join("\n",
-                    Enumerable.Range(0, _document.Paragraphs.Count).Select(_document.GetLogicalText));
+                richTextBox.Text = logical;
                 richTextBox.SelectionStart = 0;
                 richTextBox.SelectionLength = 0;
                 return;
@@ -107,28 +107,9 @@ public partial class Form1 : Form
         richTextBox.Focus();
     }
 
-    /// <summary>
-    /// 保存済みの物理行から直接ビューを組んで描画する（再ワードラップしない）。
-    /// .mbr など物理行が確定済みの文書の読み込みに使う。強制改行を保持し、
-    /// ページヘッダ生成も C# 側に一本化される（Rust フォーマッタを呼ばない）。
-    /// </summary>
-    private void RenderFromDocument(int targetParaIdx, int targetCharOffset)
-    {
-        _suppressModified = true;
-        try
-        {
-            _view = FormattedDocumentView.BuildFromDocument(_document);
-            if (_view.PhysicalLineCount == 0)
-                _view = FormattedDocumentView.CreateEmpty(_document.Config);
-
-            WriteViewToTextBox(targetParaIdx, targetCharOffset);
-        }
-        finally
-        {
-            _suppressModified = false;
-        }
-        richTextBox.Focus();
-    }
+    // 全段落の論理テキストを \n で連結して返す（Rust への受け渡し用）。
+    private string LogicalText() =>
+        string.Join("\n", Enumerable.Range(0, _document.Paragraphs.Count).Select(_document.GetLogicalText));
 
     // _view を RichTextBox に書き出し、ヘッダ保護とカーソル復元を行う。
     // _suppressModified が true の状態で呼ぶこと。target < 0 なら先頭にカーソルを置く。
@@ -142,6 +123,7 @@ public partial class Form1 : Form
         }
         richTextBox.Text = sb.ToString();
 
+        ApplyLineSpacing();
         ApplyHeaderProtection();
 
         if (targetParaIdx >= 0)
@@ -153,94 +135,21 @@ public partial class Form1 : Form
         }
     }
 
-    // PhysicalLinesHandle の内容で _document.Paragraphs[paraIdx] を更新する。
-    private static void SyncDocumentFromHandle(BrailleDocument doc, int paraIdx, MomoFfi.PhysicalLinesHandle handle)
-    {
-        var lines = new List<PhysicalLine>();
-        for (int i = 0; i < handle.Count; i++)
-            lines.Add(new PhysicalLine(handle.GetLine(i), handle.IsLogicalEnd(i)));
-        doc.Paragraphs[paraIdx] = lines.Count > 0 ? lines : [new PhysicalLine("", true)];
-    }
-
-    // _view の内容を RichTextBox に書き出す。_suppressModified が true の状態で呼ぶこと。
-    private void RerenderView(int targetParaIdx, int targetCharOffset) =>
-        WriteViewToTextBox(targetParaIdx, targetCharOffset);
-
-    // 単一段落の文字挿入・削除後に呼ぶ。
+    // 編集操作後の再描画。ドキュメント全体を Rust で再フォーマットして描画し直す
+    // （折返し・ページ分割・ヘッダは Rust に一元化されている）。以下は呼び出し側の
+    // 意図を表す薄いラッパで、いずれもカーソルを論理位置へ復元する。
     private void ReformatOneParagraphAndRender(int paraIdx, int targetCharOffset) =>
-        ReformatInsertedParagraphsAndRender(paraIdx, 0, paraIdx, targetCharOffset);
+        ReformatAndRender(paraIdx, targetCharOffset);
 
-    // 段落分割後に呼ぶ。
     private void ReformatSplitAndRender(int firstParaIdx, int secondParaIdx) =>
-        ReformatInsertedParagraphsAndRender(firstParaIdx, 1, secondParaIdx, 0);
+        ReformatAndRender(secondParaIdx, 0);
 
-    /// <summary>
-    /// startIdx から始まる insertedCount+1 個の段落を差分フォーマットして RichTextBox を更新する。
-    /// 既存の段落（startIdx+1 以降）には影響を与えない。
-    /// </summary>
     private void ReformatInsertedParagraphsAndRender(
-        int startIdx, int insertedCount, int targetParaIdx, int targetCharOffset)
-    {
-        if (_view == null) { ReformatAndRender(targetParaIdx, targetCharOffset); return; }
+        int startIdx, int insertedCount, int targetParaIdx, int targetCharOffset) =>
+        ReformatAndRender(targetParaIdx, targetCharOffset);
 
-        int totalCount = insertedCount + 1;
-        var handles = new MomoFfi.PhysicalLinesHandle?[totalCount];
-        for (int i = 0; i < totalCount; i++)
-            handles[i] = MomoFfi.FormatLogicalLine(_document.GetLogicalText(startIdx + i), _document.Config.LineWidth);
-
-        if (Array.Exists(handles, h => h == null))
-        {
-            foreach (var h in handles) h?.Dispose();
-            ReformatAndRender(targetParaIdx, targetCharOffset);
-            return;
-        }
-
-        _suppressModified = true;
-        try
-        {
-            SyncDocumentFromHandle(_document, startIdx, handles[0]!);
-            _view.UpdateParagraph(startIdx, handles[0]!);
-            if (insertedCount > 0)
-            {
-                _view.ShiftParagraphIndices(startIdx + 1, insertedCount);
-                for (int i = 1; i <= insertedCount; i++)
-                {
-                    SyncDocumentFromHandle(_document, startIdx + i, handles[i]!);
-                    _view.UpdateParagraph(startIdx + i, handles[i]!);
-                }
-            }
-            _view.RecomputeHeaders(_document.Config);
-            RerenderView(targetParaIdx, targetCharOffset);
-        }
-        finally
-        {
-            _suppressModified = false;
-            foreach (var h in handles) h?.Dispose();
-        }
-        richTextBox.Focus();
-    }
-
-    /// <summary>
-    /// 段落結合後に呼ぶ。survivingIdx の内容を再フォーマットし、
-    /// removedIdx の物理行を削除して後続インデックスを -1 ずらす。
-    /// </summary>
-    private void ReformatMergeAndRender(int survivingIdx, int removedIdx, int targetCharOffset)
-    {
-        if (_view == null) { ReformatAndRender(survivingIdx, targetCharOffset); return; }
-        using var h = MomoFfi.FormatLogicalLine(_document.GetLogicalText(survivingIdx), _document.Config.LineWidth);
-        if (h == null) { ReformatAndRender(survivingIdx, targetCharOffset); return; }
-        _suppressModified = true;
-        try
-        {
-            _view.DeleteParagraph(removedIdx);
-            SyncDocumentFromHandle(_document, survivingIdx, h);
-            _view.UpdateParagraph(survivingIdx, h);
-            _view.RecomputeHeaders(_document.Config);
-            RerenderView(survivingIdx, targetCharOffset);
-        }
-        finally { _suppressModified = false; }
-        richTextBox.Focus();
-    }
+    private void ReformatMergeAndRender(int survivingIdx, int removedIdx, int targetCharOffset) =>
+        ReformatAndRender(survivingIdx, targetCharOffset);
 
     /// <summary>現在のカーソル行がヘッダ行かどうかを返す。</summary>
     private bool IsOnHeaderLine()
@@ -316,7 +225,7 @@ public partial class Form1 : Form
         if (!ConfirmDiscard()) return;
         _document = BrailleDocument.Empty();
         _document.Paragraphs.Add([new PhysicalLine("", true)]);
-        LoadDocumentToEditor(alreadyFormatted: true);
+        LoadDocumentToEditor();
         _filePath = null;
         IsModified = false;
     }
@@ -331,30 +240,23 @@ public partial class Form1 : Form
         if (dialog.ShowDialog() != DialogResult.OK) return;
         try
         {
-            bool alreadyFormatted;
             // 取り込み後のファイル名と変更フラグ。点字以外（テキスト）を取り込んだ場合は
             // 拡張子を .mbr に付け替え、未保存（要保存）として扱う。
             string filePath = dialog.FileName;
             bool modified = false;
 
-            if (IsBesFile(dialog.FileName))
+            if (IsBesFile(dialog.FileName) || IsMbrFile(dialog.FileName))
             {
-                // BES はバイナリ。Rust でデコードし物理行を復元する。
-                var doc = BesFormat.Read(File.ReadAllBytes(dialog.FileName));
+                // 点字ファイル（MBR / BES）は Rust の reader で正本ドキュメントへ復元する。
+                int format = IsBesFile(dialog.FileName) ? MomoFfi.ReadBes : MomoFfi.ReadMbr;
+                var doc = MomoFfi.ReadDocument(File.ReadAllBytes(dialog.FileName), format);
                 if (doc == null)
                 {
-                    MessageBox.Show("BESファイルを読み込めませんでした。", "エラー",
+                    MessageBox.Show("点字ファイルを読み込めませんでした。", "エラー",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
                 _document = doc;
-                alreadyFormatted = true; // 物理行が確定済み
-            }
-            else if (IsMbrFile(dialog.FileName))
-            {
-                _document = MbrFormat.Read(File.ReadAllText(dialog.FileName, Encoding.UTF8));
-                // .mbr は物理行が確定済み → 再ワードラップせず直接描画（強制改行を保持）
-                alreadyFormatted = true;
             }
             else
             {
@@ -369,13 +271,12 @@ public partial class Form1 : Form
                     return;
                 }
                 _document = doc;
-                alreadyFormatted = false;                              // 折り返しが必要
                 filePath = Path.ChangeExtension(dialog.FileName, ".mbr"); // 編集中のファイル名は .mbr
                 modified = true;                                       // .mbr はまだ保存されていない
             }
             if (_document.Paragraphs.Count == 0)
                 _document.Paragraphs.Add([new PhysicalLine("", true)]);
-            LoadDocumentToEditor(alreadyFormatted);
+            LoadDocumentToEditor();
             _filePath = filePath;
             IsModified = modified;
             richTextBox.Focus();
@@ -409,10 +310,26 @@ public partial class Form1 : Form
         try
         {
             SyncEditorToDocument();
-            var text = IsMbrFile(path)
-                ? MbrFormat.Write(_document)
-                : string.Join("\n", Enumerable.Range(0, _document.Paragraphs.Count).Select(i => _document.GetLogicalText(i)));
-            File.WriteAllText(path, text, Encoding.UTF8);
+            var logical = LogicalText();
+            int? format = FormatForPath(path);
+            if (format is int fmt)
+            {
+                // 点字形式（MBR/BES/BASE/BRL）は Rust の writer でバイト列を生成する。
+                var bytes = MomoFfi.WriteFromParagraphs(logical, _document.Config, fmt);
+                if (bytes == null)
+                {
+                    MessageBox.Show(
+                        "点字変換エンジン（DLL）を読み込めないため、保存できませんでした。",
+                        "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                File.WriteAllBytes(path, bytes);
+            }
+            else
+            {
+                // それ以外（.txt など）は論理テキストをそのまま書き出す。
+                File.WriteAllText(path, logical, Encoding.UTF8);
+            }
             _filePath = path;
             IsModified = false;
         }
@@ -431,6 +348,17 @@ public partial class Form1 : Form
     private static bool IsBesFile(string path) =>
         Path.GetExtension(path).Equals(".bes", StringComparison.OrdinalIgnoreCase);
 
+    // 拡張子に対応する点字書き出し形式コード。点字形式でなければ null（プレーンテキスト保存）。
+    private static int? FormatForPath(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".mbr" => MomoFfi.FormatMbr,
+            ".bes" => MomoFfi.FormatBes,
+            ".bse" => MomoFfi.FormatBase,
+            ".brl" => MomoFfi.FormatBrl,
+            _ => null,
+        };
+
     private void SyncEditorToDocument()
     {
         // _view != null のとき _document.Paragraphs は編集操作ごとに更新済み
@@ -438,15 +366,8 @@ public partial class Form1 : Form
         _document.SetParagraphs(richTextBox.Lines);
     }
 
-    // alreadyFormatted: 物理行が確定済み（.mbr・新規空文書）なら Rust を介さず直接描画。
-    // false（生テキスト取り込みなど未折り返し）なら Rust でワードラップする。
-    private void LoadDocumentToEditor(bool alreadyFormatted)
-    {
-        if (alreadyFormatted)
-            RenderFromDocument(-1, -1);
-        else
-            ReformatAndRender(-1, -1);
-    }
+    // ドキュメントを Rust で整形して描画する（折返し・ページ分割・ヘッダは Rust 側）。
+    private void LoadDocumentToEditor() => ReformatAndRender(-1, -1);
 
     /// <summary>
     /// 漢字かな交じり文を 1 論理行ずつ点字へ変換してドキュメントを組み立てる。

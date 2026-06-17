@@ -18,7 +18,7 @@
 //! 自然に取れること、後段で原文スライスを取るときに変換が不要なこと、
 //! Rust の文字列表現と整合的なことが理由。
 
-use crate::char_type::{CharType, get_char_type};
+use crate::char_type::{get_char_type, CharType};
 use crate::feature::{FeatureKey, FeatureType};
 
 // ============================================================
@@ -433,7 +433,11 @@ fn numeric_run_length(seq: &[SourceEntry], i: usize) -> u32 {
 /// 学習時の `_RUN_LEN_MAP = {"1": 1, "2": 2, "3": 3, "4": 4, "5+": 5}` に対応。
 #[inline]
 fn clamp_run(run: u32) -> u8 {
-    if run <= 4 { run as u8 } else { 5 }
+    if run <= 4 {
+        run as u8
+    } else {
+        5
+    }
 }
 
 /// 小書き仮名（拗音複合ユニット検出に使用）。
@@ -669,11 +673,9 @@ mod tests {
         );
         assert!(feats[1].contains(&key));
         // 最初の「あ」には TypeTransition がない (prev がないため)
-        assert!(
-            !feats[0]
-                .iter()
-                .any(|k| k.feature_type == FeatureType::TypeTransition)
-        );
+        assert!(!feats[0]
+            .iter()
+            .any(|k| k.feature_type == FeatureType::TypeTransition));
     }
 
     #[test]
@@ -719,19 +721,22 @@ mod tests {
 
     #[test]
     fn is_small_kana_works() {
+        // 直前の基底かなと結合して拗音（1複合ユニット）になる小書きかな。
         for cp in [
             'ぁ' as u32,
             'ゃ' as u32,
-            'っ' as u32,
             'ゎ' as u32,
             'ァ' as u32,
             'ャ' as u32,
-            'ッ' as u32,
+            'ヮ' as u32,
         ] {
             assert!(is_small_kana(cp));
         }
         assert!(!is_small_kana('あ' as u32));
         assert!(!is_small_kana('き' as u32));
+        // 促音 っ/ッ は結合せず独立した 1 ユニットなので小書きかな扱いしない。
+        assert!(!is_small_kana('っ' as u32));
+        assert!(!is_small_kana('ッ' as u32));
     }
 
     #[test]

@@ -112,7 +112,7 @@ partial class Form1
 
         // richTextBox
         richTextBox.Dock = DockStyle.Fill;
-        richTextBox.Font = new Font("Courier New", 13F, FontStyle.Regular, GraphicsUnit.Point);
+        richTextBox.Font = new Font("Courier New", 28F, FontStyle.Regular, GraphicsUnit.Point);
         richTextBox.ScrollBars = RichTextBoxScrollBars.Both;
         richTextBox.WordWrap = false;
         richTextBox.AcceptsTab = true;

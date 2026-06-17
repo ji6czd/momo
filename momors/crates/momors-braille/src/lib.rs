@@ -1,11 +1,16 @@
 //! # momors-braille
 //!
-//! かな列を日本語点字に変換するライブラリ。
+//! かな列を日本語点字に変換し、点字ドキュメントを各種ファイル形式で読み書きするライブラリ。
 //!
-//! [`momors_core::PredictionResult`] のかな列を受け取り、点字文字列と
-//! かな↔点字の双方向インデックスを返す。
+//! ## 構成
 //!
-//! ## 使い方
+//! - [`BrailleConverter`]: かな列 → 点字（[`momors_core::PredictionResult`] のかなを受け取る）。
+//! - [`document`]: 点字ドキュメントの**正本** [`BrailleDocument`]。MBR テキスト codec を含む。
+//! - [`reader`]: バイト列 → [`BrailleDocument`]（BES デコード）。
+//! - [`formatter`]: 正本 → 印刷イメージ [`FormattedDocument`] の導出（[`render`]）とワードラップ。
+//! - [`writer`]: 正本 → 各種ファイル形式のバイト列（[`OutputFormat`]）。
+//!
+//! ## 使い方（変換）
 //!
 //! ```no_run
 //! use momors_braille::BrailleConverter;
@@ -19,6 +24,7 @@
 //! ```
 
 pub mod converter;
+pub mod document;
 pub mod error;
 pub mod formatter;
 mod nabcc;
@@ -27,8 +33,11 @@ pub mod table;
 pub mod writer;
 
 pub use converter::{BrailleConverter, BrailleResult};
+pub use document::{
+    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine,
+};
 pub use error::{Error, Result};
-pub use formatter::{BrailleFormatter, FormattedDocument, FormatterConfig, PhysicalLine};
-pub use reader::{read_bes_file, BesDocument, BesPhysicalLine};
+pub use formatter::{render, FormattedDocument, RenderedLine};
+pub use reader::read_bes;
 pub use table::BrailleTable;
 pub use writer::OutputFormat;

@@ -1,60 +1,34 @@
-use crate::formatter::{FormattedDocument, FormatterConfig};
+//! 正本 [`BrailleDocument`] をファイル形式のバイト列へ直列化する。
+//!
+//! - `Mbr`: 論理ドキュメントをそのまま MBR テキストへ（[`BrailleDocument::to_mbr`]）。
+//! - `Bes` / `Base` / `BrailleText`: [`render`] で印刷イメージへ導出してから符号化する。
+
+use crate::document::BrailleDocument;
+use crate::formatter::{render, FormattedDocument};
 use crate::nabcc::braille_to_nabcc_capital;
 
-/// フォーマット済み点字ドキュメントの出力形式。
+/// ドキュメントの出力形式。
 pub enum OutputFormat {
-    /// ページ間をフォームフィード (`\x0C`) で区切ったプレーンテキスト。ファイル拡張子: `.brl`
+    /// ページ間をフォームフィード (`\x0C`) で区切ったプレーンテキスト。拡張子: `.brl`
     BrailleText,
-    /// オリジナルはPC-9801用の点字ファイル形式。ヘッダとページデータを含む。ファイル拡張子: `.bse`
+    /// PC-9801 用の点字ファイル形式。ヘッダとページデータを含む。拡張子: `.bse`
     Base,
-    /// IBM点字編集システム。ヘッダとページデータを含む独自バイナリ形式。ファイル拡張子: `.bes`
+    /// IBM 点字編集システム形式。独自バイナリ。拡張子: `.bes`
     Bes,
-    /// Momo Braille Document。フロントマター + 段落本文の UTF-8 テキスト。ファイル拡張子: `.mbr`
-    Mbr(FormatterConfig),
+    /// Momo Braille Document。フロントマター + 段落本文の UTF-8 テキスト。拡張子: `.mbr`
+    Mbr,
 }
 
 impl OutputFormat {
-    /// ドキュメントをこの形式のバイト列に変換して返す。
-    pub fn write(&self, doc: &FormattedDocument) -> Vec<u8> {
+    /// 正本ドキュメントをこの形式のバイト列へ変換する。
+    pub fn write(&self, doc: &BrailleDocument) -> Vec<u8> {
         match self {
-            OutputFormat::BrailleText => write_braille_text(doc),
-            OutputFormat::Base => write_base_file(doc),
-            OutputFormat::Bes => write_bes_file(doc),
-            OutputFormat::Mbr(config) => write_mbr(doc, config),
+            OutputFormat::Mbr => doc.to_mbr().into_bytes(),
+            OutputFormat::BrailleText => write_braille_text(&render(doc)),
+            OutputFormat::Base => write_base_file(&render(doc)),
+            OutputFormat::Bes => write_bes_file(&render(doc)),
         }
     }
-}
-
-/// `.mbr` 形式（Momo Braille Document）の UTF-8 バイト列を返す。
-///
-/// フロントマター + 本文を生成する。本文は物理行をそのまま1行ずつ出力し、
-/// 論理行（段落）の終わりに空行を1行挿入する。
-/// `page_header = true` の場合、各ページの先頭ヘッダ行はスキップする。
-pub fn write_mbr(doc: &FormattedDocument, config: &FormatterConfig) -> Vec<u8> {
-    let mut out = String::new();
-    out.push_str(&format!("line_width = {}\n", config.line_width));
-    out.push_str(&format!("lines_per_page = {}\n", config.lines_per_page));
-    out.push_str(&format!(
-        "page_header = {}\n",
-        if config.page_header { "true" } else { "false" }
-    ));
-    if let Some(title) = &config.title {
-        out.push_str(&format!("title = {}\n", title));
-    }
-    out.push_str("---\n");
-    for page in doc.pages() {
-        for (l, line) in page.iter().enumerate() {
-            if config.page_header && l == 0 {
-                continue;
-            }
-            out.push_str(&line.content);
-            out.push('\n');
-            if line.logical_end {
-                out.push('\n');
-            }
-        }
-    }
-    out.into_bytes()
 }
 
 fn write_braille_text(doc: &FormattedDocument) -> Vec<u8> {
@@ -192,161 +166,54 @@ fn write_bes_file(doc: &FormattedDocument) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formatter::{BrailleFormatter, FormatterConfig};
+    use crate::document::{DocumentConfig, PageNumberStyle};
 
-    fn default_config() -> FormatterConfig {
-        FormatterConfig {
+    fn config(page_header: bool) -> DocumentConfig {
+        DocumentConfig {
             line_width: 32,
             lines_per_page: 22,
-            page_header: false,
+            page_header,
             title: None,
+            number_style: PageNumberStyle::Standard,
         }
     }
 
-    fn empty_doc() -> FormattedDocument {
-        BrailleFormatter::new(default_config()).format(&[])
+    fn doc(paragraphs: &[&str], page_header: bool) -> BrailleDocument {
+        let paras: Vec<String> = paragraphs.iter().map(|s| s.to_string()).collect();
+        BrailleDocument::from_reflowed_paragraphs(&paras, config(page_header))
     }
 
     #[test]
-    fn mbr_front_matter_keys() {
-        let out = String::from_utf8(write_mbr(&empty_doc(), &default_config())).unwrap();
-        assert!(out.starts_with("line_width = 32\n"));
-        assert!(out.contains("lines_per_page = 22\n"));
-        assert!(out.contains("page_header = false\n"));
-        assert!(out.contains("---\n"));
-    }
-
-    #[test]
-    fn mbr_title_written_when_present() {
-        let config = FormatterConfig {
-            title: Some("⠞⠊⠞⠇⠑".to_string()),
-            ..default_config()
-        };
-        let doc = BrailleFormatter::new(default_config()).format(&[]);
-        let out = String::from_utf8(write_mbr(&doc, &config)).unwrap();
-        assert!(out.contains("title = ⠞⠊⠞⠇⠑\n"));
-    }
-
-    #[test]
-    fn mbr_title_absent_when_none() {
-        let out = String::from_utf8(write_mbr(&empty_doc(), &default_config())).unwrap();
-        assert!(!out.contains("title"));
-    }
-
-    #[test]
-    fn mbr_paragraphs_written_as_lines_with_blank_separator() {
-        // 2段落 → 各段落の後に空行（論理行区切り）
-        let paras = vec!["⠁⠃⠉".to_string(), "⠙⠑⠋".to_string()];
-        let doc = BrailleFormatter::new(default_config()).format(&paras);
-        let out = String::from_utf8(write_mbr(&doc, &default_config())).unwrap();
+    fn mbr_uses_document_to_mbr() {
+        let d = doc(&["⠁⠃⠉", "⠙⠑⠋"], true);
+        let out = String::from_utf8(OutputFormat::Mbr.write(&d)).unwrap();
+        assert_eq!(out, d.to_mbr());
         let body = out.split("---\n").nth(1).unwrap();
-        assert_eq!(body, "⠁⠃⠉\n\n⠙⠑⠋\n\n");
-    }
-
-    #[test]
-    fn mbr_wrapped_paragraph_writes_physical_lines_separately() {
-        // ワードラップされた段落の物理行が個別の行として出力される
-        let long_para: String = (0..30).map(|_| '⠁').collect::<String>()
-            + "⠀"
-            + &(0..30).map(|_| '⠃').collect::<String>();
-        let paras = vec![long_para];
-        let f = BrailleFormatter::new(default_config());
-        let doc = f.format(&paras);
-        let physical_line_count = doc.pages()[0].len();
-        assert!(physical_line_count > 1, "ワードラップされているはず");
-        let out = String::from_utf8(write_mbr(&doc, &default_config())).unwrap();
-        let body = out.split("---\n").nth(1).unwrap();
-        // 物理行数分の行 + 段落末の空行
-        assert_eq!(body.lines().count(), physical_line_count + 1);
-        // 最後から2行目が空行（論理行区切り）
-        let lines: Vec<&str> = body.lines().collect();
-        assert_eq!(lines[physical_line_count], "");
-    }
-
-    #[test]
-    fn mbr_page_header_lines_are_skipped() {
-        // page_header=true のとき、ヘッダ行は本文に含まれない
-        let config = FormatterConfig {
-            page_header: true,
-            title: Some("⠞⠊⠞⠇⠑".to_string()),
-            ..default_config()
-        };
-        let doc = BrailleFormatter::new(FormatterConfig {
-            page_header: true,
-            title: Some("⠞⠊⠞⠇⠑".to_string()),
-            ..default_config()
-        })
-        .format(&["⠁⠃⠉".to_string()]);
-        let out = String::from_utf8(write_mbr(&doc, &config)).unwrap();
-        let body = out.split("---\n").nth(1).unwrap();
-        assert_eq!(body, "⠁⠃⠉\n\n");
-    }
-
-    #[test]
-    fn output_format_mbr_roundtrip() {
-        let paras = vec!["⠁⠃⠉".to_string(), "⠙⠑⠋".to_string()];
-        let doc = BrailleFormatter::new(default_config()).format(&paras);
-        let bytes = OutputFormat::Mbr(default_config()).write(&doc);
-        let out = String::from_utf8(bytes).unwrap();
-        let body = out.split("---\n").nth(1).unwrap();
-        assert_eq!(body, "⠁⠃⠉\n\n⠙⠑⠋\n\n");
-    }
-
-    fn make_doc(paragraphs: &[&str]) -> FormattedDocument {
-        let f = BrailleFormatter::new(FormatterConfig {
-            line_width: 32,
-            lines_per_page: 22,
-            page_header: false,
-            title: None,
-        });
-        let paras: Vec<String> = paragraphs.iter().map(|s| s.chars().collect()).collect();
-        f.format(&paras)
+        assert_eq!(body, "⠁⠃⠉\n\n⠙⠑⠋\n");
     }
 
     #[test]
     fn bes_has_correct_magic() {
-        let doc = make_doc(&["⠁⠃"]);
-        let bytes = write_bes_file(&doc);
+        let d = doc(&["⠁⠃"], false);
+        let bytes = OutputFormat::Bes.write(&d);
         assert_eq!(&bytes[0..4], b"%BET");
         assert_eq!(bytes[4], b'4');
     }
 
     #[test]
-    fn bes_ext_header_magic() {
-        let doc = make_doc(&["⠁"]);
-        let bytes = write_bes_file(&doc);
-        assert_eq!(bytes[0x200], 0xFF);
-        assert_eq!(bytes[0x201], 0xFF);
-        assert_eq!(bytes[0x202], 0xFF);
-        assert_eq!(bytes[0x203], 0x54);
-    }
-
-    #[test]
-    fn bes_control_area_terminator() {
-        let doc = make_doc(&["⠁"]);
-        let bytes = write_bes_file(&doc);
-        // コントロールエリアは offset 0x400 の 0xFF 1 byte
-        assert_eq!(bytes[0x400], 0xFF);
-    }
-
-    #[test]
     fn bes_xl_yl_encoding() {
-        let doc = make_doc(&["⠁"]);
-        let bytes = write_bes_file(&doc);
-        // xl=32 → xl+1=33 → '3','3'
-        assert_eq!(bytes[0x16], b'3');
+        let d = doc(&["⠁"], false);
+        let bytes = OutputFormat::Bes.write(&d);
+        assert_eq!(bytes[0x16], b'3'); // xl=32 → 33
         assert_eq!(bytes[0x17], b'3');
-        // yl=22 → '2','2'
-        assert_eq!(bytes[0x18], b'2');
+        assert_eq!(bytes[0x18], b'2'); // yl=22
         assert_eq!(bytes[0x19], b'2');
     }
 
     #[test]
     fn bes_braille_cell_encoding() {
-        // U+2801 (⠁, pattern=1) → 0xA1
-        let doc = make_doc(&["⠁"]);
-        let bytes = write_bes_file(&doc);
-        // page data starts at 0x401: size_lo, size_hi, 0xFD, cell, 0x0D, ...
+        let d = doc(&["⠁"], false);
+        let bytes = OutputFormat::Bes.write(&d);
         let page_start = 0x401;
         assert_eq!(bytes[page_start + 2], 0xFD); // ページ開始マーカ
         assert_eq!(bytes[page_start + 3], 0xA1); // ⠁ = 0xA0 + 1
@@ -354,23 +221,35 @@ mod tests {
 
     #[test]
     fn bes_logical_line_end_codes() {
-        // 2論理行 → 1行目の末尾は 0x0D 0xFE、最終行は 0x0D のみ
-        let doc = make_doc(&["⠁", "⠃"]);
-        let bytes = write_bes_file(&doc);
+        let d = doc(&["⠁", "⠃"], false);
+        let bytes = OutputFormat::Bes.write(&d);
         let page_start = 0x401;
         // page_buf: FD A1 0D FE A3 0D
         assert_eq!(bytes[page_start + 2], 0xFD);
         assert_eq!(bytes[page_start + 3], 0xA1);
         assert_eq!(bytes[page_start + 4], 0x0D);
         assert_eq!(bytes[page_start + 5], 0xFE);
-        assert_eq!(bytes[page_start + 6], 0xA3); // ⠃ = 0xA0 + 3
+        assert_eq!(bytes[page_start + 6], 0xA3);
         assert_eq!(bytes[page_start + 7], 0x0D);
     }
 
     #[test]
     fn bes_eof_marker() {
-        let doc = make_doc(&["⠁"]);
-        let bytes = write_bes_file(&doc);
+        let d = doc(&["⠁"], false);
+        let bytes = OutputFormat::Bes.write(&d);
         assert_eq!(*bytes.last().unwrap(), 0xFF);
+    }
+
+    #[test]
+    fn braille_text_form_feed_between_pages() {
+        // lines_per_page=1, ヘッダなし、2段落 → 2ページ → フォームフィードで区切る
+        let cfg = DocumentConfig {
+            lines_per_page: 1,
+            page_header: false,
+            ..config(false)
+        };
+        let d = BrailleDocument::from_reflowed_paragraphs(&["⠁".to_string(), "⠃".to_string()], cfg);
+        let out = String::from_utf8(OutputFormat::BrailleText.write(&d)).unwrap();
+        assert!(out.contains('\x0C'));
     }
 }

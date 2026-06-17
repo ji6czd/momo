@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
-use momors_braille::{BrailleConverter, BrailleFormatter, FormatterConfig, OutputFormat};
+use momors_braille::{BrailleConverter, BrailleDocument, DocumentConfig, OutputFormat};
 use momors_core::{Predictor, PredictorConfig};
 
 fn data_dir() -> PathBuf {
@@ -158,12 +158,7 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
         Some("brf") => Some(OutputFormat::BrailleText),
         Some("bse") => Some(OutputFormat::Base),
         Some("bes") => Some(OutputFormat::Bes),
-        Some("mbr") => Some(OutputFormat::Mbr(FormatterConfig {
-            line_width: 32,
-            lines_per_page: 22,
-            page_header: true,
-            title: None,
-        })),
+        Some("mbr") => Some(OutputFormat::Mbr),
         _ => None,
     };
 
@@ -184,13 +179,15 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
                 .as_ref()
                 .map(|t| to_braille(t, predictor, &converter))
                 .transpose()?;
-            let formatter = BrailleFormatter::new(FormatterConfig {
+            let config = DocumentConfig {
                 line_width: cli.line_width,
                 lines_per_page: cli.lines_per_page,
                 page_header: true,
                 title: title_braille,
-            });
-            format.write(&formatter.format(&braille_list))
+                ..DocumentConfig::default()
+            };
+            let doc = BrailleDocument::from_reflowed_paragraphs(&braille_list, config);
+            format.write(&doc)
         }
         None => {
             let kana_lines: Vec<String> = paragraphs

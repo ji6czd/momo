@@ -84,13 +84,17 @@
                                 Action='set'
                                 System='yes'/>
                         </Component>
-                        <!-- momo.exe (Rust CLI) -->
-                        <Component Id='MomoCli' Guid='*'>
+                        <!-- momo.exe (Rust CLI) + momors_ffi.dll (FFI ライブラリ) -->
+                        <Component Id='MomoCli' Guid='69B9CCC3-B027-43B6-BBD1-EBBC64CAE445'>
                             <File Id='MomoCliExe'
                                   Name='momo.exe'
                                   DiskId='1'
                                   Source='$(var.StageDir)\bin\momo.exe'
                                   KeyPath='yes'/>
+                            <File Id='MomorsFfiDll'
+                                  Name='momors_ffi.dll'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\momors_ffi.dll'/>
                         </Component>
                         <!-- MomoEditor.exe (.NET 点字エディタ) -->
                         <Component Id='MomoEditor' Guid='68C5A748-909B-4DC6-8AE1-A7800CC0808A'>

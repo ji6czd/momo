@@ -214,6 +214,12 @@ def main():
         action="store_true",
         help="読みモデルに SGDClassifier(loss=hinge) を使用する（メモリ節約、精度やや低下）",
     )
+    trainer_parser.add_argument(
+        "--jobs",
+        type=int,
+        default=4,
+        help="読みモデルの One-vs-Rest 学習を並列実行するワーカ数（デフォルト: 4）",
+    )
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -234,6 +240,7 @@ def main():
             window=args.window,
             dry_run=args.dry_run,
             use_svc=not args.sgd,
+            n_jobs=args.jobs,
         )
 
     elif args.command == "predict":

@@ -1,0 +1,4 @@
+# Model/data files synced from dataset/ at build time (task pyo3:sync).
+# Force-included into the wheel via [tool.maturin] include.
+python/momors_py/*.mbm
+python/momors_py/single_character_dic.tsv

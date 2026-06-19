@@ -18,15 +18,14 @@ tasks:
     cmds:
       - uv run momopy createdata --raw '{{.DATASET_DIR}}/basic_raw.tsv'
       - uv run makedic {{.DATASET_DIR}}/basic_data.tsv {{.DATASET_DIR}}/single_character_dic.tsv
-      - uv run momopy train --dry-run --tsv '{{.DATASET_DIR}}/basic_data.tsv'
 
   train:
     desc: Train the model (Python)
     deps: [createdata]
     cmds:
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4 --sgd
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 5
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 7
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4 --jobs 16
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 5 --jobs 16
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 7 --jobs 16
 
   test:
     desc: Run Python tests

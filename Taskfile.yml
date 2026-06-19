@@ -108,7 +108,7 @@ tasks:
     desc: Copy trained model files from dataset/ to momors-pyo3 crate
     vars:
       SRC: "{{.ROOT_DIR}}/dataset"
-      DST: "{{.ROOT_DIR}}/momors/crates/momors-pyo3"
+      DST: "{{.ROOT_DIR}}/momors/crates/momors-pyo3/python/momors_py"
     sources:
       - "{{.SRC}}/basic_data_4.mbm"
       - "{{.SRC}}/basic_data_5.mbm"
@@ -195,3 +195,53 @@ tasks:
       - mkdir -p "{{.OUT}}"
       - candle -arch x64 "-dVersion={{.VERSION}}" "-dStageDir={{.STAGE}}" -out "{{.OBJ}}" "{{.WXS}}"
       - light -ext WixUIExtension -loc "C:/Program Files (x86)/WiX Toolset v3.14/SDK/wixui/WixUI_ja-jp.wxl" -out "{{.OUT}}/Momo-{{.VERSION}}-x64.msi" "{{.OBJ}}"
+
+  dist:pyo3:
+    desc: Build Python wheel and copy to dist/
+    vars:
+      OUT: "{{.ROOT_DIR}}/dist"
+    deps: [pyo3]
+    cmds:
+      - mkdir -p "{{.OUT}}"
+      - cp momors/target/wheels/*.whl "{{.OUT}}/"
+
+  dist:python:
+    desc: Build Python wheel and copy to dist/
+    vars:
+      OUT: "{{.ROOT_DIR}}/dist"
+    deps: [python]
+    cmds:
+      - mkdir -p "{{.OUT}}"
+      - cp momo-py/dist/*.whl "{{.OUT}}/"
+      - cp momo-py/dist/*.tar.gz "{{.OUT}}/"
+
+  dist:vscode:
+    desc: Build VSCode extension and copy to dist/
+    vars:
+      OUT: "{{.ROOT_DIR}}/dist"
+    deps: [vscode]
+    cmds:
+      - mkdir -p "{{.OUT}}"
+      - cp vscode-momo/out/*.vsix "{{.OUT}}/"
+
+  dist:models:
+    desc: Copy trained model files to dist/
+    vars:
+      OUT: "{{.ROOT_DIR}}/dist/models"
+      SRC: "{{.ROOT_DIR}}/dataset"
+    sources:
+      - "{{.SRC}}/basic_data_4.mbm"
+      - "{{.SRC}}/basic_data_5.mbm"
+      - "{{.SRC}}/basic_data_7.mbm"
+      - "{{.SRC}}/single_character_dic.tsv"
+    generates:
+      - "{{.OUT}}/basic_data_4.mbm"
+      - "{{.OUT}}/basic_data_5.mbm"
+      - "{{.OUT}}/basic_data_7.mbm"
+      - "{{.OUT}}/single_character_dic.tsv"
+    cmds:
+      - mkdir -p "{{.OUT}}"
+      - cp "{{.SRC}}/basic_data_4.mbm" "{{.OUT}}/"
+      - cp "{{.SRC}}/basic_data_5.mbm" "{{.OUT}}/"
+      - cp "{{.SRC}}/basic_data_7.mbm" "{{.OUT}}/"
+      - cp "{{.SRC}}/single_character_dic.tsv" "{{.OUT}}/"

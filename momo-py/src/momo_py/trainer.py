@@ -9,10 +9,11 @@ from collections import defaultdict
 
 import joblib
 import numpy as np
+from joblib import Parallel, delayed
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, vstack
 
 from .features import (
     get_units,
@@ -278,6 +279,39 @@ def _split_labels(raw_labels: List[str]) -> tuple:
 
 
 # ==========================================
+# 🌟 6.5 読みモデルの One-vs-Rest 並列学習
+# ==========================================
+PRUNE_THRESHOLD = 0.01
+
+
+def _fit_ovr_batch(X, y_arr, class_chunk, use_svc, svc_params):
+    """与えられたクラス群について、それぞれ「当該クラス vs その他」の
+    2値分類器を学習し、枝刈り済み sparse 重み行 + 切片を返す。
+
+    1クラスずつ2値で学習するため、liblinear/SGD が内部確保する密 coef_ は
+    常に (1, n_features) = 数MB に収まり、(n_classes, n_features) の巨大配列
+    （2000×2M×float64 ≒ 32GB）を一度も確保しない。
+    """
+    rows = []
+    intercepts = []
+    for c in class_chunk:
+        y_bin = (y_arr == c).astype(np.int8)
+        if use_svc:
+            clf = LinearSVC(**svc_params)
+        else:
+            clf = SGDClassifier(
+                loss="hinge", max_iter=2000, tol=1e-4, random_state=42, verbose=0
+            )
+        clf.fit(X, y_bin)
+        # 2値なので classes_=[0,1]、coef_[0] は正例(=当該クラス)の重み
+        w = clf.coef_[0].astype(np.float32)
+        w[np.abs(w) < PRUNE_THRESHOLD] = 0.0
+        rows.append(csr_matrix(w))
+        intercepts.append(np.float32(clf.intercept_[0]))
+    return rows, intercepts
+
+
+# ==========================================
 # 🌟 7. train()
 # ==========================================
 def train(
@@ -286,6 +320,7 @@ def train(
     window: int = 7,
     dry_run: bool = False,
     use_svc: bool = True,
+    n_jobs: int = 4,
 ) -> None:
     """
     TSVから読みモデルと境界モデル（SGDClassifier）を学習し、1つのZIPにまとめる。
@@ -355,29 +390,53 @@ def train(
         print("⚠️  dry_run=True のため、ここまでで終了します。")
         return
 
-    if use_svc:
-        print("🏋️  [読みモデル] 学習中 (LinearSVC)...")
-        # windowに応じてパラメータだけ切り替え
-        params = {
-            7: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
-            5: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
-            4: dict(C=0.1, max_iter=2000, tol=1e-2, verbose=0),
-        }
-        model_read = LinearSVC(**params[window])
-    else:
-        print("🏋️  [読みモデル] 学習中 (SGDClassifier loss=hinge)...")
-        model_read = SGDClassifier(
-            loss="hinge", max_iter=2000, tol=1e-4, random_state=42, verbose=0
-        )
-    model_read.fit(X_read, Y_read)
-    model_read.coef_ = model_read.coef_.astype(np.float32)
-    model_read.intercept_ = model_read.intercept_.astype(np.float32)
+    # windowに応じてパラメータだけ切り替え（LinearSVC用）
+    svc_params = {
+        7: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
+        5: dict(C=1.0, max_iter=2000, tol=1e-4, verbose=0),
+        4: dict(C=0.1, max_iter=2000, tol=1e-2, verbose=0),
+    }[window]
 
-    # 枝刈り→sparse化
-    coef = model_read.coef_.copy()
-    coef[np.abs(coef) < 0.01] = 0.0
-    coef_sparse = csr_matrix(coef)
-    print(f"疎性: {(coef == 0).sum() / coef.size:.1%}")
+    algo_name = "LinearSVC" if use_svc else "SGDClassifier loss=hinge"
+    # クラスごとに「当該クラス vs その他」を並列で学習（One-vs-Rest）。
+    # 密 coef_ (n_classes×n_features) を一括確保せずメモリを抑える。
+    y_arr = np.asarray(Y_read)
+    classes = np.unique(y_arr)
+    print(
+        f"🏋️  [読みモデル] 学習中 ({algo_name}, One-vs-Rest "
+        f"{len(classes)}クラス, n_jobs={n_jobs})..."
+    )
+
+    # ラウンドロビンでクラスをn_jobs個のバッチに分割し、各バッチを1タスクに。
+    # これにより X はワーカ数ぶんだけpickleされ（クラス数ぶんではない）、
+    # 学習コストの偏り（高頻度かな vs 低頻度）も平準化される。
+    n_batches = max(1, n_jobs)
+    chunks = [list(classes[i::n_batches]) for i in range(n_batches)]
+    chunks = [c for c in chunks if c]
+
+    results = Parallel(n_jobs=n_jobs, verbose=10)(
+        delayed(_fit_ovr_batch)(X_read, y_arr, chunk, use_svc, svc_params)
+        for chunk in chunks
+    )
+
+    # 結果をクラス→(重み行,切片)に展開し、ソート済みクラス順で再整列する。
+    # predictor 側が read_classes に np.searchsorted を使うため、行・切片・
+    # read_classes はソート順（= np.unique の順）で揃える必要がある。
+    row_by_class = {}
+    inter_by_class = {}
+    for chunk, (rows, intercepts) in zip(chunks, results):
+        for c, r, b in zip(chunk, rows, intercepts):
+            row_by_class[c] = r
+            inter_by_class[c] = b
+
+    read_classes = classes  # np.unique 済みでソート済み
+    coef_sparse = vstack([row_by_class[c] for c in classes]).tocsr()
+    coef_sparse.data = coef_sparse.data.astype(np.float32, copy=False)
+    intercept_read = np.array([inter_by_class[c] for c in classes], dtype=np.float32)
+
+    total = coef_sparse.shape[0] * coef_sparse.shape[1]
+    nnz = coef_sparse.nnz
+    print(f"疎性: {(total - nnz) / total:.1%}")
     print(f"推定サイズ: {coef_sparse.data.nbytes / 1024**2:.1f}MB")
     print("💾 [読みモデル] 学習完了")
 
@@ -422,8 +481,8 @@ def train(
     bundle = LRModelBundle(
         vectorizer_read=vect_read,
         coef_read_sparse=coef_sparse,
-        intercept_read=model_read.intercept_.astype(np.float32),
-        read_classes=np.array(model_read.classes_),
+        intercept_read=intercept_read,
+        read_classes=read_classes,
         vectorizer_boundary=vect_boundary,
         model_boundary=model_boundary,
         version_info={},

@@ -10,6 +10,11 @@ use crate::nabcc::braille_to_nabcc_capital;
 /// ドキュメントの出力形式。
 pub enum OutputFormat {
     /// ページ間をフォームフィード (`\x0C`) で区切ったプレーンテキスト。拡張子: `.brl`
+    ///
+    /// 各行の末尾点字スペース (`⠀` U+2800) は落とす。これにより 1 行が必ず
+    /// `line_width` マス以内になり、プリンタ印刷時に行幅超過で意図しない折返しが
+    /// 入るのを防ぐ。代償として、この出力からは折返し位置（行末スペース）を
+    /// 厳密には再現できない（印刷専用の非可逆形式であり読み戻しもしない）。
     BrailleText,
     /// PC-9801 用の点字ファイル形式。ヘッダとページデータを含む。拡張子: `.bse`
     Base,
@@ -37,7 +42,11 @@ fn write_braille_text(doc: &FormattedDocument) -> Vec<u8> {
         if i > 0 {
             out.push_str("\x0C\n");
         }
-        let lines: Vec<&str> = page.iter().map(|l| l.content.as_str()).collect();
+        // 行末の点字スペースを落とす（line_width 超過と印刷時の余分な折返しを防ぐ）。
+        let lines: Vec<&str> = page
+            .iter()
+            .map(|l| l.content.as_str().trim_end_matches('⠀'))
+            .collect();
         out.push_str(&lines.join("\n"));
         out.push('\n');
     }
@@ -166,7 +175,7 @@ fn write_bes_file(doc: &FormattedDocument) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{DocumentConfig, PageNumberStyle};
+    use crate::document::DocumentConfig;
 
     fn config(page_header: bool) -> DocumentConfig {
         DocumentConfig {
@@ -174,13 +183,13 @@ mod tests {
             lines_per_page: 22,
             page_header,
             title: None,
-            number_style: PageNumberStyle::Standard,
+            number_start: 1,
         }
     }
 
     fn doc(paragraphs: &[&str], page_header: bool) -> BrailleDocument {
         let paras: Vec<String> = paragraphs.iter().map(|s| s.to_string()).collect();
-        BrailleDocument::from_reflowed_paragraphs(&paras, config(page_header))
+        BrailleDocument::from_paragraphs(&paras, config(page_header))
     }
 
     #[test]
@@ -241,6 +250,31 @@ mod tests {
     }
 
     #[test]
+    fn braille_text_trims_trailing_space_within_line_width() {
+        // line_width=5、ヘッダなし。"⠁⠁⠁⠁⠀⠃⠃" は 4 セル + スペース + 2 セル。
+        // render は 1 行目を 5 セル埋め後の行末スペースを含めて折返す（"⠁⠁⠁⠁⠀"=5+1?）。
+        // .brl 出力では行末スペースが落ちて各行が line_width 以内になる。
+        let cfg = DocumentConfig {
+            line_width: 5,
+            lines_per_page: 25,
+            page_header: false,
+            title: None,
+            number_start: 1,
+        };
+        let d = BrailleDocument::from_paragraphs(&["⠁⠁⠁⠁⠀⠃⠃".to_string()], cfg);
+        let out = String::from_utf8(OutputFormat::BrailleText.write(&d)).unwrap();
+        for line in out.split('\n') {
+            assert!(!line.ends_with('⠀'), "行末スペースが残っている: {:?}", line);
+            assert!(
+                line.chars().count() <= 5,
+                "line_width を超過: {:?} ({} セル)",
+                line,
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
     fn braille_text_form_feed_between_pages() {
         // lines_per_page=1, ヘッダなし、2段落 → 2ページ → フォームフィードで区切る
         let cfg = DocumentConfig {
@@ -248,7 +282,7 @@ mod tests {
             page_header: false,
             ..config(false)
         };
-        let d = BrailleDocument::from_reflowed_paragraphs(&["⠁".to_string(), "⠃".to_string()], cfg);
+        let d = BrailleDocument::from_paragraphs(&["⠁".to_string(), "⠃".to_string()], cfg);
         let out = String::from_utf8(OutputFormat::BrailleText.write(&d)).unwrap();
         assert!(out.contains('\x0C'));
     }

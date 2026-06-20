@@ -25,8 +25,15 @@ partial class Form1
         cutMenuItem = new ToolStripMenuItem();
         copyMenuItem = new ToolStripMenuItem();
         pasteMenuItem = new ToolStripMenuItem();
+        pasteConvertedMenuItem = new ToolStripMenuItem();
+        hardBreakMenuItem = new ToolStripMenuItem();
+        pageBreakMenuItem = new ToolStripMenuItem();
         selectAllMenuItem = new ToolStripMenuItem();
         brailleInputMenuItem = new ToolStripMenuItem();
+        formatMenu = new ToolStripMenuItem();
+        pageSetupMenuItem = new ToolStripMenuItem();
+        helpMenu = new ToolStripMenuItem();
+        aboutMenuItem = new ToolStripMenuItem();
         richTextBox = new RichTextBox();
         statusStrip = new StatusStrip();
         statusLabel = new ToolStripStatusLabel();
@@ -36,7 +43,7 @@ partial class Form1
         SuspendLayout();
 
         // menuStrip
-        menuStrip.Items.AddRange(new ToolStripItem[] { fileMenu, editMenu });
+        menuStrip.Items.AddRange(new ToolStripItem[] { fileMenu, editMenu, formatMenu, helpMenu });
         menuStrip.TabStop = false;
 
         // fileMenu
@@ -78,6 +85,10 @@ partial class Form1
             cutMenuItem,
             copyMenuItem,
             pasteMenuItem,
+            pasteConvertedMenuItem,
+            new ToolStripSeparator(),
+            hardBreakMenuItem,
+            pageBreakMenuItem,
             new ToolStripSeparator(),
             selectAllMenuItem,
             brailleInputMenuItem,
@@ -99,6 +110,20 @@ partial class Form1
         pasteMenuItem.ShortcutKeys = Keys.Control | Keys.V;
         pasteMenuItem.Click += (_, _) => SmartPaste();
 
+        pasteConvertedMenuItem.Text = "変換して貼り付け(&R)";
+        pasteConvertedMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.V;
+        pasteConvertedMenuItem.Click += PasteConvertedMenuItem_Click;
+
+        // 強制改行・改ページの挿入。実際のキー処理は OnKeyDown 側で行うため、
+        // ここではショートカット表示のみ付ける（Enter 系は ShortcutKeys に設定できないため）。
+        hardBreakMenuItem.Text = "強制改行(&L)";
+        hardBreakMenuItem.ShortcutKeyDisplayString = "Shift+Enter";
+        hardBreakMenuItem.Click += (_, _) => InsertHardBreak();
+
+        pageBreakMenuItem.Text = "改ページ(&K)";
+        pageBreakMenuItem.ShortcutKeyDisplayString = "Ctrl+Enter";
+        pageBreakMenuItem.Click += (_, _) => InsertPageBreak();
+
         selectAllMenuItem.Text = "すべて選択(&A)";
         selectAllMenuItem.ShortcutKeys = Keys.Control | Keys.A;
         selectAllMenuItem.Click += (_, _) => richTextBox.SelectAll();
@@ -109,6 +134,20 @@ partial class Form1
         brailleInputMenuItem.Checked = true;
         brailleInputMenuItem.Visible = false;
         brailleInputMenuItem.Click += BrailleInputMenuItem_Click;
+
+        // formatMenu
+        formatMenu.Text = "書式(&O)";
+        formatMenu.DropDownItems.AddRange(new ToolStripItem[] { pageSetupMenuItem });
+
+        pageSetupMenuItem.Text = "ページ設定(&G)...";
+        pageSetupMenuItem.Click += PageSetupMenuItem_Click;
+
+        // helpMenu
+        helpMenu.Text = "ヘルプ(&H)";
+        helpMenu.DropDownItems.AddRange(new ToolStripItem[] { aboutMenuItem });
+
+        aboutMenuItem.Text = "Momo Editor について(&A)...";
+        aboutMenuItem.Click += AboutMenuItem_Click;
 
         // richTextBox
         richTextBox.Dock = DockStyle.Fill;
@@ -157,9 +196,16 @@ partial class Form1
     private ToolStripMenuItem cutMenuItem;
     private ToolStripMenuItem copyMenuItem;
     private ToolStripMenuItem pasteMenuItem;
+    private ToolStripMenuItem pasteConvertedMenuItem;
+    private ToolStripMenuItem hardBreakMenuItem;
+    private ToolStripMenuItem pageBreakMenuItem;
     private ToolStripMenuItem selectAllMenuItem;
+    private ToolStripMenuItem formatMenu;
+    private ToolStripMenuItem pageSetupMenuItem;
     private RichTextBox richTextBox;
     private StatusStrip statusStrip;
     private ToolStripStatusLabel statusLabel;
     private ToolStripMenuItem brailleInputMenuItem;
+    private ToolStripMenuItem helpMenu;
+    private ToolStripMenuItem aboutMenuItem;
 }

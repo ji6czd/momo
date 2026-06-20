@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 
 namespace MomoEditor;
@@ -7,7 +8,7 @@ public partial class Form1 : Form
     private string? _filePath;
     private bool _isModified;
     private bool _suppressModified;
-    private BrailleDocument _document = BrailleDocument.Empty();
+    private BrailleDocument _document = BrailleDocument.NewEmpty();
     private FormattedDocumentView? _view;
 
     // キーリマップテーブル（全モード共通）
@@ -35,16 +36,39 @@ public partial class Form1 : Form
         {
             [Keys.Control | Keys.H] = SimulateBackspace,
             [Keys.Control | Keys.M] = InsertParagraphBreak,
-            [Keys.Return]           = InsertParagraphBreak,
-            [Keys.Back]             = SimulateBackspace,
-            [Keys.Delete]           = SimulateDelete,
+            [Keys.Return] = InsertParagraphBreak,
+            [Keys.Shift | Keys.Return] = InsertHardBreak,   // 強制改行（段落内）
+            [Keys.Control | Keys.Return] = InsertPageBreak,   // 改ページ
+            [Keys.Back] = SimulateBackspace,
+            [Keys.Delete] = SimulateDelete,
         };
         // 新規ドキュメントで起動
-        _document.Paragraphs.Add([new PhysicalLine("", true)]);
         LoadDocumentToEditor();
         IsModified = false;
         UpdateTitle();
         UpdateStatus();
+        AdjustStartupSize();
+    }
+
+    /// <summary>
+    /// 起動時のウィンドウ幅を、点字 1 行（LineWidth セル）が
+    /// 折り返さずに収まるサイズ以上へ広げる。等幅フォントを実測するため
+    /// 高 DPI 環境でも正しくスケールする。
+    /// </summary>
+    private void AdjustStartupSize()
+    {
+        int cells = _document.Config.LineWidth;
+        // U+2800（点字の空セル）を LineWidth 個並べた幅を実測。
+        // NoPadding で両端余白を除き、純粋な文字列幅を得る。
+        int textWidth = TextRenderer.MeasureText(
+            new string('⠀', cells), richTextBox.Font,
+            new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Width;
+        // 縦スクロールバーと内部余白の分を加える。
+        int needed = textWidth + SystemInformation.VerticalScrollBarWidth + 12;
+        if (ClientSize.Width < needed)
+            ClientSize = new Size(needed, ClientSize.Height);
+        // 1 行分を割り込めないよう最小幅も設定。
+        MinimumSize = new Size(needed + (Width - ClientSize.Width), MinimumSize.Height);
     }
 
     // ---- タイトル・ステータス ----
@@ -74,21 +98,20 @@ public partial class Form1 : Form
     // ---- フォーマット・レンダリング ----
 
     /// <summary>
-    /// _document をフォーマットして RichTextBox に描画する。
-    /// targetParaIdx/targetCharOffset: カーソルを論理位置に復元する（-1 なら先頭）。
+    /// _document を Rust で整形して RichTextBox に描画する。
+    /// targetSeg/targetOffset: カーソルを論理位置（セグメント+オフセット）に復元する（-1 なら先頭の編集可能行）。
     /// </summary>
-    private void ReformatAndRender(int targetParaIdx, int targetCharOffset)
+    private void ReformatAndRender(int targetSeg, int targetOffset)
     {
         _suppressModified = true;
         try
         {
-            var logical = LogicalText();
-            using var handle = MomoFfi.RenderFromParagraphs(logical, _document.Config);
+            using var handle = MomoFfi.RenderDocument(_document);
             if (handle == null)
             {
-                // DLL 未ビルド/モデル不在: 論理行を生テキストとして表示
+                // DLL 未ビルド/モデル不在: セグメントを生テキストとして表示
                 _view = null;
-                richTextBox.Text = logical;
+                richTextBox.Text = LogicalFallbackText();
                 richTextBox.SelectionStart = 0;
                 richTextBox.SelectionLength = 0;
                 return;
@@ -98,7 +121,7 @@ public partial class Form1 : Form
             if (_view.PhysicalLineCount == 0)
                 _view = FormattedDocumentView.CreateEmpty(_document.Config);
 
-            WriteViewToTextBox(targetParaIdx, targetCharOffset);
+            WriteViewToTextBox(targetSeg, targetOffset);
         }
         finally
         {
@@ -107,13 +130,13 @@ public partial class Form1 : Form
         richTextBox.Focus();
     }
 
-    // 全段落の論理テキストを \n で連結して返す（Rust への受け渡し用）。
-    private string LogicalText() =>
-        string.Join("\n", Enumerable.Range(0, _document.Paragraphs.Count).Select(_document.GetLogicalText));
+    // DLL 不在時のフォールバック表示用。各セグメントを1行ずつ並べる。
+    private string LogicalFallbackText() =>
+        string.Join("\n", _document.Segments.Select(s => s.Text));
 
-    // _view を RichTextBox に書き出し、ヘッダ保護とカーソル復元を行う。
-    // _suppressModified が true の状態で呼ぶこと。target < 0 なら先頭にカーソルを置く。
-    private void WriteViewToTextBox(int targetParaIdx, int targetCharOffset)
+    // _view を RichTextBox に書き出し、行間・ヘッダ保護・カーソル復元を行う。
+    // _suppressModified が true の状態で呼ぶこと。target < 0 なら先頭の編集可能行にカーソルを置く。
+    private void WriteViewToTextBox(int targetSeg, int targetOffset)
     {
         var sb = new StringBuilder();
         for (int i = 0; i < _view!.PhysicalLineCount; i++)
@@ -126,30 +149,17 @@ public partial class Form1 : Form
         ApplyLineSpacing();
         ApplyHeaderProtection();
 
-        if (targetParaIdx >= 0)
-            RestoreCursor(targetParaIdx, targetCharOffset);
+        if (targetSeg >= 0)
+        {
+            RestoreCursor(targetSeg, targetOffset);
+        }
         else
         {
-            richTextBox.SelectionStart = 0;
+            int fl = _view.FirstEditableLine();
+            richTextBox.SelectionStart = richTextBox.GetFirstCharIndexFromLine(fl);
             richTextBox.SelectionLength = 0;
         }
     }
-
-    // 編集操作後の再描画。ドキュメント全体を Rust で再フォーマットして描画し直す
-    // （折返し・ページ分割・ヘッダは Rust に一元化されている）。以下は呼び出し側の
-    // 意図を表す薄いラッパで、いずれもカーソルを論理位置へ復元する。
-    private void ReformatOneParagraphAndRender(int paraIdx, int targetCharOffset) =>
-        ReformatAndRender(paraIdx, targetCharOffset);
-
-    private void ReformatSplitAndRender(int firstParaIdx, int secondParaIdx) =>
-        ReformatAndRender(secondParaIdx, 0);
-
-    private void ReformatInsertedParagraphsAndRender(
-        int startIdx, int insertedCount, int targetParaIdx, int targetCharOffset) =>
-        ReformatAndRender(targetParaIdx, targetCharOffset);
-
-    private void ReformatMergeAndRender(int survivingIdx, int removedIdx, int targetCharOffset) =>
-        ReformatAndRender(survivingIdx, targetCharOffset);
 
     /// <summary>現在のカーソル行がヘッダ行かどうかを返す。</summary>
     private bool IsOnHeaderLine()
@@ -165,11 +175,9 @@ public partial class Form1 : Form
     {
         if (_view == null) return;
 
-        // まず全体の保護を解除
         richTextBox.SelectAll();
         richTextBox.SelectionProtected = false;
 
-        // ヘッダ行を保護
         for (int i = 0; i < _view.PhysicalLineCount; i++)
         {
             if (!_view.IsHeaderAt(i)) continue;
@@ -182,18 +190,18 @@ public partial class Form1 : Form
         }
     }
 
-    /// <summary>論理カーソル位置に物理カーソルを戻す。</summary>
-    private void RestoreCursor(int paraIdx, int charOffset)
+    /// <summary>論理カーソル位置（セグメント+オフセット）に物理カーソルを戻す。</summary>
+    private void RestoreCursor(int segIdx, int charOffset)
     {
         if (_view == null) return;
-        var (flatLine, cell) = _view.LogicalToPhysical(paraIdx, charOffset);
+        var (flatLine, cell) = _view.LogicalToPhysical(segIdx, charOffset);
         int lineStart = richTextBox.GetFirstCharIndexFromLine(flatLine);
         richTextBox.SelectionStart = lineStart + cell;
         richTextBox.SelectionLength = 0;
     }
 
-    /// <summary>現在のカーソル位置を論理座標で返す。</summary>
-    private (int paragraphIndex, int charOffset) GetLogicalCursorPosition()
+    /// <summary>現在のカーソル位置を論理座標（セグメント+オフセット）で返す。</summary>
+    private (int segmentIndex, int charOffset) GetCursor()
     {
         if (_view == null) return (0, 0);
         int pos = richTextBox.SelectionStart;
@@ -223,8 +231,7 @@ public partial class Form1 : Form
     private void NewMenuItem_Click(object? sender, EventArgs e)
     {
         if (!ConfirmDiscard()) return;
-        _document = BrailleDocument.Empty();
-        _document.Paragraphs.Add([new PhysicalLine("", true)]);
+        _document = BrailleDocument.NewEmpty();
         LoadDocumentToEditor();
         _filePath = null;
         IsModified = false;
@@ -274,8 +281,8 @@ public partial class Form1 : Form
                 filePath = Path.ChangeExtension(dialog.FileName, ".mbr"); // 編集中のファイル名は .mbr
                 modified = true;                                       // .mbr はまだ保存されていない
             }
-            if (_document.Paragraphs.Count == 0)
-                _document.Paragraphs.Add([new PhysicalLine("", true)]);
+            if (_document.Segments.Count == 0)
+                _document.Segments.Add(new Segment("", true));
             LoadDocumentToEditor();
             _filePath = filePath;
             IsModified = modified;
@@ -298,7 +305,7 @@ public partial class Form1 : Form
     {
         using var dialog = new SaveFileDialog
         {
-            Filter = "Momo点字ファイル (*.mbr)|*.mbr|点字ファイル (*.brl)|*.brl|点字ESファイル (*.bes)|*.bes|テキストファイル (*.txt)|*.txt|すべてのファイル (*.*)|*.*",
+            Filter = "Momo点字ファイル (*.mbr)|*.mbr|点字ファイル (*.brl)|*.brl|BESファイル (*.bes)|*.bes|BASEファイル (*.bse)|*.bse",
             FileName = _filePath != null ? Path.GetFileName(_filePath) : "untitled.mbr",
         };
         if (dialog.ShowDialog() != DialogResult.OK) return;
@@ -310,12 +317,11 @@ public partial class Form1 : Form
         try
         {
             SyncEditorToDocument();
-            var logical = LogicalText();
             int? format = FormatForPath(path);
             if (format is int fmt)
             {
                 // 点字形式（MBR/BES/BASE/BRL）は Rust の writer でバイト列を生成する。
-                var bytes = MomoFfi.WriteFromParagraphs(logical, _document.Config, fmt);
+                var bytes = MomoFfi.WriteDocument(_document, fmt);
                 if (bytes == null)
                 {
                     MessageBox.Show(
@@ -327,8 +333,8 @@ public partial class Form1 : Form
             }
             else
             {
-                // それ以外（.txt など）は論理テキストをそのまま書き出す。
-                File.WriteAllText(path, logical, Encoding.UTF8);
+                // それ以外（.txt など）はセグメントの論理テキストをそのまま書き出す。
+                File.WriteAllText(path, LogicalFallbackText(), Encoding.UTF8);
             }
             _filePath = path;
             IsModified = false;
@@ -361,9 +367,14 @@ public partial class Form1 : Form
 
     private void SyncEditorToDocument()
     {
-        // _view != null のとき _document.Paragraphs は編集操作ごとに更新済み
+        // _view != null のとき _document.Segments は編集操作ごとに更新済み。
         if (_view != null) return;
-        _document.SetParagraphs(richTextBox.Lines);
+        // フォールバック（DLL 不在）時は RichTextBox の各行を段落セグメントとして取り込む。
+        _document.Segments.Clear();
+        foreach (var t in richTextBox.Lines)
+            _document.Segments.Add(new Segment(t, true));
+        if (_document.Segments.Count == 0)
+            _document.Segments.Add(new Segment("", true));
     }
 
     // ドキュメントを Rust で整形して描画する（折返し・ページ分割・ヘッダは Rust 側）。
@@ -371,7 +382,7 @@ public partial class Form1 : Form
 
     /// <summary>
     /// 漢字かな交じり文を 1 論理行ずつ点字へ変換してドキュメントを組み立てる。
-    /// 空行は空の論理行として保持する。点字変換エンジンが使えない場合は null。
+    /// 空行は空の段落として保持する。点字変換エンジンが使えない場合は null。
     /// </summary>
     private static BrailleDocument? TextToBrailleDocument(string text)
     {
@@ -383,12 +394,50 @@ public partial class Form1 : Form
         {
             var line = raw.TrimEnd('\r');
             var braille = line.Length == 0 ? "" : predictor.ToBraille(line) ?? "";
-            doc.Paragraphs.Add([new PhysicalLine(braille, true)]);
+            doc.Segments.Add(new Segment(braille, true));
         }
+        if (doc.Segments.Count == 0)
+            doc.Segments.Add(new Segment("", true));
         return doc;
     }
 
     private void ExitMenuItem_Click(object? sender, EventArgs e) => Close();
+
+    // ---- 書式（ページ設定） ----
+
+    private void PageSetupMenuItem_Click(object? sender, EventArgs e)
+    {
+        var updated = FormatterConfigDialog.Edit(this, _document.Config);
+        if (updated == null || updated == _document.Config) return;
+
+        // 設定変更を反映して再整形する。カーソルは現在の論理位置に復元する。
+        var (si, off) = GetCursor();
+        _document.Config = updated;
+        ReformatAndRender(si, off);
+        IsModified = true;
+    }
+
+    // ---- ヘルプ ----
+
+    private void AboutMenuItem_Click(object? sender, EventArgs e)
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        // バージョン・著作権・製品名はアセンブリ属性（csproj の Version/Copyright/Product）から取得する。
+        var product = asm.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "Momo Editor";
+        var version = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? asm.GetName().Version?.ToString()
+            ?? "";
+        // SourceLink などが付ける "+<commit>" ビルドメタデータは表示から落とす。
+        int plus = version.IndexOf('+');
+        if (plus >= 0) version = version[..plus];
+        var copyright = asm.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "";
+
+        var message = $"{product}\nバージョン {version}";
+        if (copyright.Length > 0) message += $"\n\n{copyright}";
+
+        MessageBox.Show(message, $"{product} について",
+            MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
 
     private void Form1_FormClosing(object? sender, FormClosingEventArgs e)
     {
@@ -413,7 +462,7 @@ public partial class Form1 : Form
         );
     }
 
-    // ---- 編集操作（モデルを通じて行う） ----
+    // ---- 編集操作（セグメントモデルを通じて行う） ----
 
     private void InsertBrailleChar(int dotPattern)
     {
@@ -421,26 +470,65 @@ public partial class Form1 : Form
         if (_view != null)
         {
             if (IsOnHeaderLine()) return;
-            var (paraIdx, charOffset) = GetLogicalCursorPosition();
-            var para = _document.GetLogicalText(paraIdx);
-            _document.Paragraphs[paraIdx] = [new PhysicalLine(para.Insert(charOffset, ch.ToString()), true)];
-            ReformatOneParagraphAndRender(paraIdx, charOffset + 1);
+            var (si, off) = GetCursor();
+            var seg = _document.Segments[si];
+            seg.Text = seg.Text.Insert(off, ch.ToString());
+            ReformatAndRender(si, off + 1);
+            Earcon.PlayClick();
             return;
         }
         richTextBox.SelectedText = ch.ToString();
         richTextBox.Focus();
+        Earcon.PlayClick();
     }
 
+    // カーソル位置でセグメントを分割する。前半の終端種別と改ページマーカーを指定する。
+    // 後半は元の終端種別・改ページマーカーを引き継ぐ。
+    private void SplitAtCursor(bool firstParagraphEnd, string? firstPageBreak)
+    {
+        var (si, off) = GetCursor();
+        var seg = _document.Segments[si];
+        var before = seg.Text[..off];
+        var after = seg.Text[off..];
+        var second = new Segment(after, seg.ParagraphEnd, seg.PageBreakMarker);
+        seg.Text = before;
+        seg.ParagraphEnd = firstParagraphEnd;
+        seg.PageBreakMarker = firstPageBreak;
+        _document.Segments.Insert(si + 1, second);
+        ReformatAndRender(si + 1, 0);
+    }
+
+    // Enter: 段落区切り（空行で区切られる新しい論理段落）。
     private void InsertParagraphBreak()
     {
         if (_view != null)
         {
             if (IsOnHeaderLine()) return;
-            var (paraIdx, charOffset) = GetLogicalCursorPosition();
-            var para = _document.GetLogicalText(paraIdx);
-            _document.Paragraphs[paraIdx] = [new PhysicalLine(para[..charOffset], true)];
-            _document.Paragraphs.Insert(paraIdx + 1, [new PhysicalLine(para[charOffset..], true)]);
-            ReformatSplitAndRender(paraIdx, paraIdx + 1);
+            SplitAtCursor(firstParagraphEnd: true, firstPageBreak: null);
+            return;
+        }
+        richTextBox.SelectedText = "\n";
+    }
+
+    // Shift+Enter: 強制改行（同じ論理段落のまま、その位置で必ず行を分ける）。
+    private void InsertHardBreak()
+    {
+        if (_view != null)
+        {
+            if (IsOnHeaderLine()) return;
+            SplitAtCursor(firstParagraphEnd: false, firstPageBreak: null);
+            return;
+        }
+        richTextBox.SelectedText = "\n";
+    }
+
+    // Ctrl+Enter: 改ページ（カーソル位置で段落を区切り、その直後で改ページする）。
+    private void InsertPageBreak()
+    {
+        if (_view != null)
+        {
+            if (IsOnHeaderLine()) return;
+            SplitAtCursor(firstParagraphEnd: true, firstPageBreak: "====");
             return;
         }
         richTextBox.SelectedText = "\n";
@@ -453,36 +541,39 @@ public partial class Form1 : Form
             if (IsOnHeaderLine()) return;
             if (richTextBox.SelectionLength > 0)
             {
-                // 選択範囲削除（同一段落内に限定）
+                // 選択範囲削除（同一セグメント内に限定）
                 int pos = richTextBox.SelectionStart;
                 int flatLine = richTextBox.GetLineFromCharIndex(pos);
-                var (paraIdx, charOffset) = _view.PhysicalToLogical(flatLine,
+                var (si, off) = _view.PhysicalToLogical(flatLine,
                     pos - richTextBox.GetFirstCharIndexFromLine(flatLine));
-                var para = _document.GetLogicalText(paraIdx);
-                int delLen = Math.Min(richTextBox.SelectionLength, para.Length - charOffset);
+                var seg = _document.Segments[si];
+                int delLen = Math.Min(richTextBox.SelectionLength, seg.Text.Length - off);
                 if (delLen > 0)
                 {
-                    _document.Paragraphs[paraIdx] = [new PhysicalLine(para.Remove(charOffset, delLen), true)];
-                    ReformatOneParagraphAndRender(paraIdx, charOffset);
+                    seg.Text = seg.Text.Remove(off, delLen);
+                    ReformatAndRender(si, off);
                 }
                 return;
             }
-            var (pi, co) = GetLogicalCursorPosition();
-            if (co == 0)
+            var (csi, coff) = GetCursor();
+            if (coff == 0)
             {
-                // 段落先頭: 前の段落と結合
-                if (pi == 0) return;
-                var prev = _document.GetLogicalText(pi - 1);
-                var curr = _document.GetLogicalText(pi);
-                _document.Paragraphs[pi - 1] = [new PhysicalLine(prev + curr, true)];
-                _document.Paragraphs.RemoveAt(pi);
-                ReformatMergeAndRender(pi - 1, pi, prev.Length);
+                // セグメント先頭: 直前のセグメントと結合（間の区切り＝改行/段落/改ページを除去）
+                if (csi == 0) return;
+                var prev = _document.Segments[csi - 1];
+                var cur = _document.Segments[csi];
+                int prevLen = prev.Text.Length;
+                prev.Text += cur.Text;
+                prev.ParagraphEnd = cur.ParagraphEnd;
+                prev.PageBreakMarker = cur.PageBreakMarker;
+                _document.Segments.RemoveAt(csi);
+                ReformatAndRender(csi - 1, prevLen);
                 return;
             }
             // 1文字削除
-            var p = _document.GetLogicalText(pi);
-            _document.Paragraphs[pi] = [new PhysicalLine(p.Remove(co - 1, 1), true)];
-            ReformatOneParagraphAndRender(pi, co - 1);
+            var s = _document.Segments[csi];
+            s.Text = s.Text.Remove(coff - 1, 1);
+            ReformatAndRender(csi, coff - 1);
             return;
         }
         if (richTextBox.SelectionLength > 0)
@@ -499,20 +590,22 @@ public partial class Form1 : Form
         if (_view != null)
         {
             if (IsOnHeaderLine()) return;
-            var (paraIdx, charOffset) = GetLogicalCursorPosition();
-            var para = _document.GetLogicalText(paraIdx);
-            if (charOffset >= para.Length)
+            var (si, off) = GetCursor();
+            var seg = _document.Segments[si];
+            if (off >= seg.Text.Length)
             {
-                // 段落末尾: 次の段落と結合
-                if (paraIdx + 1 >= _document.Paragraphs.Count) return;
-                var next = _document.GetLogicalText(paraIdx + 1);
-                _document.Paragraphs[paraIdx] = [new PhysicalLine(para + next, true)];
-                _document.Paragraphs.RemoveAt(paraIdx + 1);
-                ReformatMergeAndRender(paraIdx, paraIdx + 1, charOffset);
+                // セグメント末尾: 次のセグメントと結合
+                if (si + 1 >= _document.Segments.Count) return;
+                var next = _document.Segments[si + 1];
+                seg.Text += next.Text;
+                seg.ParagraphEnd = next.ParagraphEnd;
+                seg.PageBreakMarker = next.PageBreakMarker;
+                _document.Segments.RemoveAt(si + 1);
+                ReformatAndRender(si, off);
                 return;
             }
-            _document.Paragraphs[paraIdx] = [new PhysicalLine(para.Remove(charOffset, 1), true)];
-            ReformatOneParagraphAndRender(paraIdx, charOffset);
+            seg.Text = seg.Text.Remove(off, 1);
+            ReformatAndRender(si, off);
             return;
         }
         if (richTextBox.SelectionLength > 0)
@@ -538,43 +631,130 @@ public partial class Form1 : Form
         SimulateBackspace(); // 選択範囲をモデル経由で削除
     }
 
+    /// <summary>
+    /// 貼り付け（自動判定）。クリップボードが点字データならそのまま、
+    /// 漢字かな交じり文なら 1 行ずつ点字へ変換して挿入する。
+    /// </summary>
     private void SmartPaste()
     {
         if (!Clipboard.ContainsText()) return;
         var text = Clipboard.GetText();
-        if (_view != null)
+        if (_view == null) { richTextBox.Paste(); return; }
+        if (IsOnHeaderLine()) return;
+        switch (ClassifyClipboard(text))
         {
-            if (IsOnHeaderLine()) return;
-            // 改行で分割して段落を追加しながら挿入
-            var parts = text.Split('\n');
-            var (paraIdx, charOffset) = GetLogicalCursorPosition();
-            var para = _document.GetLogicalText(paraIdx);
-            if (parts.Length == 1)
-            {
-                // 1段落内への単純挿入
-                _document.Paragraphs[paraIdx] = [new PhysicalLine(para.Insert(charOffset, parts[0]), true)];
-                ReformatOneParagraphAndRender(paraIdx, charOffset + parts[0].Length);
-            }
-            else
-            {
-                // 複数行: 現在の段落を分割しながら挿入
-                var tail = para[charOffset..];
-                _document.Paragraphs[paraIdx] = [new PhysicalLine(para[..charOffset] + parts[0], true)];
-                for (int i = 1; i < parts.Length - 1; i++)
-                    _document.Paragraphs.Insert(paraIdx + i, [new PhysicalLine(parts[i], true)]);
-                var lastIdx = paraIdx + parts.Length - 1;
-                _document.Paragraphs.Insert(lastIdx, [new PhysicalLine(parts[^1] + tail, true)]);
-                ReformatInsertedParagraphsAndRender(paraIdx, parts.Length - 1, lastIdx, parts[^1].Length);
-            }
+            case ClipboardKind.Braille:
+                InsertBrailleLines(SplitLines(text));
+                break;
+            case ClipboardKind.Text:
+                InsertConvertedText(text);
+                break;
+                // Mixed（点字と非点字が混在）: 安全のため何もしない
+        }
+    }
+
+    /// <summary>
+    /// 「変換して貼り付け」。クリップボードの内容を必ず漢字かな交じり文とみなし、
+    /// 1 行ずつ点字へ変換して挿入する。
+    /// </summary>
+    private void PasteConvertedMenuItem_Click(object? sender, EventArgs e)
+    {
+        if (!Clipboard.ContainsText()) return;
+        var text = Clipboard.GetText();
+        if (_view == null || IsOnHeaderLine()) return;
+        // 点字と非点字が混在しているときは、誤変換を避けるため何もしない。
+        if (ClassifyClipboard(text) == ClipboardKind.Mixed) return;
+        InsertConvertedText(text);
+    }
+
+    /// <summary>漢字かな交じり文を 1 行ずつ点字へ変換し、カーソル位置に挿入する。</summary>
+    private void InsertConvertedText(string text)
+    {
+        var predictor = MomoFfi.GetPredictor();
+        if (predictor == null)
+        {
+            MessageBox.Show(
+                "点字変換エンジン（モデル）を読み込めないため、漢字かな交じり文を点字に変換できませんでした。",
+                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
-        richTextBox.Paste();
+        var lines = SplitLines(text);
+        var braille = Array.ConvertAll(lines, line => line.Length == 0 ? "" : predictor.ToBraille(line) ?? "");
+        InsertBrailleLines(braille);
+    }
+
+    /// <summary>点字データ（複数行）をカーソル位置に挿入する。_view != null かつ非ヘッダ行で呼ぶこと。</summary>
+    private void InsertBrailleLines(string[] parts)
+    {
+        var (si, off) = GetCursor();
+        var seg = _document.Segments[si];
+        if (parts.Length == 1)
+        {
+            // セグメント内への単純挿入
+            seg.Text = seg.Text.Insert(off, parts[0]);
+            ReformatAndRender(si, off + parts[0].Length);
+            return;
+        }
+        // 複数行: 現在のセグメントを分割しながら段落として挿入する。
+        var tail = seg.Text[off..];
+        var origEnd = seg.ParagraphEnd;
+        var origPageBreak = seg.PageBreakMarker;
+        seg.Text = seg.Text[..off] + parts[0];
+        seg.ParagraphEnd = true;
+        seg.PageBreakMarker = null;
+
+        int insertAt = si + 1;
+        for (int i = 1; i < parts.Length - 1; i++)
+            _document.Segments.Insert(insertAt++, new Segment(parts[i], true));
+        _document.Segments.Insert(insertAt, new Segment(parts[^1] + tail, origEnd, origPageBreak));
+        ReformatAndRender(insertAt, parts[^1].Length);
+    }
+
+    // 改行（CRLF/CR/LF）を正規化して論理行へ分割する。
+    private static string[] SplitLines(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+
+    private enum ClipboardKind
+    {
+        Braille, // 点字データ（U+2800 ブロック）のみ
+        Text,    // 非点字（漢字かな交じり文）のみ
+        Mixed,   // 点字と非点字が混在
+    }
+
+    /// <summary>
+    /// クリップボード文字列を点字データ・テキスト・混在のいずれかに分類する。
+    /// 空白・改行は判定対象外。点字セルと非点字文字が両方あれば混在とみなす。
+    /// </summary>
+    private static ClipboardKind ClassifyClipboard(string text)
+    {
+        bool hasBraille = false, hasOther = false;
+        foreach (var ch in text)
+        {
+            if (ch is >= '⠀' and <= '⣿') hasBraille = true;
+            else if (ch is '\r' or '\n' or '\t' or ' ' or '　') continue;
+            else hasOther = true;
+        }
+        if (hasBraille && hasOther) return ClipboardKind.Mixed;
+        return hasBraille ? ClipboardKind.Braille : ClipboardKind.Text;
     }
 
     // ---- キー処理 ----
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        // Alt 単独 / F10 でメニューバーへフォーカス。
+        // 編集面の RichTextBox が Alt を内部で消費し、既定のメニュー活性化が
+        // 効かないため、Form の KeyPreview 経由でここから明示的に活性化する。
+        if ((e.KeyData == (Keys.Menu | Keys.Alt) || e.KeyData == Keys.F10)
+            && menuStrip.Items.Count > 0)
+        {
+            menuStrip.Select();
+            menuStrip.Items[0].Select();
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+            return;
+        }
+
         if (_keyMap.TryGetValue(e.KeyData, out var action))
         {
             action();

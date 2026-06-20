@@ -1,10 +1,9 @@
 //! 正本 [`BrailleDocument`] から**印刷イメージ** [`FormattedDocument`] を導出する。
 //!
-//! - [`render`]: 段落の物理行を**そのまま尊重**（再ワードラップしない）して、
-//!   ページ分割・ページヘッダ生成・ページ番号付与・改ページ上書きを行う。
-//! - [`wrap_line`] / [`wrap_suffix`]: 1論理行の点字文字列をワードラップして
-//!   物理行に分割する低レベル関数。新規ドキュメント組み立て
-//!   ([`BrailleDocument::from_reflowed_paragraphs`]) やエディタの逐次再整形に使う。
+//! - [`render`]: 各セグメントを行幅で**折り返し**た上で、ページ分割・ページヘッダ生成・
+//!   ページ番号付与・改ページ上書きを行う。強制改行（セグメント境界）と改ページは尊重する。
+//! - [`wrap_line`] / [`wrap_suffix`]: 1セグメントの点字文字列をワードラップして
+//!   表示行に分割する低レベル関数。`render` 内部や FFI の逐次折返しに使う。
 
 use crate::document::{BrailleDocument, PageBreak, PageNumberStyle, PhysicalLine};
 
@@ -33,15 +32,18 @@ fn braille_page_num(n: u32, style: PageNumberStyle) -> String {
 // FormattedDocument（印刷イメージ）
 // ============================================================
 
-/// 印刷イメージ上の1物理行。
+/// 印刷イメージ上の1表示行（折返し後）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedLine {
     /// 点字セルの文字列（ヘッダ行ならヘッダ内容）。
     pub content: String,
-    /// この物理行で論理行（段落）が終わるか。ヘッダ行は `true`。
+    /// この行で論理行（段落）が終わるか。ヘッダ行は `true`。
     pub logical_end: bool,
     /// ページヘッダ行か。
     pub is_header: bool,
+    /// この行の元になった**セグメント**の通し番号（全段落通し）。ヘッダ行は -1。
+    /// エディタが表示行 ↔ 論理位置（セグメント+オフセット）を対応づけるのに使う。
+    pub segment_index: i32,
 }
 
 /// 正本から導出された印刷イメージ。ページのリストとして保持する。
@@ -80,8 +82,9 @@ impl FormattedDocument {
 
 /// 正本ドキュメントを印刷イメージへ導出する。
 ///
-/// 段落の物理行は再ワードラップせずそのまま使い、ページ分割（暗黙/強制）と
-/// ページヘッダ・ページ番号を付与する。空ドキュメント（段落 0）は 0 ページ。
+/// 各セグメントを行幅で**折り返し**た上で、ページ分割（暗黙/強制）とページヘッダ・
+/// ページ番号を付与する。空ドキュメント（段落 0）は 0 ページ。
+/// 折返しで分かれた行は同じ `segment_index` を持ち、最後の行だけが論理行終端/改ページを担う。
 pub fn render(doc: &BrailleDocument) -> FormattedDocument {
     let cfg = &doc.config;
     let line_width = cfg.line_width;
@@ -94,15 +97,37 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
         lines_per_page.max(1)
     };
 
-    // 段落を物理行へ平坦化する。空段落は空の物理行1行を占める。
-    let mut flat: Vec<(String, bool, Option<PageBreak>)> = Vec::new();
+    // セグメントを折返して表示行へ平坦化する。
+    // 各行: (content, logical_end, page_break, segment_index)
+    let mut flat: Vec<(String, bool, Option<PageBreak>, i32)> = Vec::new();
+    let mut seg_idx: i32 = 0;
     for para in &doc.paragraphs {
         if para.is_empty() {
-            flat.push((String::new(), true, None));
-        } else {
-            for l in para {
-                flat.push((l.content.clone(), l.logical_end, l.page_break.clone()));
+            flat.push((String::new(), true, None, seg_idx));
+            seg_idx += 1;
+            continue;
+        }
+        for seg in para {
+            // セグメントを折返す。空セグメントは空行1行。
+            let mut rows = wrap_line(&seg.content, line_width);
+            if rows.is_empty() {
+                rows.push(PhysicalLine::new(String::new(), true));
             }
+            let last = rows.len() - 1;
+            for (ri, row) in rows.into_iter().enumerate() {
+                let is_last = ri == last;
+                flat.push((
+                    row.content,
+                    seg.logical_end && is_last,
+                    if is_last {
+                        seg.page_break.clone()
+                    } else {
+                        None
+                    },
+                    seg_idx,
+                ));
+            }
+            seg_idx += 1;
         }
     }
 
@@ -115,13 +140,13 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
     }
 
     // パス1: ページへ分割する。各 raw ページに「そのページを開始させた改ページ上書き」を持たせる。
-    let mut raw_pages: Vec<(Vec<(String, bool)>, Option<PageBreak>)> = Vec::new();
-    let mut cur: Vec<(String, bool)> = Vec::new();
+    let mut raw_pages: Vec<(Vec<(String, bool, i32)>, Option<PageBreak>)> = Vec::new();
+    let mut cur: Vec<(String, bool, i32)> = Vec::new();
     let mut start_override: Option<PageBreak> = None;
     let mut count = 0usize;
 
-    for (content, logical_end, page_break) in flat {
-        cur.push((content, logical_end));
+    for (content, logical_end, page_break, sidx) in flat {
+        cur.push((content, logical_end, sidx));
         count += 1;
         if let Some(pb) = page_break {
             // 強制改ページ: この行の後でページを送る。
@@ -140,8 +165,8 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
 
     // パス2: ページ番号・ヘッダを付与する。
     let mut pages: Vec<Vec<RenderedLine>> = Vec::with_capacity(raw_pages.len());
-    let mut page_number = 1u32;
-    let mut style = cfg.number_style;
+    let mut page_number = cfg.number_start;
+    let mut style = PageNumberStyle::default();
 
     for (lines, ovr) in raw_pages {
         if let Some(o) = &ovr {
@@ -163,13 +188,15 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
                 content: make_header(title, page_number, style, line_width),
                 logical_end: true,
                 is_header: true,
+                segment_index: -1,
             });
         }
-        for (content, logical_end) in lines {
+        for (content, logical_end, sidx) in lines {
             page.push(RenderedLine {
                 content,
                 logical_end,
                 is_header: false,
+                segment_index: sidx,
             });
         }
         pages.push(page);
@@ -322,12 +349,12 @@ mod tests {
             lines_per_page,
             page_header,
             title: None,
-            number_style: PageNumberStyle::Standard,
+            number_start: 1,
         }
     }
 
     fn doc_from(paragraphs: &[String], cfg: DocumentConfig) -> BrailleDocument {
-        BrailleDocument::from_reflowed_paragraphs(paragraphs, cfg)
+        BrailleDocument::from_paragraphs(paragraphs, cfg)
     }
 
     // ---- wrap ----
@@ -404,6 +431,37 @@ mod tests {
         assert_eq!(f.pages()[0].len(), 1);
         assert!(!f.pages()[0][0].is_header);
         assert!(f.pages()[0][0].logical_end);
+    }
+
+    #[test]
+    fn render_wraps_long_segment() {
+        // 1段落＝1セグメント（未折返し）。render が行幅で折り返す。
+        // 10 + space + 10 = 21 セル > width=15 → 2行、どちらも同じ segment_index=0。
+        let doc = doc_from(&[braille_with_spaces(&[10, 10])], config(15, 25, false));
+        let f = render(&doc);
+        assert_eq!(f.page_count(), 1);
+        assert_eq!(f.pages()[0].len(), 2);
+        assert_eq!(f.pages()[0][0].segment_index, 0);
+        assert_eq!(f.pages()[0][1].segment_index, 0);
+        assert!(!f.pages()[0][0].logical_end); // 折返し継続
+        assert!(f.pages()[0][1].logical_end); // 段落終端
+    }
+
+    #[test]
+    fn render_segment_index_increments_per_segment() {
+        // 段落0: 強制改行で2セグメント、段落1: 1セグメント → segment_index 0,1,2
+        let mut doc = doc_from(&[braille_str(3), braille_str(3)], config(32, 25, false));
+        doc.paragraphs[0] = vec![
+            PhysicalLine::new(braille_str(3), false), // 強制改行（seg 0）
+            PhysicalLine::new(braille_str(3), true),  // 段落終端（seg 1）
+        ];
+        // 段落1 は seg 2
+        let f = render(&doc);
+        let rows: Vec<i32> = f.pages()[0].iter().map(|l| l.segment_index).collect();
+        assert_eq!(rows, vec![0, 1, 2]);
+        assert!(!f.pages()[0][0].logical_end); // 強制改行
+        assert!(f.pages()[0][1].logical_end); // 段落終端
+        assert!(f.pages()[0][2].logical_end);
     }
 
     #[test]
@@ -489,16 +547,48 @@ mod tests {
     }
 
     #[test]
-    fn render_alternative_page_number_style() {
+    fn render_number_start_offsets_first_page() {
+        // 開始ページ番号を 5 にすると先頭ページの番号が 5 になる。
         let cfg = DocumentConfig {
-            number_style: PageNumberStyle::Alternative,
+            number_start: 5,
             ..config(32, 25, true)
         };
         let doc = doc_from(&[braille_str(1)], cfg);
         let f = render(&doc);
         let header = &f.pages()[0][0].content;
-        // 代替スタイルの 1 = ⠂、prefix ⠼
+        // 標準スタイルの 5 = ⠑、prefix ⠼
         let tail: String = header
+            .chars()
+            .rev()
+            .take(2)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        assert_eq!(tail, "⠼⠑");
+    }
+
+    #[test]
+    fn render_alternative_page_number_style_override() {
+        // ページ番号スタイルは改ページ単位の上書きで切り替える（文書全体の既定は標準）。
+        let mut doc = doc_from(&[braille_str(1)], config(32, 25, true));
+        doc.paragraphs[0] = vec![
+            {
+                let mut l = PhysicalLine::new(braille_str(1), false);
+                l.page_break = Some(PageBreak {
+                    number_start: Some(1),
+                    number_style: Some(PageNumberStyle::Alternative),
+                    ..PageBreak::default()
+                });
+                l
+            },
+            PhysicalLine::new(braille_str(1), true),
+        ];
+        let f = render(&doc);
+        assert_eq!(f.page_count(), 2);
+        // 2ページ目は代替スタイルで番号 1 = ⠼⠂
+        let h2 = &f.pages()[1][0].content;
+        let tail: String = h2
             .chars()
             .rev()
             .take(2)

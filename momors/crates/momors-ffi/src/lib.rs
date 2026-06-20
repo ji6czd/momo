@@ -54,7 +54,7 @@
 //! void    momo_doc_free(MomoDoc);
 //! // 設定・段落・物理行の getter（momo_doc_line_width / _paragraph_count / _line_w など）
 //! // 保存: ビルダーで組み立て -> momo_doc_write でバイト列取得（format: 0=MBR,1=BES,2=BASE,3=BRL）
-//! MomoDocBuilder momo_doc_builder_new(int32_t lw, int32_t lpp, bool header, int32_t style, const uint16_t* title);
+//! MomoDocBuilder momo_doc_builder_new(int32_t lw, int32_t lpp, bool header, int32_t number_start, const uint16_t* title);
 //! void           momo_doc_builder_add_line(MomoDocBuilder, const uint16_t* content, bool logical_end, const uint16_t* page_break);
 //! MomoDoc        momo_doc_builder_build(MomoDocBuilder); // ビルダーは解放される
 //! MomoBytes      momo_doc_write(MomoDoc, int32_t format);
@@ -73,9 +73,7 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 
-use momors_braille::document::{
-    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine,
-};
+use momors_braille::document::{BrailleDocument, DocumentConfig, PageBreak, PhysicalLine};
 use momors_braille::formatter::{render, wrap_line, wrap_suffix, FormattedDocument, RenderedLine};
 use momors_braille::writer::OutputFormat;
 use momors_braille::BrailleConverter;
@@ -500,20 +498,6 @@ pub extern "C" fn momo_prediction_src_to_kana(
 // 改ページ情報は MBR の ==== マーカー文字列として不透明に授受する。
 // ============================================================
 
-fn number_style_from_i32(v: c_int) -> PageNumberStyle {
-    match v {
-        1 => PageNumberStyle::Alternative,
-        _ => PageNumberStyle::Standard,
-    }
-}
-
-fn number_style_to_i32(s: PageNumberStyle) -> c_int {
-    match s {
-        PageNumberStyle::Standard => 0,
-        PageNumberStyle::Alternative => 1,
-    }
-}
-
 /// 文字列を null 終端 UTF-16 として buf に書く。戻り値は必要な u16 要素数（null 含む）。
 /// buf が NULL か buf_len 不足なら書かずにサイズだけ返す。
 fn write_utf16(s: &str, buf: *mut u16, buf_len: c_int) -> c_int {
@@ -592,9 +576,9 @@ pub extern "C" fn momo_doc_page_header(h: *const BrailleDocHandle) -> bool {
 }
 
 #[no_mangle]
-pub extern "C" fn momo_doc_number_style(h: *const BrailleDocHandle) -> c_int {
+pub extern "C" fn momo_doc_number_start(h: *const BrailleDocHandle) -> c_int {
     match unsafe { h.as_ref() } {
-        Some(h) => number_style_to_i32(h.doc.config.number_style),
+        Some(h) => h.doc.config.number_start as c_int,
         None => -1,
     }
 }
@@ -712,13 +696,13 @@ pub struct BrailleDocBuilder {
     current: Vec<PhysicalLine>,
 }
 
-/// ビルダーを作る。number_style: 0=標準, 1=代替。title は NULL/空で無し。
+/// ビルダーを作る。number_start: 開始ページ番号。title は NULL/空で無し。
 #[no_mangle]
 pub extern "C" fn momo_doc_builder_new(
     line_width: c_int,
     lines_per_page: c_int,
     page_header: bool,
-    number_style: c_int,
+    number_start: c_int,
     title: *const u16,
 ) -> *mut BrailleDocBuilder {
     let title = unsafe { lpwstr_to_string(title) }.filter(|s| !s.is_empty());
@@ -727,7 +711,7 @@ pub extern "C" fn momo_doc_builder_new(
         lines_per_page: lines_per_page.max(1) as usize,
         page_header,
         title,
-        number_style: number_style_from_i32(number_style),
+        number_start: number_start.max(0) as u32,
     };
     Box::into_raw(Box::new(BrailleDocBuilder {
         config,
@@ -951,6 +935,22 @@ pub extern "C" fn momo_formatted_line_logical_end(
     }
 }
 
+/// 物理行の元セグメント通し番号（ヘッダ行や無効な引数なら -1）。
+/// エディタが表示行 ↔ 論理位置（セグメント+オフセット）を対応づけるのに使う。
+#[no_mangle]
+pub extern "C" fn momo_formatted_line_segment_index(
+    h: *const FormattedDocHandle,
+    page: c_int,
+    line: c_int,
+) -> c_int {
+    match unsafe { h.as_ref() } {
+        Some(h) => fmt_line(h, page, line)
+            .map(|l| l.segment_index)
+            .unwrap_or(-1),
+        None => -1,
+    }
+}
+
 // ============================================================
 // 1論理行の折返し（逐次編集の表示用）
 // ============================================================
@@ -1048,7 +1048,7 @@ fn config_from_params(
     line_width: c_int,
     lines_per_page: c_int,
     page_header: bool,
-    number_style: c_int,
+    number_start: c_int,
     title: *const u16,
 ) -> DocumentConfig {
     let title = unsafe { lpwstr_to_string(title) }.filter(|s| !s.is_empty());
@@ -1057,7 +1057,7 @@ fn config_from_params(
         lines_per_page: lines_per_page.max(1) as usize,
         page_header,
         title,
-        number_style: number_style_from_i32(number_style),
+        number_start: number_start.max(0) as u32,
     }
 }
 
@@ -1092,15 +1092,15 @@ pub extern "C" fn momo_doc_render_from_paragraphs(
     line_width: c_int,
     lines_per_page: c_int,
     page_header: bool,
-    number_style: c_int,
+    number_start: c_int,
     title: *const u16,
 ) -> *mut FormattedDocHandle {
     let text = match unsafe { lpwstr_to_string(paragraphs) } {
         Some(t) => t,
         None => return std::ptr::null_mut(),
     };
-    let config = config_from_params(line_width, lines_per_page, page_header, number_style, title);
-    let doc = BrailleDocument::from_reflowed_paragraphs(&paragraphs_from_text(&text), config);
+    let config = config_from_params(line_width, lines_per_page, page_header, number_start, title);
+    let doc = BrailleDocument::from_paragraphs(&paragraphs_from_text(&text), config);
     Box::into_raw(Box::new(FormattedDocHandle { doc: render(&doc) }))
 }
 
@@ -1112,7 +1112,7 @@ pub extern "C" fn momo_doc_write_from_paragraphs(
     line_width: c_int,
     lines_per_page: c_int,
     page_header: bool,
-    number_style: c_int,
+    number_start: c_int,
     title: *const u16,
     format: c_int,
 ) -> *mut ByteBuffer {
@@ -1127,8 +1127,8 @@ pub extern "C" fn momo_doc_write_from_paragraphs(
         3 => OutputFormat::BrailleText,
         _ => return std::ptr::null_mut(),
     };
-    let config = config_from_params(line_width, lines_per_page, page_header, number_style, title);
-    let doc = BrailleDocument::from_reflowed_paragraphs(&paragraphs_from_text(&text), config);
+    let config = config_from_params(line_width, lines_per_page, page_header, number_start, title);
+    let doc = BrailleDocument::from_paragraphs(&paragraphs_from_text(&text), config);
     Box::into_raw(Box::new(ByteBuffer {
         bytes: fmt.write(&doc),
     }))

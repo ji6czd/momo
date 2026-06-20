@@ -14,7 +14,7 @@
 //! - ヘッダ行: 各ページ先頭行を位置で落とす。ただし数符 `⠼` を含む行に限定して誤爆を防ぐ。
 //!   （タイトル・ページ番号の中身の復元は点字→数字の逆変換が入ってから。）
 
-use crate::document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
+use crate::document::{BrailleDocument, DocumentConfig, PageBreak, PhysicalLine};
 
 const HEADER_SIZE: usize = 512;
 const EXT_HEADER_SIZE: usize = 512;
@@ -137,7 +137,7 @@ pub fn read_bes(bytes: &[u8]) -> Option<BrailleDocument> {
         page_header: true,
         // タイトルは読み込み時に落としている（点字→数字の逆変換が入るまで復元しない）。
         title: None,
-        number_style: PageNumberStyle::Standard,
+        number_start: 1,
     };
 
     Some(BrailleDocument { paragraphs, config })
@@ -300,31 +300,26 @@ mod tests {
 
     #[test]
     fn roundtrip_from_writer_preserves_content() {
-        // writer の Bes 出力（ヘッダ無し）を読み戻し、論理テキストが一致する。
+        // writer の Bes 出力（ヘッダ無し）を読み戻し、段落ごとの論理テキストが一致する。
+        // doc 側は未折返しセグメント、read 側は BES の折返し行だが、連結すれば一致する。
         let config = DocumentConfig {
             line_width: 32,
             lines_per_page: 25,
             page_header: false,
             title: None,
-            number_style: PageNumberStyle::Standard,
+            number_start: 1,
         };
         let paras = vec![braille_str(10), braille_str(40), braille_str(5)];
-        let doc = BrailleDocument::from_reflowed_paragraphs(&paras, config);
+        let doc = BrailleDocument::from_paragraphs(&paras, config);
         let bytes = OutputFormat::Bes.write(&doc);
 
         let read = read_bes(&bytes).unwrap();
-        // 全物理行の内容を連結して比較（折返し位置含め一致するはず）
-        let restored: Vec<String> = read
-            .paragraphs
-            .iter()
-            .flatten()
-            .map(|l| l.content.clone())
+        assert_eq!(read.paragraphs.len(), doc.paragraphs.len());
+        let restored: Vec<String> = (0..read.paragraphs.len())
+            .map(|i| read.logical_text(i))
             .collect();
-        let original: Vec<String> = doc
-            .paragraphs
-            .iter()
-            .flatten()
-            .map(|l| l.content.clone())
+        let original: Vec<String> = (0..doc.paragraphs.len())
+            .map(|i| doc.logical_text(i))
             .collect();
         assert_eq!(restored, original);
     }

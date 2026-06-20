@@ -6,14 +6,14 @@ namespace MomoEditor;
 /// momors-ffi (momors_ffi.dll) への P/Invoke ラッパ。
 ///
 /// 点字ドキュメントの読み書き・折返し・ページ分割・ヘッダ生成・各形式の符号化は
-/// すべて Rust 側（momors-braille）に集約されている。エディタは論理段落＋設定だけを
-/// 保持し、ここを通して Rust にデータ生成を委ねる。
+/// すべて Rust 側（momors-braille）に集約されている。エディタはセグメント列＋設定を
+/// 保持し、ここを通して Rust にデータ生成を委ねる（ビルダー経由）。
 /// </summary>
 static class MomoFfi
 {
     const string DllName = "momors_ffi";
 
-    // 書き出し形式コード（Rust 側 momo_doc_write* と一致させる）。
+    // 書き出し形式コード（Rust 側 momo_doc_write と一致させる）。
     public const int FormatMbr = 0;
     public const int FormatBes = 1;
     public const int FormatBase = 2;
@@ -60,7 +60,7 @@ static class MomoFfi
     static extern bool momo_doc_page_header(nint handle);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern int momo_doc_number_style(nint handle);
+    static extern int momo_doc_number_start(nint handle);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern int momo_doc_title_w(nint handle, nint buf, int bufLen);
@@ -69,18 +69,47 @@ static class MomoFfi
     static extern int momo_doc_paragraph_count(nint handle);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern int momo_doc_logical_text_w(nint handle, int para, nint buf, int bufLen);
-
-    // ---- 描画（印刷イメージ） ----
+    static extern int momo_doc_line_count(nint handle, int para);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern nint momo_doc_render_from_paragraphs(
-        [MarshalAs(UnmanagedType.LPWStr)] string paragraphs,
-        int lineWidth,
-        int linesPerPage,
+    static extern int momo_doc_line_w(nint handle, int para, int line, nint buf, int bufLen);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    static extern bool momo_doc_line_logical_end(nint handle, int para, int line);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_doc_line_page_break_w(nint handle, int para, int line, nint buf, int bufLen);
+
+    // ---- ビルダー（保存・描画用にドキュメントを組み立てる） ----
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_doc_builder_new(
+        int lineWidth, int linesPerPage,
         [MarshalAs(UnmanagedType.I1)] bool pageHeader,
-        int numberStyle,
+        int numberStart,
         [MarshalAs(UnmanagedType.LPWStr)] string? title);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_doc_builder_add_line(
+        nint builder,
+        [MarshalAs(UnmanagedType.LPWStr)] string content,
+        [MarshalAs(UnmanagedType.I1)] bool logicalEnd,
+        [MarshalAs(UnmanagedType.LPWStr)] string? pageBreak);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_doc_builder_build(nint builder);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_doc_builder_free(nint builder);
+
+    // ---- 描画（印刷イメージ）と書き出し ----
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_doc_render(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_doc_write(nint handle, int format);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void momo_formatted_free(nint handle);
@@ -102,17 +131,8 @@ static class MomoFfi
     [return: MarshalAs(UnmanagedType.I1)]
     static extern bool momo_formatted_line_logical_end(nint handle, int page, int line);
 
-    // ---- 書き出し（バイト列） ----
-
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern nint momo_doc_write_from_paragraphs(
-        [MarshalAs(UnmanagedType.LPWStr)] string paragraphs,
-        int lineWidth,
-        int linesPerPage,
-        [MarshalAs(UnmanagedType.I1)] bool pageHeader,
-        int numberStyle,
-        [MarshalAs(UnmanagedType.LPWStr)] string? title,
-        int format);
+    static extern int momo_formatted_line_segment_index(nint handle, int page, int line);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern int momo_bytes_len(nint handle);
@@ -140,9 +160,6 @@ static class MomoFfi
         finally { Marshal.FreeHGlobal(buf); }
     }
 
-    static int NumberStyleInt(PageNumberStyle s) =>
-        s == PageNumberStyle.Alternative ? 1 : 0;
-
     // ---- 描画ハンドル（印刷イメージ） ----
 
     public sealed class FormattedHandle : IDisposable
@@ -165,6 +182,7 @@ static class MomoFfi
             ReadString((b, l) => momo_formatted_line_w(_ptr, page, line, b, l));
         public bool IsHeader(int page, int line) => momo_formatted_line_is_header(_ptr, page, line);
         public bool IsLogicalEnd(int page, int line) => momo_formatted_line_logical_end(_ptr, page, line);
+        public int SegmentIndex(int page, int line) => momo_formatted_line_segment_index(_ptr, page, line);
     }
 
     public sealed class PredictorHandle : IDisposable
@@ -198,8 +216,22 @@ static class MomoFfi
 
     static bool? _dllAvailable;
 
+    // ドキュメント（セグメント列）から Rust のビルダーでドキュメントハンドルを組む。
+    // 成功時はハンドル、DLL 不在・失敗時は nint.Zero。呼び出し側が momo_doc_free する。
+    static nint BuildDocHandle(BrailleDocument doc)
+    {
+        var cfg = doc.Config;
+        var builder = momo_doc_builder_new(
+            cfg.LineWidth, cfg.LinesPerPage, cfg.PageHeader,
+            cfg.NumberStart, cfg.Title);
+        if (builder == nint.Zero) return nint.Zero;
+        foreach (var seg in doc.Segments)
+            momo_doc_builder_add_line(builder, seg.Text, seg.ParagraphEnd, seg.PageBreakMarker);
+        return momo_doc_builder_build(builder);
+    }
+
     /// <summary>
-    /// バイト列をドキュメントへ読み込み、論理段落＋設定を持つ <see cref="BrailleDocument"/> へ展開する。
+    /// バイト列をドキュメントへ読み込み、セグメント列＋設定を持つ <see cref="BrailleDocument"/> へ展開する。
     /// 失敗（破損・DLL 不在・不正データ）なら null。
     /// </summary>
     public static BrailleDocument? ReadDocument(byte[] bytes, int format)
@@ -220,20 +252,24 @@ static class MomoFfi
                         LineWidth = momo_doc_line_width(ptr),
                         LinesPerPage = momo_doc_lines_per_page(ptr),
                         PageHeader = momo_doc_page_header(ptr),
-                        NumberStyle = momo_doc_number_style(ptr) == 1
-                            ? PageNumberStyle.Alternative
-                            : PageNumberStyle.Standard,
+                        NumberStart = momo_doc_number_start(ptr),
                         Title = title.Length > 0 ? title : null,
                     },
                 };
                 int pc = momo_doc_paragraph_count(ptr);
                 for (int p = 0; p < pc; p++)
                 {
-                    var text = ReadString((b, l) => momo_doc_logical_text_w(ptr, p, b, l));
-                    doc.Paragraphs.Add([new PhysicalLine(text, true)]);
+                    int lc = momo_doc_line_count(ptr, p);
+                    for (int l = 0; l < lc; l++)
+                    {
+                        string text = ReadString((b, len) => momo_doc_line_w(ptr, p, l, b, len));
+                        bool paragraphEnd = momo_doc_line_logical_end(ptr, p, l);
+                        string marker = ReadString((b, len) => momo_doc_line_page_break_w(ptr, p, l, b, len));
+                        doc.Segments.Add(new Segment(text, paragraphEnd, marker.Length > 0 ? marker : null));
+                    }
                 }
-                if (doc.Paragraphs.Count == 0)
-                    doc.Paragraphs.Add([new PhysicalLine("", true)]);
+                if (doc.Segments.Count == 0)
+                    doc.Segments.Add(new Segment("", true));
                 return doc;
             }
             finally { momo_doc_free(ptr); }
@@ -243,47 +279,53 @@ static class MomoFfi
     }
 
     /// <summary>
-    /// 論理段落（\n 区切り）を折返し・ページ分割して印刷イメージを返す。
-    /// DLL 不在なら null。
+    /// ドキュメントを折返し・ページ分割して印刷イメージを返す。DLL 不在なら null。
     /// </summary>
-    public static FormattedHandle? RenderFromParagraphs(string paragraphs, FormatterConfig cfg)
+    public static FormattedHandle? RenderDocument(BrailleDocument doc)
     {
         if (_dllAvailable == false) return null;
         try
         {
-            var ptr = momo_doc_render_from_paragraphs(
-                paragraphs, cfg.LineWidth, cfg.LinesPerPage, cfg.PageHeader,
-                NumberStyleInt(cfg.NumberStyle), cfg.Title);
+            var h = BuildDocHandle(doc);
             _dllAvailable = true;
-            return ptr == nint.Zero ? null : new FormattedHandle(ptr);
+            if (h == nint.Zero) return null;
+            try
+            {
+                var f = momo_doc_render(h);
+                return f == nint.Zero ? null : new FormattedHandle(f);
+            }
+            finally { momo_doc_free(h); }
         }
         catch (DllNotFoundException) { _dllAvailable = false; return null; }
         catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
     }
 
     /// <summary>
-    /// 論理段落（\n 区切り）を折返した上で指定形式のバイト列へ書き出す。
-    /// DLL 不在・形式不正なら null。
+    /// ドキュメントを指定形式のバイト列へ書き出す。DLL 不在・形式不正なら null。
     /// </summary>
-    public static byte[]? WriteFromParagraphs(string paragraphs, FormatterConfig cfg, int format)
+    public static byte[]? WriteDocument(BrailleDocument doc, int format)
     {
         if (_dllAvailable == false) return null;
         try
         {
-            var ptr = momo_doc_write_from_paragraphs(
-                paragraphs, cfg.LineWidth, cfg.LinesPerPage, cfg.PageHeader,
-                NumberStyleInt(cfg.NumberStyle), cfg.Title, format);
+            var h = BuildDocHandle(doc);
             _dllAvailable = true;
-            if (ptr == nint.Zero) return null;
+            if (h == nint.Zero) return null;
             try
             {
-                int len = momo_bytes_len(ptr);
-                if (len < 0) return null;
-                var arr = new byte[len];
-                if (len > 0) momo_bytes_copy(ptr, arr);
-                return arr;
+                var bytesPtr = momo_doc_write(h, format);
+                if (bytesPtr == nint.Zero) return null;
+                try
+                {
+                    int len = momo_bytes_len(bytesPtr);
+                    if (len < 0) return null;
+                    var arr = new byte[len];
+                    if (len > 0) momo_bytes_copy(bytesPtr, arr);
+                    return arr;
+                }
+                finally { momo_bytes_free(bytesPtr); }
             }
-            finally { momo_bytes_free(ptr); }
+            finally { momo_doc_free(h); }
         }
         catch (DllNotFoundException) { _dllAvailable = false; return null; }
         catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }

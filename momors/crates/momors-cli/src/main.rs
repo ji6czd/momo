@@ -186,7 +186,7 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
                 title: title_braille,
                 ..DocumentConfig::default()
             };
-            let doc = BrailleDocument::from_reflowed_paragraphs(&braille_list, config);
+            let doc = BrailleDocument::from_paragraphs(&braille_list, config);
             format.write(&doc)
         }
         None => {

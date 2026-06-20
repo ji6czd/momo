@@ -14,9 +14,7 @@
 //!
 //! 段落を「物理行の列」として保持するのは、ユーザーが置いた強制物理改行を
 //! 再ワードラップで失わないため。新規にテキストから組む場合は
-//! [`BrailleDocument::from_reflowed_paragraphs`] が折返しを行う。
-
-use crate::formatter::wrap_line;
+//! [`BrailleDocument::from_paragraphs`] で組み、折返しは [`crate::formatter::render`] が行う。
 
 const SEPARATOR: &str = "---";
 const PAGE_BREAK_MARKER: &str = "====";
@@ -72,14 +70,18 @@ impl PageBreak {
     }
 }
 
-/// 論理ドキュメント上の1物理行。手動改行を保持できる単位。
+/// 論理ドキュメント上の1**セグメント**（強制改行・段落で区切られる単位）。
+///
+/// `content` は**折返し前**のテキスト。ソフト折返しは保持せず、表示・印刷時に
+/// [`crate::formatter::render`] が行幅で折り返す。段落内に複数セグメントがある場合、
+/// セグメント境界は**強制改行**（[`logical_end`](Self::logical_end) = false）を表す。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhysicalLine {
-    /// 点字セルの文字列。
+    /// 点字セルの文字列（折返し前）。
     pub content: String,
-    /// この物理行で論理行（段落）が終わるか。
+    /// このセグメントで論理行（段落）が終わるか。`false` は次セグメントへの強制改行。
     pub logical_end: bool,
-    /// この物理行の直後で強制改ページするか（上書き情報込み）。
+    /// このセグメントの直後で強制改ページするか（上書き情報込み）。
     pub page_break: Option<PageBreak>,
 }
 
@@ -105,8 +107,8 @@ pub struct DocumentConfig {
     pub page_header: bool,
     /// ページヘッダのタイトル（点字文字列）。`None` でページ番号のみ。
     pub title: Option<String>,
-    /// 既定のページ番号スタイル（[`PageBreak::number_style`] で上書き可能）。
-    pub number_style: PageNumberStyle,
+    /// 開始ページ番号（先頭ページに付く番号。[`PageBreak::number_start`] で以降を上書き可能）。
+    pub number_start: u32,
 }
 
 impl Default for DocumentConfig {
@@ -116,7 +118,7 @@ impl Default for DocumentConfig {
             lines_per_page: 22,
             page_header: true,
             title: None,
-            number_style: PageNumberStyle::Standard,
+            number_start: 1,
         }
     }
 }
@@ -149,7 +151,7 @@ impl BrailleDocument {
         Self::default()
     }
 
-    /// 段落 `index` の論理テキスト（物理行を連結したもの）を返す。
+    /// 段落 `index` の論理テキスト（セグメントを連結したもの）を返す。
     pub fn logical_text(&self, index: usize) -> String {
         self.paragraphs[index]
             .iter()
@@ -157,22 +159,14 @@ impl BrailleDocument {
             .collect()
     }
 
-    /// 段落ごとの点字文字列を、設定の `line_width` でワードラップして組む。
+    /// 1段落＝1論理テキストの単純なドキュメントを組む（強制改行・改ページなし）。
     ///
-    /// プレディクタ出力など「まだ折り返されていない」点字段落から
-    /// ドキュメントを作るときに使う。各段落は折返し後の物理行リストになる。
-    /// 空段落（空文字列）は空の物理行1行になる。
-    pub fn from_reflowed_paragraphs(paragraphs: &[String], config: DocumentConfig) -> Self {
-        let width = config.line_width;
+    /// 各段落は単一セグメント（折返し前のテキスト）になる。折返しは保存・表示時に
+    /// [`crate::formatter::render`] が行う。プレディクタ出力や CLI の取り込みに使う。
+    pub fn from_paragraphs(paragraphs: &[String], config: DocumentConfig) -> Self {
         let paragraphs = paragraphs
             .iter()
-            .map(|para| {
-                let mut lines = wrap_line(para, width);
-                if lines.is_empty() {
-                    lines.push(PhysicalLine::new(String::new(), true));
-                }
-                lines
-            })
+            .map(|para| vec![PhysicalLine::new(para.clone(), true)])
             .collect();
         Self { paragraphs, config }
     }
@@ -266,6 +260,9 @@ impl BrailleDocument {
             "page_header = {}\n",
             if c.page_header { "true" } else { "false" }
         ));
+        if c.number_start != 1 {
+            out.push_str(&format!("number_start = {}\n", c.number_start));
+        }
         if let Some(title) = &c.title {
             if !title.is_empty() {
                 out.push_str(&format!("title = {}\n", title));
@@ -321,6 +318,11 @@ fn parse_config(lines: &[&str]) -> DocumentConfig {
                 }
             }
             "page_header" => config.page_header = value == "true",
+            "number_start" => {
+                if let Ok(v) = value.parse() {
+                    config.number_start = v;
+                }
+            }
             "title" => {
                 config.title = if value.is_empty() {
                     None
@@ -407,6 +409,26 @@ mod tests {
     }
 
     #[test]
+    fn mbr_number_start_roundtrip() {
+        // number_start は既定(1)以外のときだけ前付けに出力され、往復で保たれる。
+        let mbr =
+            "line_width = 32\nlines_per_page = 22\npage_header = true\nnumber_start = 5\n---\n⠁\n";
+        let doc = BrailleDocument::parse_mbr(mbr);
+        assert_eq!(doc.config.number_start, 5);
+        assert_eq!(doc.to_mbr(), mbr);
+    }
+
+    #[test]
+    fn mbr_default_number_start_omitted() {
+        // 既定(1)のときは前付けに number_start を出さない。
+        let doc = BrailleDocument::parse_mbr(
+            "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁\n",
+        );
+        assert_eq!(doc.config.number_start, 1);
+        assert!(!doc.to_mbr().contains("number_start"));
+    }
+
+    #[test]
     fn mbr_comments_ignored_in_front_matter() {
         let mbr = "line_width = 32 # マス数\n# まるごとコメント\nlines_per_page = 22\n---\n⠁\n";
         let doc = BrailleDocument::parse_mbr(mbr);
@@ -469,26 +491,38 @@ mod tests {
     }
 
     #[test]
-    fn from_reflowed_paragraphs_wraps() {
+    fn from_paragraphs_one_segment_each_no_wrap() {
         let config = DocumentConfig {
             line_width: 5,
             ..DocumentConfig::default()
         };
-        // 4 + space + 4 = 9 セル > 5 → 2物理行
+        // 折返しは render の責務。ここでは1段落＝1セグメント（未折返し）。
         let para = "⠁⠁⠁⠁⠀⠃⠃⠃⠃".to_string();
-        let doc = BrailleDocument::from_reflowed_paragraphs(&[para], config);
+        let doc = BrailleDocument::from_paragraphs(&[para.clone()], config);
         assert_eq!(doc.paragraphs.len(), 1);
-        assert_eq!(doc.paragraphs[0].len(), 2);
-        assert!(doc.paragraphs[0][1].logical_end);
+        assert_eq!(doc.paragraphs[0].len(), 1);
+        assert_eq!(doc.paragraphs[0][0].content, para);
+        assert!(doc.paragraphs[0][0].logical_end);
     }
 
     #[test]
-    fn from_reflowed_paragraphs_empty_becomes_empty_line() {
-        let doc =
-            BrailleDocument::from_reflowed_paragraphs(&[String::new()], DocumentConfig::default());
+    fn from_paragraphs_empty_becomes_empty_segment() {
+        let doc = BrailleDocument::from_paragraphs(&[String::new()], DocumentConfig::default());
         assert_eq!(doc.paragraphs.len(), 1);
         assert_eq!(doc.paragraphs[0].len(), 1);
         assert_eq!(doc.paragraphs[0][0].content, "");
         assert!(doc.paragraphs[0][0].logical_end);
+    }
+
+    #[test]
+    fn mbr_hard_break_within_paragraph_roundtrip() {
+        // 段落内に強制改行（隣接行・空行なし）。2セグメント、最初は logical_end=false。
+        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n⠉⠙\n";
+        let doc = BrailleDocument::parse_mbr(mbr);
+        assert_eq!(doc.paragraphs.len(), 1);
+        assert_eq!(doc.paragraphs[0].len(), 2);
+        assert!(!doc.paragraphs[0][0].logical_end); // 強制改行
+        assert!(doc.paragraphs[0][1].logical_end); // 段落終端
+        assert_eq!(doc.to_mbr(), mbr);
     }
 }

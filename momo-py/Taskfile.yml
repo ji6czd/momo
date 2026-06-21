@@ -2,6 +2,7 @@ version: "3"
 
 vars:
   DATASET_DIR: "{{.TASKFILE_DIR}}/../dataset"
+  JOBS: '{{.JOBS | default "8"}}'
 
 tasks:
   default:
@@ -23,9 +24,9 @@ tasks:
     desc: Train the model (Python)
     deps: [createdata]
     cmds:
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4 --jobs 8
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 5 --jobs 8
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 7 --jobs 8
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 4 --jobs {{.JOBS}}
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 5 --jobs {{.JOBS}}
+      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --window 7 --jobs {{.JOBS}}
 
   test:
     desc: Run Python tests

@@ -32,9 +32,12 @@ partial class Form1
         brailleInputMenuItem = new ToolStripMenuItem();
         formatMenu = new ToolStripMenuItem();
         pageSetupMenuItem = new ToolStripMenuItem();
+        viewMenu = new ToolStripMenuItem();
+        guideMenuItem = new ToolStripMenuItem();
         helpMenu = new ToolStripMenuItem();
         aboutMenuItem = new ToolStripMenuItem();
         richTextBox = new RichTextBox();
+        guideStrip = new GuideStrip();
         statusStrip = new StatusStrip();
         statusLabel = new ToolStripStatusLabel();
 
@@ -43,7 +46,7 @@ partial class Form1
         SuspendLayout();
 
         // menuStrip
-        menuStrip.Items.AddRange(new ToolStripItem[] { fileMenu, editMenu, formatMenu, helpMenu });
+        menuStrip.Items.AddRange(new ToolStripItem[] { fileMenu, editMenu, formatMenu, viewMenu, helpMenu });
         menuStrip.TabStop = false;
 
         // fileMenu
@@ -142,6 +145,16 @@ partial class Form1
         pageSetupMenuItem.Text = "ページ設定(&G)...";
         pageSetupMenuItem.Click += PageSetupMenuItem_Click;
 
+        // viewMenu
+        viewMenu.Text = "表示(&V)";
+        viewMenu.DropDownItems.AddRange(new ToolStripItem[] { guideMenuItem });
+
+        guideMenuItem.Text = "読みガイド(&G)";
+        guideMenuItem.ShortcutKeys = Keys.Control | Keys.G;
+        guideMenuItem.CheckOnClick = true;
+        guideMenuItem.Checked = true;
+        guideMenuItem.Click += GuideMenuItem_Click;
+
         // helpMenu
         helpMenu.Text = "ヘルプ(&H)";
         helpMenu.DropDownItems.AddRange(new ToolStripItem[] { aboutMenuItem });
@@ -159,6 +172,11 @@ partial class Form1
         richTextBox.SelectionChanged += RichTextBox_SelectionChanged;
         richTextBox.TextChanged += RichTextBox_TextChanged;
 
+        // guideStrip（編集面の下に読みガイドを表示する帯）
+        guideStrip.Dock = DockStyle.Bottom;
+        guideStrip.Font = new Font("MS Gothic", 16F, FontStyle.Regular, GraphicsUnit.Point);
+        guideStrip.AccessibleName = "読みガイド";
+
         // statusStrip
         statusLabel.Text = "行: 1  セル: 0";
         statusLabel.Spring = true;
@@ -169,8 +187,10 @@ partial class Form1
         KeyPreview = true;
         AutoScaleMode = AutoScaleMode.Font;
         ClientSize = new Size(800, 480);
+        // 追加順で下端のドッキングが決まる: statusStrip を最下段、guideStrip をその上に置く。
         Controls.Add(richTextBox);
         Controls.Add(statusStrip);
+        Controls.Add(guideStrip);
         Controls.Add(menuStrip);
         MainMenuStrip = menuStrip;
         Text = "MomoEditor";
@@ -202,7 +222,10 @@ partial class Form1
     private ToolStripMenuItem selectAllMenuItem;
     private ToolStripMenuItem formatMenu;
     private ToolStripMenuItem pageSetupMenuItem;
+    private ToolStripMenuItem viewMenu;
+    private ToolStripMenuItem guideMenuItem;
     private RichTextBox richTextBox;
+    private GuideStrip guideStrip;
     private StatusStrip statusStrip;
     private ToolStripStatusLabel statusLabel;
     private ToolStripMenuItem brailleInputMenuItem;

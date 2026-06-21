@@ -95,6 +95,62 @@ public partial class Form1 : Form
         statusLabel.Text = $"行: {line + 1}  セル: {col}{mode}";
     }
 
+    // ---- 読みガイド ----
+
+    // 直近に逆点訳した点字行とその結果（行内でカーソルだけ動いたときの再計算を避ける）。
+    private string? _guideLineCache;
+    private IReadOnlyList<MomoFfi.GuideSegment> _guideSegments = [];
+
+    private void GuideMenuItem_Click(object? sender, EventArgs e)
+    {
+        guideStrip.Visible = guideMenuItem.Checked;
+        UpdateGuide();
+        richTextBox.Focus();
+    }
+
+    /// <summary>
+    /// カーソル行の点字を逆点訳し、ガイド帯にセルと読みを表示する。
+    /// 範囲選択中・ヘッダ行・フォールバック表示中は何も表示しない。
+    /// </summary>
+    private void UpdateGuide()
+    {
+        if (!guideMenuItem.Checked) return;
+        // 範囲選択中はキャレット位置が定まらないので更新しない（現状維持）。
+        if (richTextBox.SelectionLength != 0) return;
+
+        if (_view == null)
+        {
+            ClearGuide();
+            return;
+        }
+
+        int pos = richTextBox.SelectionStart;
+        int flatLine = richTextBox.GetLineFromCharIndex(pos);
+        if (flatLine < 0 || flatLine >= _view.PhysicalLineCount || _view.IsHeaderAt(flatLine))
+        {
+            ClearGuide();
+            return;
+        }
+
+        string content = _view.ContentAt(flatLine);
+        int col = pos - richTextBox.GetFirstCharIndexFromLine(flatLine);
+
+        if (content != _guideLineCache)
+        {
+            var result = MomoFfi.BackTranslateLine(content);
+            _guideSegments = result?.Segments ?? [];
+            _guideLineCache = content;
+        }
+        guideStrip.SetData(content, _guideSegments, col);
+    }
+
+    private void ClearGuide()
+    {
+        _guideLineCache = "";
+        _guideSegments = [];
+        guideStrip.SetData("", [], -1);
+    }
+
     // ---- フォーマット・レンダリング ----
 
     /// <summary>
@@ -122,6 +178,11 @@ public partial class Form1 : Form
                 _view = FormattedDocumentView.CreateEmpty(_document.Config);
 
             WriteViewToTextBox(targetSeg, targetOffset);
+
+            // モデル駆動編集では TextChanged が _suppressModified で抑制されるため、
+            // ここで変更フラグを立てる。targetSeg < 0 はロード/新規（LoadDocumentToEditor）で、
+            // この場合は復元すべき論理カーソルが無く＝編集ではないので変更扱いしない。
+            if (targetSeg >= 0) IsModified = true;
         }
         finally
         {
@@ -413,8 +474,7 @@ public partial class Form1 : Form
         // 設定変更を反映して再整形する。カーソルは現在の論理位置に復元する。
         var (si, off) = GetCursor();
         _document.Config = updated;
-        ReformatAndRender(si, off);
-        IsModified = true;
+        ReformatAndRender(si, off); // 変更フラグは ReformatAndRender が立てる
     }
 
     // ---- ヘルプ ----
@@ -827,7 +887,11 @@ public partial class Form1 : Form
 
     // ---- RichTextBox イベント ----
 
-    private void RichTextBox_SelectionChanged(object? sender, EventArgs e) => UpdateStatus();
+    private void RichTextBox_SelectionChanged(object? sender, EventArgs e)
+    {
+        UpdateStatus();
+        UpdateGuide();
+    }
 
     private void RichTextBox_TextChanged(object? sender, EventArgs e)
     {

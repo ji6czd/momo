@@ -143,6 +143,32 @@ static class MomoFfi
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void momo_bytes_free(nint handle);
 
+    // ---- 逆点訳（点字 → かな表層、ガイド表示用） ----
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_back_translator_new();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_back_translator_free(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_back_translate_w(nint translator, [MarshalAs(UnmanagedType.LPWStr)] string braille);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_back_trans_free(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_back_trans_text_w(nint handle, nint buf, int bufLen);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_back_trans_segment_count(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_back_trans_cell_bounds(nint handle, [Out] int[] outStart, [Out] int[] outEnd);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_back_trans_segment_text_w(nint handle, int idx, nint buf, int bufLen);
+
     // ---- 文字列取得ヘルパ ----
 
     delegate int BufWriter(nint buf, int bufLen);
@@ -376,5 +402,69 @@ static class MomoFfi
                 if (File.Exists(path)) return path;
             }
         return null;
+    }
+
+    // ---- 逆点訳（ガイド表示用）公開 API ----
+
+    /// <summary>逆点訳の 1 セグメント。点字セル範囲 [CellStart, CellEnd) とその読み。</summary>
+    public sealed record GuideSegment(int CellStart, int CellEnd, string Text);
+
+    /// <summary>1 行の逆点訳結果。全文と、セル範囲ごとの読みセグメント列。</summary>
+    public sealed record GuideLine(string Text, IReadOnlyList<GuideSegment> Segments);
+
+    // 逆変換器はアプリ全体で 1 つだけ使い回す（組み込みテーブルから構築）。
+    static nint _backTranslator;
+    static bool _backTranslatorLoaded;
+
+    static nint GetBackTranslator()
+    {
+        if (_backTranslatorLoaded) return _backTranslator;
+        _backTranslatorLoaded = true;
+        if (_dllAvailable == false) return nint.Zero;
+        try
+        {
+            _backTranslator = momo_back_translator_new();
+            _dllAvailable = true;
+        }
+        catch (DllNotFoundException) { _dllAvailable = false; }
+        catch (EntryPointNotFoundException) { _dllAvailable = false; }
+        return _backTranslator;
+    }
+
+    /// <summary>
+    /// 点字 1 行を逆点訳し、全文とセル範囲ごとの読みセグメントを返す。
+    /// 空行は空の結果、DLL 不在・失敗時は null。
+    /// </summary>
+    public static GuideLine? BackTranslateLine(string braille)
+    {
+        if (string.IsNullOrEmpty(braille)) return new GuideLine("", []);
+        var translator = GetBackTranslator();
+        if (translator == nint.Zero) return null;
+
+        nint h;
+        try { h = momo_back_translate_w(translator, braille); }
+        catch (DllNotFoundException) { _dllAvailable = false; return null; }
+        catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
+        if (h == nint.Zero) return null;
+        try
+        {
+            string text = ReadString((b, l) => momo_back_trans_text_w(h, b, l));
+            int n = momo_back_trans_segment_count(h);
+            var segs = new List<GuideSegment>(Math.Max(0, n));
+            if (n > 0)
+            {
+                var start = new int[n];
+                var end = new int[n];
+                momo_back_trans_cell_bounds(h, start, end);
+                for (int i = 0; i < n; i++)
+                {
+                    int idx = i;
+                    string segText = ReadString((b, l) => momo_back_trans_segment_text_w(h, idx, b, l));
+                    segs.Add(new GuideSegment(start[i], end[i], segText));
+                }
+            }
+            return new GuideLine(text, segs);
+        }
+        finally { momo_back_trans_free(h); }
     }
 }

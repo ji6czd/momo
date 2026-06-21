@@ -1,0 +1,19 @@
+{{- $title := .Title }}
+{{- $content := .Content }}
+{{- if not $content }}
+{{- $title = site.Params.homeInfoParams.Title }}
+{{- $content = site.Params.homeInfoParams.Content | .RenderString (dict "display" "block") }}
+{{- end }}
+{{- if or $title $content }}
+<article class="first-entry home-info">
+    <header class="entry-header">
+        <h1>{{ $title | markdownify }}</h1>
+    </header>
+    <div class="entry-content md-content">
+        {{ $content }}
+    </div>
+    <footer class="entry-footer">
+        {{ partial "social_icons.html" (dict "align" (site.Params.homeInfoParams.AlignSocialIconsTo | default "")) }}
+    </footer>
+</article>
+{{- end -}}

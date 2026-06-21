@@ -1,6 +1,59 @@
-baseURL = 'https://momo.sei-ken.dev/'
-languageCode = 'ja'
-title = 'MOMO Project'
+baseURL = 'https://momo.seiken-lab.com'
+locale = 'ja'
+title = 'Japanese Braille Translation Library MOMO Project'
+paginate = 5
+
 [module]
   [[module.imports]]
-    path = "github.com/nanxiaobei/hugo-paper"
+    path = "github.com/adityatelange/hugo-PaperMod"
+
+[minify]
+disableXML = true
+minifyOutput = true
+
+[params]
+description = 'Japanese Braille Translation Library MOMO Project'
+author = 'Seiken Lab'
+disableThemeToggle = false
+ShowShareButtons = true
+ShowPostNavLinks = true
+ShowBreadCrumbs = true
+ShowCodeCopyButtons = false
+ShowWordCount = true
+ShowRssButtonInSectionTermList = true
+UseHugoToc = true
+disableSpecial1stPost = false
+disableScrollToTop = false
+comments = false
+hidemeta = false
+hideSummary = false
+showtoc = false
+tocopen = false
+
+[menu]
+[[menu.main]]
+identifier = "home"
+name = "ホーム"
+url = "/"
+weight = 1
+[[menu.main]]
+identifier = "editor"
+name = "MOMO エディタ"
+url = "/editor/"
+weight = 2
+[[menu.main]]
+identifier = "cli"
+name = "MOMO CLI"
+url = "/cli/"
+weight = 3
+[[menu.main]]
+identifier = "api"
+name = "MOMO API"
+url = "/api/"
+weight = 4
+[[menu.main]]
+identifier = "about"
+name = "MOMO について"
+url = "/about/"
+weight = 5
+

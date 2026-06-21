@@ -65,6 +65,22 @@
 //! MomoWrapLines  momo_wrap_line_w(const uint16_t* text, int32_t line_width);
 //! MomoWrapLines  momo_wrap_suffix_w(const uint16_t* text, int32_t line_width, int32_t first_line_remaining);
 //! ```
+//!
+//! ## 逆点訳（点字 → かな表層、ガイド表示用）
+//! 逆変換器を一度作って使い回し、行ごとに逆変換する。セルインデックスは
+//! 入力点字の UTF-16 位置に対応する（点字は全て BMP のため UTF-16 と等価）。
+//! ```c
+//! MomoBackTranslator momo_back_translator_new();              // 組み込みテーブル
+//! MomoBackTranslator momo_back_translator_new_from_file_w(const uint16_t* toml_path);
+//! void               momo_back_translator_free(MomoBackTranslator);
+//! // 逆変換: 点字 -> 結果（全文＋セグメント）
+//! MomoBackTrans momo_back_translate_w(MomoBackTranslator, const uint16_t* braille_utf16);
+//! void          momo_back_trans_free(MomoBackTrans);
+//! int32_t momo_back_trans_text_w(MomoBackTrans, uint16_t* buf, int32_t buf_len);
+//! int32_t momo_back_trans_segment_count(MomoBackTrans);
+//! void    momo_back_trans_cell_bounds(MomoBackTrans, int32_t* out_start, int32_t* out_end);
+//! int32_t momo_back_trans_segment_text_w(MomoBackTrans, int32_t idx, uint16_t* buf, int32_t buf_len);
+//! ```
 
 // cbindgen は #[no_mangle] (Rust 2024) 未対応のため edition 2021 を使用する。
 // 1.82+ で発生する "unsafe attribute used without unsafe" lint を抑制する。
@@ -76,7 +92,7 @@ use std::os::raw::{c_char, c_int};
 use momors_braille::document::{BrailleDocument, DocumentConfig, PageBreak, PhysicalLine};
 use momors_braille::formatter::{render, wrap_line, wrap_suffix, FormattedDocument, RenderedLine};
 use momors_braille::writer::OutputFormat;
-use momors_braille::BrailleConverter;
+use momors_braille::{BackTransResult, BrailleBackTranslator, BrailleConverter};
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
 // ============================================================
@@ -1132,4 +1148,204 @@ pub extern "C" fn momo_doc_write_from_paragraphs(
     Box::into_raw(Box::new(ByteBuffer {
         bytes: fmt.write(&doc),
     }))
+}
+
+// ============================================================
+// 逆点訳（点字 → かな表層）
+//
+// エディタの編集画面で各点字セルの下に読みを並べるガイド表示に使う。
+// 逆変換器ハンドルを一度作って使い回し、行ごとに momo_back_translate_w を呼ぶ。
+//
+// 点字セルはすべて BMP（U+2800〜）なので、セルインデックスは UTF-16 の
+// コード単位インデックスとして C# の String にそのまま対応する。
+// ============================================================
+
+pub struct BackTranslatorHandle {
+    inner: BrailleBackTranslator,
+}
+
+pub struct BackTransHandle {
+    /// null 終端 UTF-16 全文
+    text_utf16: Vec<u16>,
+    /// 各セグメントの点字セル開始位置
+    seg_cell_start: Vec<i32>,
+    /// 各セグメントの点字セル終端位置（排他的）
+    seg_cell_end: Vec<i32>,
+    /// 各セグメントの null 終端 UTF-16 テキスト
+    seg_text_utf16: Vec<Vec<u16>>,
+}
+
+impl BackTransHandle {
+    fn new(result: BackTransResult) -> Self {
+        let mut text_utf16: Vec<u16> = result.text.encode_utf16().collect();
+        text_utf16.push(0);
+
+        let mut seg_cell_start = Vec::with_capacity(result.segments.len());
+        let mut seg_cell_end = Vec::with_capacity(result.segments.len());
+        let mut seg_text_utf16 = Vec::with_capacity(result.segments.len());
+        for seg in &result.segments {
+            seg_cell_start.push(seg.cell_start as i32);
+            seg_cell_end.push(seg.cell_end as i32);
+            let mut t: Vec<u16> = seg.text.encode_utf16().collect();
+            t.push(0);
+            seg_text_utf16.push(t);
+        }
+
+        Self {
+            text_utf16,
+            seg_cell_start,
+            seg_cell_end,
+            seg_text_utf16,
+        }
+    }
+}
+
+/// 組み込みテーブルで逆変換器を作る。失敗時は NULL。
+#[no_mangle]
+pub extern "C" fn momo_back_translator_new() -> *mut BackTranslatorHandle {
+    match BrailleBackTranslator::from_embedded() {
+        Ok(t) => Box::into_raw(Box::new(BackTranslatorHandle { inner: t })),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// `japanese_braille.toml`（UTF-16 パス）から逆変換器を作る。失敗時は NULL。
+#[no_mangle]
+pub extern "C" fn momo_back_translator_new_from_file_w(
+    toml_path: *const u16,
+) -> *mut BackTranslatorHandle {
+    let path = match unsafe { lpwstr_to_string(toml_path) } {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+    match BrailleBackTranslator::from_file(&path) {
+        Ok(t) => Box::into_raw(Box::new(BackTranslatorHandle { inner: t })),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// 逆変換器を解放する。NULL は無視する。
+#[no_mangle]
+pub extern "C" fn momo_back_translator_free(handle: *mut BackTranslatorHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+
+/// 点字文字列（UTF-16）を逆変換し、全文とセグメントを持つハンドルを返す。
+/// handle または braille が NULL なら NULL。
+#[no_mangle]
+pub extern "C" fn momo_back_translate_w(
+    handle: *const BackTranslatorHandle,
+    braille: *const u16,
+) -> *mut BackTransHandle {
+    let translator = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return std::ptr::null_mut(),
+    };
+    let text = match unsafe { lpwstr_to_string(braille) } {
+        Some(t) => t,
+        None => return std::ptr::null_mut(),
+    };
+    let result = translator.inner.back_translate_aligned(&text);
+    Box::into_raw(Box::new(BackTransHandle::new(result)))
+}
+
+/// 逆変換結果を解放する。NULL は無視する。
+#[no_mangle]
+pub extern "C" fn momo_back_trans_free(handle: *mut BackTransHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+
+/// 復元された全文（UTF-16, null 終端）を buf に書く。
+/// 戻り値は必要な u16 要素数（null 含む）。buf 不足／NULL なら書かずにサイズだけ返す。
+/// handle が NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_back_trans_text_w(
+    handle: *const BackTransHandle,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return -1,
+    };
+    let needed = h.text_utf16.len() as c_int;
+    if !buf.is_null() && buf_len >= needed {
+        unsafe {
+            std::ptr::copy_nonoverlapping(h.text_utf16.as_ptr(), buf, h.text_utf16.len());
+        }
+    }
+    needed
+}
+
+/// セグメント数を返す。handle が NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_back_trans_segment_count(handle: *const BackTransHandle) -> c_int {
+    match unsafe { handle.as_ref() } {
+        Some(h) => h.seg_cell_start.len() as c_int,
+        None => -1,
+    }
+}
+
+/// 各セグメントの点字セル範囲を out_start / out_end へまとめて書く。
+///
+/// 各配列は momo_back_trans_segment_count 要素以上を確保すること。
+/// 範囲は半開区間 `[start, end)`、インデックスは入力点字の UTF-16 位置に対応する。
+/// handle が NULL なら何もしない。片方のみ NULL なら非 NULL 側だけ書く。
+#[no_mangle]
+pub extern "C" fn momo_back_trans_cell_bounds(
+    handle: *const BackTransHandle,
+    out_start: *mut i32,
+    out_end: *mut i32,
+) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        if !out_start.is_null() {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    h.seg_cell_start.as_ptr(),
+                    out_start,
+                    h.seg_cell_start.len(),
+                );
+            }
+        }
+        if !out_end.is_null() {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    h.seg_cell_end.as_ptr(),
+                    out_end,
+                    h.seg_cell_end.len(),
+                );
+            }
+        }
+    }
+}
+
+/// セグメント idx のテキスト（UTF-16, null 終端）を buf に書く。
+/// 戻り値は必要な u16 要素数（null 含む）。buf 不足／NULL なら書かずにサイズだけ返す。
+/// handle が NULL、または idx が範囲外なら -1。
+#[no_mangle]
+pub extern "C" fn momo_back_trans_segment_text_w(
+    handle: *const BackTransHandle,
+    idx: c_int,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return -1,
+    };
+    let seg = match h.seg_text_utf16.get(idx as usize) {
+        Some(s) => s,
+        None => return -1,
+    };
+    let needed = seg.len() as c_int;
+    if !buf.is_null() && buf_len >= needed {
+        unsafe {
+            std::ptr::copy_nonoverlapping(seg.as_ptr(), buf, seg.len());
+        }
+    }
+    needed
 }

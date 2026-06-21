@@ -23,6 +23,7 @@
 //! # }
 //! ```
 
+pub mod backtranslator;
 pub mod converter;
 pub mod document;
 pub mod error;
@@ -32,10 +33,11 @@ pub mod reader;
 pub mod table;
 pub mod writer;
 
-pub use converter::{BrailleConverter, BrailleResult};
-pub use document::{
-    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine,
+pub use backtranslator::{
+    BackTransResult, BackTransSegment, BackTransState, BrailleBackTranslator, StepResult,
 };
+pub use converter::{BrailleConverter, BrailleResult};
+pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
 pub use error::{Error, Result};
 pub use formatter::{render, FormattedDocument, RenderedLine};
 pub use reader::read_bes;

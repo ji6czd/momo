@@ -12,6 +12,6 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-momo-py = { path = "../momo-py/dist/momo_py-0.8.0.tar.gz" }
+momo-py = { path = "../momo-py/dist/momo_py-0.8.1.tar.gz" }
 
 

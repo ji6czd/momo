@@ -148,6 +148,30 @@ _KURAI_READING = {
     "兆": "チョー",
 }
 
+# 🌟 数字漢字の訓読み（みっか・ふたり・ここのつ 等の助数詞語の第1要素）。
+# これらは「三日(みっか)」のように数ではなく訓読みの助数詞語であり、
+# 自信度が numeric_confidence_threshold を下回っても数字化してはならない。
+# ホワイトリストは読み（表層形ではない）に張るので、十三日・九十三日間のような
+# 多桁ケースは LR が音読み（サン等）を出して自然に弾かれ、列挙は不要。
+_KUN_NUMERAL_READINGS = {
+    "ヒト",  # 一つ・一人
+    "ツイ",  # 一日(ついたち)
+    "フツ",  # 二日(ふつか)
+    "フタ",  # 二つ・二人
+    "ミッ",  # 三日・三つ
+    "ヨッ",  # 四日・四つ
+    "ヨ",  # 四人(よにん)
+    "イツ",  # 五日・五つ
+    "ムイ",  # 六日(むいか)
+    "ムッ",  # 六つ
+    "ナノ",  # 七日(なのか)
+    "ナナ",  # 七つ
+    "ヨー",  # 八日(ようか)
+    "ヤッ",  # 八つ
+    "ココノ",  # 九日・九つ
+    "トオ",  # 十日
+}
+
 
 # ==========================================
 # 🌟 設定
@@ -936,6 +960,17 @@ class Predictor:
         left_char = source_seq[i - 1][0] if i > 0 else ""
         left_ctype = source_seq[i - 1][2] if i > 0 else ""
         right_ctype = source_seq[i + 1][2] if i < len(source_seq) - 1 else ""
+
+        # 訓読み助数詞（みっか・ふたり等）の保護:
+        # LR の読みが数字漢字の訓読みで、かつ多桁数の一部（左右が漢数字）でなければ、
+        # 低自信度でも数字化せず LR の読みを維持する。
+        # 「十三日」の三は LR が音読み（サン）を出すのでここに入らない＝数字化される。
+        if (
+            label in _KUN_NUMERAL_READINGS
+            and left_ctype != CharType.JAPANESE_NUMERIC
+            and right_ctype != CharType.JAPANESE_NUMERIC
+        ):
+            return label, "", confidence, DecisionSource.LR
 
         if char in _DIGIT_TABLE:
             return _DIGIT_TABLE[char], "", confidence, DecisionSource.FALLBACK_NUMERIC

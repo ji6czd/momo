@@ -13,12 +13,12 @@
 use crate::Error;
 use std::path::{Path, PathBuf};
 
-use crate::Result;
 use crate::char_type::CharType;
 use crate::feature::FeatureKey;
-use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
+use crate::featurize::{compute_source_features, to_source_seq, SourceEntry};
 use crate::model::MomoModel;
-use crate::numeric::{NumericFallback, convert_japanese_numeric};
+use crate::numeric::{convert_japanese_numeric, is_protected_kun_numeral, NumericFallback};
+use crate::Result;
 
 // ============================================================
 // 定数
@@ -488,6 +488,7 @@ impl Predictor {
             // ============================================================
             if entry.ctype == CharType::JapaneseNumeric
                 && conf < self.config.numeric_confidence_threshold
+                && !is_protected_kun_numeral(label, i, &source_seq)
             {
                 match convert_japanese_numeric(i, &source_seq) {
                     NumericFallback::Skip => {

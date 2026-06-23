@@ -15,18 +15,18 @@ minifyOutput = true
 description = 'Japanese Braille Translation Library MOMO Project'
 author = 'Seiken Lab'
 disableThemeToggle = false
-ShowShareButtons = true
-ShowPostNavLinks = true
-ShowBreadCrumbs = true
-ShowCodeCopyButtons = false
-ShowWordCount = true
+# ShowShareButtons = true
+# ShowPostNavLinks = true
+# ShowBreadCrumbs = true
+ShowCodeCopyButtons = true
+# ShowWordCount = true
 ShowRssButtonInSectionTermList = true
 UseHugoToc = true
 disableSpecial1stPost = false
 disableScrollToTop = false
 comments = false
 hidemeta = false
-hideSummary = false
+hideSummary = true
 showtoc = false
 tocopen = false
 
@@ -42,9 +42,9 @@ name = "MOMO エディタ"
 url = "/editor/"
 weight = 2
 [[menu.main]]
-identifier = "cli"
-name = "MOMO CLI"
-url = "/cli/"
+identifier = "converter"
+name = "変換プログラム"
+url = "/converter/"
 weight = 3
 [[menu.main]]
 identifier = "api"
@@ -52,8 +52,19 @@ name = "MOMO API"
 url = "/api/"
 weight = 4
 [[menu.main]]
+identifier = "download"
+name = "ダウンロード"
+url = "/download/"
+weight = 5
+[[menu.main]]
+identifier = "technology"
+name = "技術情報"
+url = "/technology/"
+weight = 6
+
+[[menu.main]]
 identifier = "about"
 name = "MOMO について"
 url = "/about/"
-weight = 5
+weight = 100
 

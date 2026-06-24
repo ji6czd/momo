@@ -1,3 +1,4 @@
+--extra-index-url https://asia-northeast1-python.pkg.dev/neomomo/momo-py/simple/
 blinker==1.9.0
 certifi==2026.6.17
 charset-normalizer==3.4.7
@@ -10,7 +11,7 @@ itsdangerous==2.2.0
 jinja2==3.1.6
 joblib==1.5.3
 markupsafe==3.0.3
-momo-py=0.8.1
+momo-py==0.8.5
 narwhals==2.22.1
 numpy==2.5.0
 packaging==26.2

@@ -84,12 +84,12 @@ class TestProcessLineToTsv:
         with pytest.raises(ValueError, match="原文余り"):
             process_line_to_tsv("あい\tア", 1)
 
-    def test_kutouten_gets_split_marker(self):
+    def test_kutouten_is_skipped(self):
+        # 句読点（SYMBOL_STOP/PAUSE）はバイパス文字として LABEL_SKIP="_" で格納される
         rows = process_line_to_tsv("東京。\tトウ/キョウ/。", 1)
-        # 「。」のラベルに +S が付いていること
         kutouten_row = next(r for r in rows if r.startswith("。\t"))
         label = kutouten_row.split("\t")[1]
-        assert "+S" in label
+        assert label == "_"
 
     def test_space_label_appends_split_marker(self):
         # 読み部分のスペースは直前の行に +S を付ける
@@ -98,19 +98,21 @@ class TestProcessLineToTsv:
         labels = [r.split("\t")[1] for r in rows]
         assert any("+S" in lbl for lbl in labels)
 
-    def test_single_char_tag_is_s(self):
+    def test_single_char_row_format(self):
+        # 1文字は「原文\t読み\t文字種\t原文位置」の4列で返る
         rows = process_line_to_tsv("あ\tア", 1)
-        tag = rows[0].split("\t")[3]
-        assert tag == "S"
+        cols = rows[0].split("\t")
+        assert cols[0] == "あ"
+        assert cols[1] == "ア"
+        assert cols[2] == "HIRAGANA"
+        assert cols[3] == "0"
 
-    def test_multi_char_bio_tags(self):
-        # 拗音「きゃ」は2文字1ユニット → B/E タグが付く
+    def test_compound_mora_is_single_row(self):
+        # 拗音「きゃ」は1ユニット → LABEL_CONTINUE を使わず1行で格納される
         rows = process_line_to_tsv("きゃく\tキャ/ク", 1)
-        tags = [r.split("\t")[3] for r in rows]
-        # 「き」→B、「ゃ」→E、「く」→S
-        assert tags[0] == "B"
-        assert tags[1] == "E"
-        assert tags[2] == "S"
+        assert len(rows) == 2
+        assert rows[0].startswith("きゃ\t")
+        assert rows[1].startswith("く\t")
 
 
 # ------------------------------------------------------------------ #

@@ -53,45 +53,27 @@ pub(crate) enum NumericFallback {
 // 公開関数
 // ============================================================
 
-/// 数字漢字の訓読み（みっか・ふたり・ここのつ 等の助数詞語の第1要素）。
+/// 前の数字を訓読みに変える助数詞シグナルか (助数詞の原文文字, その読み)。
 ///
-/// これらは数ではなく訓読みの助数詞語であり、自信度が低くても数字化してはならない。
-/// ホワイトリストは読み（表層形ではない）に張るので、十三日・九十三日間のような
-/// 多桁ケースは LR が音読み（サン等）を出して自然に弾かれ、列挙は不要。
-fn is_kun_numeral_reading(label: &str) -> bool {
+/// 漢数字が低自信度でも、直後がこれらなら数字化せずモデルの読みを信用する
+/// （例: 三日経って の 三 は、後続の 日→カ を見て ミッ を維持）。
+/// 助数詞の読み自体が曖昧性を解決する（人→リ＝ふたり は信用、人→ニン＝さんにん は数字化）。
+pub(crate) fn is_kun_counter_signal(src: &str, reading: &str) -> bool {
     matches!(
-        label,
-        "ヒト"      // 一つ・一人
-            | "ツイ"  // 一日(ついたち)
-            | "フツ"  // 二日(ふつか)
-            | "フタ"  // 二つ・二人
-            | "ミッ"  // 三日・三つ
-            | "ヨッ"  // 四日・四つ
-            | "ヨ"    // 四人(よにん)
-            | "イツ"  // 五日・五つ
-            | "ムイ"  // 六日(むいか)
-            | "ムッ"  // 六つ
-            | "ナノ"  // 七日(なのか)
-            | "ナナ"  // 七つ
-            | "ヨー"  // 八日(ようか)
-            | "ヤッ"  // 八つ
-            | "ココノ" // 九日・九つ
-            | "トオ" // 十日
+        (src, reading),
+        ("日", "カ")      // みっか・ふつか・ようか…
+            | ("日", "タチ")  // ついたち（一日）
+            | ("つ", "ツ")    // ひとつ・みっつ…
+            | ("人", "リ") // ひとり・ふたり
     )
 }
 
-/// `seq[i]` が訓読み助数詞として保護対象か（数字化を抑止すべきか）を判定する。
-///
-/// LR の読み `label` が数字漢字の訓読みで、かつ多桁数の一部（左右が漢数字）でなければ
-/// `true`。Python 版 `_convert_japanese_numeric` の訓読み保護に対応する。
-pub(crate) fn is_protected_kun_numeral(label: &str, i: usize, seq: &[SourceEntry]) -> bool {
-    if !is_kun_numeral_reading(label) {
-        return false;
-    }
-    let n = seq.len();
-    let left_is_numeric = i > 0 && seq[i - 1].ctype == CharType::JapaneseNumeric;
-    let right_is_numeric = i + 1 < n && seq[i + 1].ctype == CharType::JapaneseNumeric;
-    !left_is_numeric && !right_is_numeric
+/// ラベルが（半角/全角）数字のみで構成されるか。
+pub(crate) fn is_digit_label(label: &str) -> bool {
+    !label.is_empty()
+        && label
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('０'..='９').contains(&c))
 }
 
 /// JAPANESE_NUMERIC として認識された `seq[i]` をフォールバック変換する。
@@ -462,40 +444,23 @@ mod tests {
         );
     }
 
-    // --- is_protected_kun_numeral: 訓読み助数詞の保護 ---
-
     #[test]
-    fn protect_mikka_standalone() {
-        // 「三日(みっか)」の三: LR が訓読み「ミッ」を出し、左右が漢数字でない → 保護
-        let s = seq("三日");
-        assert!(is_protected_kun_numeral("ミッ", 0, &s));
+    fn is_kun_counter_signal_basic() {
+        assert!(is_kun_counter_signal("日", "カ")); // みっか
+        assert!(is_kun_counter_signal("つ", "ツ")); // みっつ
+        assert!(is_kun_counter_signal("人", "リ")); // ふたり
+        assert!(!is_kun_counter_signal("日", "ニチ")); // じゅうさんにち → 数字化
+        assert!(!is_kun_counter_signal("人", "ニン")); // さんにん → 数字化
+        assert!(!is_kun_counter_signal("年", "ネン"));
     }
 
     #[test]
-    fn protect_futari() {
-        // 「二人(ふたり)」の二: 訓読み「フタ」、右は KANJI → 保護
-        let s = seq("二人");
-        assert!(is_protected_kun_numeral("フタ", 0, &s));
-    }
-
-    #[test]
-    fn no_protect_when_left_numeric() {
-        // 「十三日」の三: 左に十(漢数字) ＝多桁数の一部 → たとえ「ミッ」でも保護しない
-        let s = seq("十三日");
-        assert!(!is_protected_kun_numeral("ミッ", 1, &s));
-    }
-
-    #[test]
-    fn no_protect_when_right_numeric() {
-        // 「三〇」の三: 右に〇(漢数字) → 保護しない（数字化させる）
-        let s = seq("三〇");
-        assert!(!is_protected_kun_numeral("ミッ", 0, &s));
-    }
-
-    #[test]
-    fn no_protect_on_yomi_reading() {
-        // 音読み「サン」はホワイトリスト外 → 保護しない
-        let s = seq("三日");
-        assert!(!is_protected_kun_numeral("サン", 0, &s));
+    fn is_digit_label_basic() {
+        assert!(is_digit_label("3"));
+        assert!(is_digit_label("３")); // 全角
+        assert!(is_digit_label("120"));
+        assert!(!is_digit_label("ミッ"));
+        assert!(!is_digit_label(""));
+        assert!(!is_digit_label("3カ"));
     }
 }

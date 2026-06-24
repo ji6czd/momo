@@ -148,29 +148,23 @@ _KURAI_READING = {
     "兆": "チョー",
 }
 
-# 🌟 数字漢字の訓読み（みっか・ふたり・ここのつ 等の助数詞語の第1要素）。
-# これらは「三日(みっか)」のように数ではなく訓読みの助数詞語であり、
-# 自信度が numeric_confidence_threshold を下回っても数字化してはならない。
-# ホワイトリストは読み（表層形ではない）に張るので、十三日・九十三日間のような
-# 多桁ケースは LR が音読み（サン等）を出して自然に弾かれ、列挙は不要。
-_KUN_NUMERAL_READINGS = {
-    "ヒト",  # 一つ・一人
-    "ツイ",  # 一日(ついたち)
-    "フツ",  # 二日(ふつか)
-    "フタ",  # 二つ・二人
-    "ミッ",  # 三日・三つ
-    "ヨッ",  # 四日・四つ
-    "ヨ",  # 四人(よにん)
-    "イツ",  # 五日・五つ
-    "ムイ",  # 六日(むいか)
-    "ムッ",  # 六つ
-    "ナノ",  # 七日(なのか)
-    "ナナ",  # 七つ
-    "ヨー",  # 八日(ようか)
-    "ヤッ",  # 八つ
-    "ココノ",  # 九日・九つ
-    "トオ",  # 十日
+# 🌟 前の数字を訓読みに変える助数詞シグナル (助数詞の原文, その読み)。
+# 漢数字が低自信度でも、直後がこれらならば数字化せずモデルの読みを信用する
+# （例: 三日経って の 三 は、後続の 日→カ を見て ミッ を維持）。
+# 助数詞の読み自体が曖昧性を解決する（人→リ＝ふたり は信用、人→ニン＝さんにん は数字化）。
+# 前の数字の読みを変える助数詞は少数なので、有限の例外集合として持つ。
+_KUN_COUNTER_SIGNALS = {
+    ("日", "カ"),  # みっか・ふつか・ようか…
+    ("日", "タチ"),  # ついたち（一日）
+    ("つ", "ツ"),  # ひとつ・みっつ…
+    ("人", "リ"),  # ひとり・ふたり
 }
+
+def _is_digit_label(label: str) -> bool:
+    """ラベルが（半角/全角）数字のみで構成されるか。"""
+    return label != "" and all(
+        ("0" <= c <= "9") or ("０" <= c <= "９") for c in label
+    )
 
 
 # ==========================================
@@ -889,8 +883,18 @@ class Predictor:
                             label,
                             confidence,
                             source_seq,
+                            raw_labels,
                             last_fallback_reading,
                         )
+                    )
+                elif ctype == CharType.NUMERIC:
+                    last_fallback_reading = ""
+                    label, confidence, decision = self._convert_numeric(
+                        i,
+                        char,
+                        label,
+                        confidence,
+                        source_seq,
                     )
                 else:
                     label, last_fallback_reading, _, decision = (
@@ -952,25 +956,23 @@ class Predictor:
         label: str,
         confidence: float,
         source_seq: List[SourceEntry],
+        raw_labels: List[str],
         last_fallback: str,
     ) -> Tuple[str, str, float, str]:
         if confidence >= self._config.numeric_confidence_threshold:
             return label, "", confidence, DecisionSource.LR
 
+        # 助数詞コヒーレンス: 直後が訓読み助数詞（日→カ・つ→ツ・人→リ 等）なら、
+        # 低自信度でも数字化せずモデルの読み（ミッ 等）を信用する。
+        n = len(source_seq)
+        if i + 1 < n and i + 1 < len(raw_labels):
+            next_signal = (source_seq[i + 1][0], raw_labels[i + 1])
+            if next_signal in _KUN_COUNTER_SIGNALS:
+                return label, "", confidence, DecisionSource.LR
+
         left_char = source_seq[i - 1][0] if i > 0 else ""
         left_ctype = source_seq[i - 1][2] if i > 0 else ""
         right_ctype = source_seq[i + 1][2] if i < len(source_seq) - 1 else ""
-
-        # 訓読み助数詞（みっか・ふたり等）の保護:
-        # LR の読みが数字漢字の訓読みで、かつ多桁数の一部（左右が漢数字）でなければ、
-        # 低自信度でも数字化せず LR の読みを維持する。
-        # 「十三日」の三は LR が音読み（サン）を出すのでここに入らない＝数字化される。
-        if (
-            label in _KUN_NUMERAL_READINGS
-            and left_ctype != CharType.JAPANESE_NUMERIC
-            and right_ctype != CharType.JAPANESE_NUMERIC
-        ):
-            return label, "", confidence, DecisionSource.LR
 
         if char in _DIGIT_TABLE:
             return _DIGIT_TABLE[char], "", confidence, DecisionSource.FALLBACK_NUMERIC
@@ -981,6 +983,41 @@ class Predictor:
             confidence,
             DecisionSource.FALLBACK_NUMERIC,
         )
+
+    def _convert_numeric(
+        self,
+        i: int,
+        char: str,
+        label: str,
+        confidence: float,
+        source_seq: List[SourceEntry],
+    ) -> Tuple[str, float, str]:
+        """アラビア数字（NUMERIC）の採否ロジック。
+
+        モデルを信用し、出力の種類で採否を決める:
+          - モデルが数字を返した: 原文と一致→採用 / 不一致→原文の数字に戻す（数の崩壊防止）
+          - モデルがかなを返した: 左右どちらも数字（＝多桁の内部）→原文の数字に戻す /
+                                  それ以外→採用（みっか・はつか等の助数詞読み）
+        多桁の端の桁（例「120日」の 0）は局所文脈が「20日」と同一で守れないため、
+        対比データ（120日・20日間 等の負例）＋回帰セットで監視する。
+        """
+        # CONTINUE/SKIP はラベルではないので数字をそのまま素通し。
+        if label in (LABEL_CONTINUE, LABEL_SKIP):
+            return char, 0.0, DecisionSource.FALLBACK_ORPHAN
+        # ① モデルが数字を返した
+        if _is_digit_label(label):
+            if label != char:
+                # 取り違え（例 7→1）→ 原文の数字に戻す
+                return char, confidence, DecisionSource.FALLBACK_NUMERIC
+            return label, confidence, DecisionSource.LR
+        # ② モデルがかなを返した: 多桁の内部（左右どちらも数字）だけ数字に戻す
+        n = len(source_seq)
+        numeric_ctypes = (CharType.NUMERIC, CharType.JAPANESE_NUMERIC)
+        left_num = i > 0 and source_seq[i - 1][2] in numeric_ctypes
+        right_num = i < n - 1 and source_seq[i + 1][2] in numeric_ctypes
+        if left_num and right_num:
+            return char, confidence, DecisionSource.FALLBACK_NUMERIC
+        return label, confidence, DecisionSource.LR
 
     def _apply_kanji_fallback(
         self,

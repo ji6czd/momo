@@ -17,7 +17,9 @@ use crate::char_type::CharType;
 use crate::feature::FeatureKey;
 use crate::featurize::{compute_source_features, to_source_seq, SourceEntry};
 use crate::model::MomoModel;
-use crate::numeric::{convert_japanese_numeric, is_protected_kun_numeral, NumericFallback};
+use crate::numeric::{
+    convert_japanese_numeric, is_digit_label, is_kun_counter_signal, NumericFallback,
+};
 use crate::Result;
 
 // ============================================================
@@ -444,51 +446,44 @@ impl Predictor {
             }
 
             // ============================================================
-            // スコア計算 + argmax
+            // スコア計算 + argmax（漢字辞書制約付き）
             // ============================================================
-            int_scores.fill(0);
-            self.compute_read_scores(&all_feat_ids[i], &mut int_scores);
-
-            let scale = self.model.read_scale;
-            for cls in 0..n_cls {
-                scores[cls] = self.model.intercept_read[cls] + (int_scores[cls] as f32) * scale;
-            }
-
-            // 漢字辞書制約付き argmax
-            let (best_cls, best_score): (usize, f32) = if entry.ctype == CharType::Kanji
-                && !self.kanji_dict.is_empty()
-            {
-                if let Some(ch) = char::from_u32(entry.cp) {
-                    if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
-                        let mut best = 0usize;
-                        let mut best_s = f32::NEG_INFINITY;
-                        for cls in 0..n_cls {
-                            let lbl = self.model.read_class(cls as u32).unwrap_or("");
-                            if readings.iter().any(|r| r.as_str() == lbl) && scores[cls] > best_s {
-                                best_s = scores[cls];
-                                best = cls;
-                            }
-                        }
-                        (best, best_s)
-                    } else {
-                        unconstrained_argmax(&scores)
-                    }
-                } else {
-                    unconstrained_argmax(&scores)
-                }
-            } else {
-                unconstrained_argmax(&scores)
-            };
+            let (best_cls, best_score) =
+                self.read_argmax(entry, &all_feat_ids[i], &mut int_scores, &mut scores);
 
             let conf = sigmoid(best_score);
             let label = self.model.read_class(best_cls as u32).unwrap_or("");
 
             // ============================================================
             // JAPANESE_NUMERIC ルールベース変換
+            //
+            // 助数詞コヒーレンス: 低自信度でも、直後が訓読み助数詞（日→カ・つ→ツ・
+            // 人→リ 等）ならば数字化せずモデルの読み（ミッ 等）を信用する。
+            // 助数詞の読み自体が曖昧性を解決する（人→リ＝ふたり は信用、
+            // 人→ニン＝さんにん は数字化）。漢数字専用（アラビアは別ロジック）。
             // ============================================================
+            let next_is_kun_counter = if entry.ctype == CharType::JapaneseNumeric
+                && conf < self.config.numeric_confidence_threshold
+                && i + 1 < n
+            {
+                let (next_cls, _) = self.read_argmax(
+                    &source_seq[i + 1],
+                    &all_feat_ids[i + 1],
+                    &mut int_scores,
+                    &mut scores,
+                );
+                let next_label = self.model.read_class(next_cls as u32).unwrap_or("");
+                let next_char = char::from_u32(source_seq[i + 1].cp)
+                    .map(|c| c.to_string())
+                    .unwrap_or_default();
+                is_kun_counter_signal(&next_char, next_label)
+            } else {
+                false
+            };
+
             if entry.ctype == CharType::JapaneseNumeric
                 && conf < self.config.numeric_confidence_threshold
-                && !is_protected_kun_numeral(label, i, &source_seq)
+                && !next_is_kun_counter
             {
                 match convert_japanese_numeric(i, &source_seq) {
                     NumericFallback::Skip => {
@@ -513,6 +508,49 @@ impl Predictor {
                         continue;
                     }
                 }
+            }
+
+            // ============================================================
+            // NUMERIC (アラビア数字) の採否（モデルを信用する）
+            //
+            //   - モデルが数字を返した: 原文と一致→採用 / 不一致→原文に戻す（数の崩壊防止）
+            //   - モデルがかなを返した: 左右どちらも数字（＝多桁の内部）→原文に戻す /
+            //                          それ以外→採用（みっか・はつか等の助数詞読み）
+            //
+            // 多桁の端の桁（例「120日」の 0）は局所文脈が「20日」と同一で守れないため、
+            // 対比データ＋回帰で監視する。CONTINUE/SKIP は後段の救済に委ねる。
+            // ============================================================
+            if entry.ctype == CharType::Numeric && label != LABEL_CONTINUE && label != LABEL_SKIP {
+                let src_ch = char::from_u32(entry.cp)
+                    .map(|c| c.to_string())
+                    .unwrap_or_default();
+                let revert = if is_digit_label(label) {
+                    label != src_ch
+                } else {
+                    let n = source_seq.len();
+                    let is_num =
+                        |ct: CharType| matches!(ct, CharType::Numeric | CharType::JapaneseNumeric);
+                    let left = i > 0 && is_num(source_seq[i - 1].ctype);
+                    let right = i + 1 < n && is_num(source_seq[i + 1].ctype);
+                    left && right
+                };
+                if revert {
+                    let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                    self.emit_char_passthrough(entry, conf, &mut result);
+                    parent_src_idx = Some(i);
+                    parent_is_bypass = false;
+                    parent_is_kanji = false;
+                    parent_has_small_kana = false;
+                    parent_kana_byte_end = result.kana_text.len();
+                    last_fallback.clear();
+                    if has_split {
+                        result.kana_text.push(' ');
+                        result.kana_to_src_index.push(entry.orig_idx as usize);
+                        result.confidences.push(conf);
+                    }
+                    continue;
+                }
+                // revert しない場合は下の通常ラベル出力へ流す（label をそのまま emit）。
             }
 
             // ============================================================
@@ -641,6 +679,44 @@ impl Predictor {
     // ============================================================
     // private helpers
     // ============================================================
+
+    /// 1文字分の読みスコアを計算し、（漢字辞書制約付き）argmax のクラスとスコアを返す。
+    /// `int_scores` / `scores` はスクラッチバッファ（呼び出しごとに上書きされる）。
+    fn read_argmax(
+        &self,
+        entry: &SourceEntry,
+        feat_ids: &[u32],
+        int_scores: &mut [i32],
+        scores: &mut [f32],
+    ) -> (usize, f32) {
+        let n_cls = scores.len();
+        int_scores.fill(0);
+        self.compute_read_scores(feat_ids, int_scores);
+
+        let scale = self.model.read_scale;
+        for cls in 0..n_cls {
+            scores[cls] = self.model.intercept_read[cls] + (int_scores[cls] as f32) * scale;
+        }
+
+        // 漢字辞書制約付き argmax
+        if entry.ctype == CharType::Kanji && !self.kanji_dict.is_empty() {
+            if let Some(ch) = char::from_u32(entry.cp) {
+                if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
+                    let mut best = 0usize;
+                    let mut best_s = f32::NEG_INFINITY;
+                    for cls in 0..n_cls {
+                        let lbl = self.model.read_class(cls as u32).unwrap_or("");
+                        if readings.iter().any(|r| r.as_str() == lbl) && scores[cls] > best_s {
+                            best_s = scores[cls];
+                            best = cls;
+                        }
+                    }
+                    return (best, best_s);
+                }
+            }
+        }
+        unconstrained_argmax(scores)
+    }
 
     /// 整数スコアに対して CSC 行列の特徴量列を加算する。
     fn compute_read_scores(&self, feat_ids: &[u32], int_scores: &mut [i32]) {

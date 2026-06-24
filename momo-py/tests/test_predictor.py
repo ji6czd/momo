@@ -4,8 +4,9 @@ predictor.py の単体テスト
   - Predictor.__init__() のエラーハンドリング
 """
 import json
+from pathlib import Path
 import pytest
-from momo_py.predictor import PredictionResult, Predictor
+from momo_py.predictor import PredictionResult, Predictor, PredictorConfig
 
 
 # ------------------------------------------------------------------ #
@@ -80,6 +81,7 @@ class TestPredictionResultToJson:
 # Predictor.__init__()
 # ------------------------------------------------------------------ #
 class TestPredictorInit:
-    def test_missing_model_raises(self, tmp_path):
+    def test_missing_model_raises(self, tmp_path: Path):
+        config = PredictorConfig(model_path=str(tmp_path / "nonexistent.model"))
         with pytest.raises(FileNotFoundError, match="モデル未検出"):
-            Predictor(str(tmp_path / "nonexistent.model"))
+            Predictor(config)

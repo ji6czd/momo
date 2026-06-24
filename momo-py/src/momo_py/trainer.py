@@ -31,10 +31,11 @@ from .exporter import export
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
 
 # ラベルを '_'（LABEL_SKIP）にして素通しする文字種
+# 注: NUMERIC は含めない。数字は恒等またはかな読みとして学習対象にする
+#     （_create_tsv_rows を参照）。英字（ALPHA）は引き続き素通し。
 _SKIP_CTYPES = frozenset(
     {
         CharType.ALPHA,
-        CharType.NUMERIC,
         CharType.SYMBOL,
         CharType.SYMBOL_CLOSE,
         CharType.SYMBOL_OPEN,
@@ -158,6 +159,12 @@ def _create_tsv_rows(
             f"{char}\t{LABEL_SKIP}\t{ctype}\t{orig_idx + i}"
             for i, char in enumerate(target_chars)
         ]
+    # 数字（NUMERIC）は1文字ずつ学習する（推論側も1文字に展開するため整合させる）。
+    #   単一数字 : 注釈をそのまま採用（恒等 "3"→"3"、またはかな "3"→"ミッ"＝みっか）
+    #   多桁     : 桁ごとに恒等（"120"→ 1,2,0）。多桁のかな読み（はつか等）は扱わず
+    #              漢数字（二十日）で表現する。
+    if ctype == CharType.NUMERIC:
+        return [f"{target_chars}\t{r_label}\t{ctype}\t{orig_idx}"]
     # 拗音（ひらがな/カタカナ複合ユニット）は1行にまとめる。
     # 推論時も get_units() が同じユニットとして認識するため整合が取れる。
     # 漢字などは LABEL_CONTINUE で1文字ずつに分割する（推論は1文字単位のため）。

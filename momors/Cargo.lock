@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "momors-braille"
-version = "0.8.1"
+version = "0.8.5"
 dependencies = [
  "momors-core",
  "serde",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "momors-cli"
-version = "0.8.1"
+version = "0.8.5"
 dependencies = [
  "clap",
  "momors-braille",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "momors-core"
-version = "0.8.1"
+version = "0.8.5"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "momors-ffi"
-version = "0.8.1"
+version = "0.8.5"
 dependencies = [
  "cbindgen",
  "momors-braille",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "momors-pyo3"
-version = "0.8.1"
+version = "0.8.5"
 dependencies = [
  "momors-braille",
  "momors-core",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "momors-wasm"
-version = "0.8.1"
+version = "0.8.5"
 dependencies = [
  "momors-braille",
  "momors-core",

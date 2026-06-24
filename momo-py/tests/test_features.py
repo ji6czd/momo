@@ -32,13 +32,31 @@ class TestGetCharType:
         assert get_char_type("0") == "NUM"
         assert get_char_type("9") == "NUM"
 
-    def test_symbol_ascii(self):
-        assert get_char_type("!") == "SYMBOL"
-        assert get_char_type(".") == "SYMBOL"
+    def test_symbol_stop(self):
+        # 文末記号類は SYMBOL_STOP
+        assert get_char_type("!") == "SYMBOL_STOP"
+        assert get_char_type(".") == "SYMBOL_STOP"
+        assert get_char_type("。") == "SYMBOL_STOP"
 
-    def test_symbol_fullwidth(self):
-        assert get_char_type("。") == "SYMBOL"
-        assert get_char_type("、") == "SYMBOL"
+    def test_symbol_pause(self):
+        # 読点・中点類は SYMBOL_PAUSE
+        assert get_char_type("、") == "SYMBOL_PAUSE"
+        assert get_char_type(",") == "SYMBOL_PAUSE"
+
+    def test_symbol_open(self):
+        # 開き括弧類は SYMBOL_OPEN
+        assert get_char_type("「") == "SYMBOL_OPEN"
+        assert get_char_type("(") == "SYMBOL_OPEN"
+
+    def test_symbol_close(self):
+        # 閉じ括弧類は SYMBOL_CLOSE
+        assert get_char_type("」") == "SYMBOL_CLOSE"
+        assert get_char_type(")") == "SYMBOL_CLOSE"
+
+    def test_symbol_other(self):
+        # いずれの特殊カテゴリにも属さない記号は SYMBOL
+        assert get_char_type("@") == "SYMBOL"
+        assert get_char_type("#") == "SYMBOL"
 
     def test_space(self):
         assert get_char_type(" ") == "SPACE"
@@ -54,7 +72,7 @@ class TestGetCharType:
 class TestGetUnits:
     def test_single_hiragana(self):
         units = get_units("あいう")
-        assert units == [("あ", 0), ("い", 1), ("う", 2)]
+        assert units == [("あ", 0, "HIRAGANA"), ("い", 1, "HIRAGANA"), ("う", 2, "HIRAGANA")]
 
     def test_compound_mora(self):
         # 拗音（きゃ など）は2文字で1ユニット
@@ -63,15 +81,18 @@ class TestGetUnits:
         assert "きゃ" in chars
 
     def test_alphanumeric_block(self):
-        # 英数字の連続は1ブロックにまとめる（学習データ作成時の省略記法サポート）
+        # 英字はまとめるが、数字は1文字ずつ個別ユニットになる
         units = get_units("abc123")
-        assert len(units) == 1
-        assert units[0] == ("abc123", 0)
+        chars = [u[0] for u in units]
+        assert "abc" in chars          # 英字ブロックはまとめる
+        assert "1" in chars and "2" in chars and "3" in chars  # 数字は個別
 
     def test_alphanumeric_with_hyphen(self):
+        # ハイフンは英字と同じグループ、数字は個別
         units = get_units("abc-123")
-        assert len(units) == 1
-        assert units[0][0] == "abc-123"
+        chars = [u[0] for u in units]
+        assert "abc-" in chars         # 英字+ハイフンはまとめる
+        assert "1" in chars and "2" in chars and "3" in chars
 
     def test_bracket_notation(self):
         # [xxx] 形式はブラケットを除いた中身が1ユニット
@@ -94,8 +115,8 @@ class TestGetUnits:
     def test_index_accuracy(self):
         units = get_units("abc東")
         # "abc" は idx=0、"東" は idx=3
-        assert units[0] == ("abc", 0)
-        assert units[1] == ("東", 3)
+        assert units[0] == ("abc", 0, "ALPHA")
+        assert units[1] == ("東", 3, "KANJI")
 
     def test_empty_string(self):
         assert get_units("") == []
@@ -120,16 +141,18 @@ class TestComputeSourceFeatures:
         assert features[0]["bias"] == 1.0
 
     def test_bos_flag_on_first(self):
+        # 先頭文字は直前コンテキスト特徴量を持たない
         seq = self._make_seq("あい")
         features = compute_source_features(seq)
-        assert features[0].get("BOS") == 1.0
-        assert "BOS" not in features[1]
+        assert not any(k.startswith("char_p1=") for k in features[0])
+        assert any(k.startswith("char_p1=") for k in features[1])
 
     def test_eos_flag_on_last(self):
+        # 末尾文字は直後コンテキスト特徴量を持たない
         seq = self._make_seq("あい")
         features = compute_source_features(seq)
-        assert features[-1].get("EOS") == 1.0
-        assert "EOS" not in features[0]
+        assert not any(k.startswith("char_n1=") for k in features[-1])
+        assert any(k.startswith("char_n1=") for k in features[0])
 
     def test_context_features_middle(self):
         seq = self._make_seq("あいう")
@@ -156,7 +179,8 @@ class TestComputeSourceFeatures:
         assert features[1].get("type_trans_p1_s=HIRAGANA->KANJI") == 1.0
 
     def test_single_char(self):
+        # 1文字だけの場合、前後のコンテキスト特徴量ともに持たない
         seq = self._make_seq("あ")
         features = compute_source_features(seq)
-        assert features[0].get("BOS") == 1.0
-        assert features[0].get("EOS") == 1.0
+        assert not any(k.startswith("char_p1=") for k in features[0])
+        assert not any(k.startswith("char_n1=") for k in features[0])

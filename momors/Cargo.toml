@@ -18,7 +18,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.8.1"
+version = "0.8.5"
 edition = "2024"
 authors = ["KIRIAKE Masanori <seiken@rd01.net>"]
 license = "BSD-3-Clause"

@@ -54,7 +54,7 @@ weight = 4
 [[menu.main]]
 identifier = "download"
 name = "ダウンロード"
-url = "/download/"
+url = "/downloads/"
 weight = 5
 [[menu.main]]
 identifier = "technology"

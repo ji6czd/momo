@@ -82,9 +82,9 @@ partial class MainForm
         cmbOutputFormat.Size = new Size(316, 23);
         cmbOutputFormat.Items.AddRange(new object[]
         {
-            "仮名テキスト (.txt)",
-            "BASE ファイル (.bse)",
-            "フォーマット済み点字 (.brf)"
+            "MOMO文書ファイル (.mbr)",
+            "BASEファイル (.bse)",
+            "点字テキスト (.brf)"
         });
         cmbOutputFormat.SelectedIndex = 1;
         cmbOutputFormat.SelectedIndexChanged += cmbOutputFormat_SelectedIndexChanged;

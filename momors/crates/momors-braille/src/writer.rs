@@ -4,12 +4,12 @@
 //! - `Bes` / `Base` / `BrailleText`: [`render`] で印刷イメージへ導出してから符号化する。
 
 use crate::document::BrailleDocument;
-use crate::formatter::{render, FormattedDocument};
+use crate::formatter::{FormattedDocument, render};
 use crate::nabcc::braille_to_nabcc_capital;
 
 /// ドキュメントの出力形式。
 pub enum OutputFormat {
-    /// ページ間をフォームフィード (`\x0C`) で区切ったプレーンテキスト。拡張子: `.brl`
+    /// ページ間をフォームフィード (`\x0C`) で区切ったプレーンテキスト。拡張子: `.brf`
     ///
     /// 各行の末尾点字スペース (`⠀` U+2800) は落とす。これにより 1 行が必ず
     /// `line_width` マス以内になり、プリンタ印刷時に行幅超過で意図しない折返しが

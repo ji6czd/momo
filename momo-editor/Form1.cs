@@ -303,7 +303,7 @@ public partial class Form1 : Form
         if (!ConfirmDiscard()) return;
         using var dialog = new OpenFileDialog
         {
-            Filter = "Momo点字ファイル (*.mbr)|*.mbr|点字ファイル (*.brl;*.bes)|*.brl;*.bes|テキストファイル (*.txt)|*.txt|すべてのファイル (*.*)|*.*",
+            Filter = "Momo点字ファイル (*.mbr)|*.mbr|テキストファイル (*.txt)|*.txt|すべてのファイル (*.*)|*.*",
         };
         if (dialog.ShowDialog() != DialogResult.OK) return;
         try
@@ -366,7 +366,7 @@ public partial class Form1 : Form
     {
         using var dialog = new SaveFileDialog
         {
-            Filter = "Momo点字ファイル (*.mbr)|*.mbr|点字ファイル (*.brl)|*.brl|BESファイル (*.bes)|*.bes|BASEファイル (*.bse)|*.bse",
+            Filter = "Momo点字ファイル (*.mbr)|*.mbr|点字ファイル (*.brf)|*.brf|BASEファイル (*.bse)|*.bse",
             FileName = _filePath != null ? Path.GetFileName(_filePath) : "untitled.mbr",
         };
         if (dialog.ShowDialog() != DialogResult.OK) return;
@@ -381,7 +381,7 @@ public partial class Form1 : Form
             int? format = FormatForPath(path);
             if (format is int fmt)
             {
-                // 点字形式（MBR/BES/BASE/BRL）は Rust の writer でバイト列を生成する。
+                // 点字形式（MBR/BES/BASE/BRF）は Rust の writer でバイト列を生成する。
                 var bytes = MomoFfi.WriteDocument(_document, fmt);
                 if (bytes == null)
                 {
@@ -422,7 +422,7 @@ public partial class Form1 : Form
             ".mbr" => MomoFfi.FormatMbr,
             ".bes" => MomoFfi.FormatBes,
             ".bse" => MomoFfi.FormatBase,
-            ".brl" => MomoFfi.FormatBrl,
+            ".brf" => MomoFfi.FormatBrf,
             _ => null,
         };
 

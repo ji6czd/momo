@@ -17,7 +17,7 @@ static class MomoFfi
     public const int FormatMbr = 0;
     public const int FormatBes = 1;
     public const int FormatBase = 2;
-    public const int FormatBrl = 3;
+    public const int FormatBrf = 3;
 
     // 読み込み形式コード。
     public const int ReadAuto = 0;

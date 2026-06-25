@@ -282,11 +282,12 @@ mod tests {
             ],
         );
         let doc = read_bes(&bytes).unwrap();
-        assert!(doc
-            .paragraphs
-            .iter()
-            .flatten()
-            .all(|l| l.page_break.is_none()));
+        assert!(
+            doc.paragraphs
+                .iter()
+                .flatten()
+                .all(|l| l.page_break.is_none())
+        );
     }
 
     #[test]

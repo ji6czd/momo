@@ -4,7 +4,7 @@
 //! - `Bes` / `Base` / `BrailleText`: [`render`] で印刷イメージへ導出してから符号化する。
 
 use crate::document::BrailleDocument;
-use crate::formatter::{FormattedDocument, render};
+use crate::formatter::{render, FormattedDocument};
 use crate::nabcc::braille_to_nabcc_capital;
 
 /// ドキュメントの出力形式。

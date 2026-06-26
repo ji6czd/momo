@@ -313,14 +313,13 @@ public partial class Form1 : Form
             string filePath = dialog.FileName;
             bool modified = false;
 
-            if (IsBesFile(dialog.FileName) || IsMbrFile(dialog.FileName))
+            if (FormatForPath(dialog.FileName) is int fmt)
             {
-                // 点字ファイル（MBR / BES）は Rust の reader で正本ドキュメントへ復元する。
-                int format = IsBesFile(dialog.FileName) ? MomoFfi.ReadBes : MomoFfi.ReadMbr;
-                var doc = MomoFfi.ReadDocument(File.ReadAllBytes(dialog.FileName), format);
+                // 点字ファイル（MBR / BES / BET）は Rust の reader で正本ドキュメントへ復元する。
+                var doc = MomoFfi.ReadDocument(File.ReadAllBytes(dialog.FileName), fmt);
                 if (doc == null)
                 {
-                    MessageBox.Show("点字ファイルを読み込めませんでした。", "エラー",
+                    MessageBox.Show("対応していないファイル形式です。", "エラー",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
@@ -409,18 +408,13 @@ public partial class Form1 : Form
 
     // ---- ドキュメントモデルとエディタの同期 ----
 
-    private static bool IsMbrFile(string path) =>
-        Path.GetExtension(path).Equals(".mbr", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsBesFile(string path) =>
-        Path.GetExtension(path).Equals(".bes", StringComparison.OrdinalIgnoreCase);
-
-    // 拡張子に対応する点字書き出し形式コード。点字形式でなければ null（プレーンテキスト保存）。
+    // 拡張子に対応する点字形式コード（読み書き共通）。点字形式でなければ null。
     private static int? FormatForPath(string path) =>
         Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".mbr" => MomoFfi.FormatMbr,
             ".bes" => MomoFfi.FormatBes,
+            ".bet" => MomoFfi.FormatBet,
             ".bse" => MomoFfi.FormatBase,
             ".brf" => MomoFfi.FormatBrf,
             _ => null,

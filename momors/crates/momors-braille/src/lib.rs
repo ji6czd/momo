@@ -39,7 +39,7 @@ pub use backtranslator::{
 pub use converter::{BrailleConverter, BrailleResult};
 pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
 pub use error::{Error, Result};
-pub use formatter::{FormattedDocument, RenderedLine, render};
-pub use reader::read_bes;
+pub use formatter::{render, FormattedDocument, RenderedLine};
+pub use reader::{read_bes, read_bet};
 pub use table::BrailleTable;
 pub use writer::OutputFormat;

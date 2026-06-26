@@ -13,16 +13,17 @@ static class MomoFfi
 {
     const string DllName = "momors_ffi";
 
-    // 書き出し形式コード（Rust 側 momo_doc_write と一致させる）。
-    public const int FormatMbr = 0;
-    public const int FormatBes = 1;
-    public const int FormatBase = 2;
-    public const int FormatBrf = 3;
+    // 形式コード（読み込み・書き出しで共通。Rust 側 momo_doc_read / momo_doc_write と一致させる）。
+    public const int FormatMbr  = 0;   // 読み書き両対応
+    public const int FormatBes  = 1;   // 読み書き両対応
+    public const int FormatBet  = 2;   // 読み込みのみ
+    public const int FormatBase = 3;   // 書き出しのみ
+    public const int FormatBrf  = 4;   // 書き出しのみ
 
-    // 読み込み形式コード。
-    public const int ReadAuto = 0;
-    public const int ReadMbr = 1;
-    public const int ReadBes = 2;
+    // 読み込み時の別名（可読性のため）。
+    public const int ReadMbr = FormatMbr;
+    public const int ReadBes = FormatBes;
+    public const int ReadBet = FormatBet;
 
     // ---- 予測器（漢字かな交じり文 → 点字） ----
 

@@ -37,30 +37,35 @@ name = "ホーム"
 url = "/"
 weight = 1
 [[menu.main]]
+identifier = "news"
+name = "お知らせ"
+url = "/news/"
+weight = 2
+[[menu.main]]
 identifier = "editor"
 name = "MOMO エディタ"
 url = "/editor/"
-weight = 2
+weight = 3
 [[menu.main]]
 identifier = "converter"
 name = "変換プログラム"
 url = "/converter/"
-weight = 3
+weight = 4
 [[menu.main]]
 identifier = "api"
 name = "MOMO API"
 url = "/api/"
-weight = 4
+weight = 5
 [[menu.main]]
 identifier = "download"
 name = "ダウンロード"
 url = "/downloads/"
-weight = 5
+weight = 6
 [[menu.main]]
 identifier = "technology"
 name = "技術情報"
 url = "/technology/"
-weight = 6
+weight = 7
 
 [[menu.main]]
 identifier = "about"

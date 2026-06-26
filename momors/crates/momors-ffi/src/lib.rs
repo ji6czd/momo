@@ -49,11 +49,11 @@
 //! 改ページ情報は MBR の `====` マーカー文字列として不透明に授受する。
 //! 詳細はソース下部の各関数ドキュメントを参照。
 //! ```c
-//! // 読込: バイト列 -> ドキュメント（format: 0=自動,1=MBR,2=BES）
+//! // 読込: バイト列 -> ドキュメント（format: 0=MBR,1=BES,2=BET）
 //! MomoDoc momo_doc_read(const uint8_t* bytes, int32_t len, int32_t format);
 //! void    momo_doc_free(MomoDoc);
 //! // 設定・段落・物理行の getter（momo_doc_line_width / _paragraph_count / _line_w など）
-//! // 保存: ビルダーで組み立て -> momo_doc_write でバイト列取得（format: 0=MBR,1=BES,2=BASE,3=BRL）
+//! // 保存: ビルダーで組み立て -> momo_doc_write でバイト列取得（format: 0=MBR,1=BES,3=BASE,4=BRF）
 //! MomoDocBuilder momo_doc_builder_new(int32_t lw, int32_t lpp, bool header, int32_t number_start, const uint16_t* title);
 //! void           momo_doc_builder_add_line(MomoDocBuilder, const uint16_t* content, bool logical_end, const uint16_t* page_break);
 //! MomoDoc        momo_doc_builder_build(MomoDocBuilder); // ビルダーは解放される
@@ -530,8 +530,8 @@ pub struct BrailleDocHandle {
     doc: BrailleDocument,
 }
 
-/// バイト列を点字ドキュメントへ読み込む。format: 0=自動判定, 1=MBR, 2=BES。
-/// 失敗時（破損 BES・不正 UTF-8・NULL）は NULL を返す。
+/// バイト列を点字ドキュメントへ読み込む。format: 0=MBR, 1=BES, 2=BET。
+/// 失敗時（破損・不正 UTF-8・NULL）は NULL を返す。
 #[no_mangle]
 pub extern "C" fn momo_doc_read(
     bytes: *const u8,
@@ -542,17 +542,19 @@ pub extern "C" fn momo_doc_read(
         return std::ptr::null_mut();
     }
     let slice = unsafe { std::slice::from_raw_parts(bytes, len as usize) };
-    let is_bes = format == 2 || (format == 0 && slice.len() >= 4 && &slice[0..4] == b"%BET");
-    let doc = if is_bes {
-        match momors_braille::read_bes(slice) {
+    let doc = match format {
+        1 => match momors_braille::read_bes(slice) {
             Some(d) => d,
             None => return std::ptr::null_mut(),
-        }
-    } else {
-        match std::str::from_utf8(slice) {
+        },
+        2 => match momors_braille::read_bet(slice) {
+            Some(d) => d,
+            None => return std::ptr::null_mut(),
+        },
+        _ => match std::str::from_utf8(slice) {
             Ok(t) => BrailleDocument::parse_mbr(t),
             Err(_) => return std::ptr::null_mut(),
-        }
+        },
     };
     Box::into_raw(Box::new(BrailleDocHandle { doc }))
 }
@@ -801,7 +803,7 @@ pub struct ByteBuffer {
 }
 
 /// ドキュメントを指定形式のバイト列へ書き出す。
-/// format: 0=MBR, 1=BES, 2=BASE(.bse), 3=BrailleText(.brl)。無効/NULL なら NULL。
+/// format: 0=MBR, 1=BES, 3=BASE(.bse), 4=BrailleText(.brf)。無効/NULL なら NULL。
 #[no_mangle]
 pub extern "C" fn momo_doc_write(h: *const BrailleDocHandle, format: c_int) -> *mut ByteBuffer {
     let h = match unsafe { h.as_ref() } {
@@ -811,8 +813,8 @@ pub extern "C" fn momo_doc_write(h: *const BrailleDocHandle, format: c_int) -> *
     let fmt = match format {
         0 => OutputFormat::Mbr,
         1 => OutputFormat::Bes,
-        2 => OutputFormat::Base,
-        3 => OutputFormat::BrailleText,
+        3 => OutputFormat::Base,
+        4 => OutputFormat::BrailleText,
         _ => return std::ptr::null_mut(),
     };
     let bytes = fmt.write(&h.doc);
@@ -1121,7 +1123,7 @@ pub extern "C" fn momo_doc_render_from_paragraphs(
 }
 
 /// 論理段落（UTF-16, `\n` 区切り）を折返した上で指定形式のバイト列へ書き出す。
-/// `format`: 0=MBR, 1=BES, 2=BASE, 3=BrailleText。paragraphs が NULL／format 不正なら NULL。
+/// `format`: 0=MBR, 1=BES, 3=BASE, 4=BrailleText。paragraphs が NULL／format 不正なら NULL。
 #[no_mangle]
 pub extern "C" fn momo_doc_write_from_paragraphs(
     paragraphs: *const u16,
@@ -1139,8 +1141,8 @@ pub extern "C" fn momo_doc_write_from_paragraphs(
     let fmt = match format {
         0 => OutputFormat::Mbr,
         1 => OutputFormat::Bes,
-        2 => OutputFormat::Base,
-        3 => OutputFormat::BrailleText,
+        3 => OutputFormat::Base,
+        4 => OutputFormat::BrailleText,
         _ => return std::ptr::null_mut(),
     };
     let config = config_from_params(line_width, lines_per_page, page_header, number_start, title);

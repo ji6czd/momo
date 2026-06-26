@@ -1,8 +1,13 @@
 //! 点字ファイルの読み込み。バイト列を正本 [`BrailleDocument`] へ復元する。
 //!
-//! 現在は BES バイナリ形式（[`crate::writer`] の `Bes` 出力の逆変換）に対応する。
+//! BES（[`crate::writer`] の `Bes` 出力の逆変換）および
+//! その前身 BET（バージョン 2）に対応する。
+//! どちらも `%BET` マジックを共有し、5 バイト目の版番号で区別する。
 //!
-//! BES は印刷イメージを保持する形式であり、ヘッダ行・強制/暗黙の改ページが
+//! - BES: `%BET4`（[`read_bes`]）
+//! - BET: `%BET2`（[`read_bet`]）
+//!
+//! 両形式とも印刷イメージを保持し、ヘッダ行・強制/暗黙の改ページが
 //! すべてファイル中に焼き込まれている。本リーダはバイト列をデコードし、
 //! 段落（物理行の列）へ復元する。方針:
 //!
@@ -26,6 +31,8 @@ const CELL_BASE: u8 = 0xA0;
 const CELL_MAX: u8 = 0xDF; // 0xA0 + 63
 const BRAILLE_BASE: u32 = 0x2800;
 const NUM_SIGN: char = '⠼'; // U+283C
+const BES_VERSION: u8 = b'4';
+const BET_VERSION: u8 = b'2';
 
 /// 復元途中の1物理行（段落へグループ化する前）。
 struct RawLine {
@@ -34,13 +41,31 @@ struct RawLine {
     page_break: bool,
 }
 
-/// BES バイナリ列を読み込んで正本ドキュメントへ復元する。
-/// マジック不一致や明らかな破損では `None` を返す。
+/// BES バイナリ列（`%BET4`）を読み込んで正本ドキュメントへ復元する。
+/// マジック・版番号不一致や明らかな破損では `None` を返す。
 pub fn read_bes(bytes: &[u8]) -> Option<BrailleDocument> {
-    if bytes.len() < HEADER_SIZE + EXT_HEADER_SIZE + 2 || &bytes[0..4] != b"%BET" {
+    if bytes.len() < HEADER_SIZE + EXT_HEADER_SIZE + 2
+        || &bytes[0..4] != b"%BET"
+        || bytes[4] != BES_VERSION
+    {
         return None;
     }
+    parse_bes_family(bytes)
+}
 
+/// BET バイナリ列（`%BET2`）を読み込んで正本ドキュメントへ復元する。
+/// BET は BES の前身形式（バージョン 2）。拡張ヘッダを持たない。
+/// マジック・版番号不一致や明らかな破損では `None` を返す。
+pub fn read_bet(bytes: &[u8]) -> Option<BrailleDocument> {
+    if bytes.len() < HEADER_SIZE + 2 || &bytes[0..4] != b"%BET" || bytes[4] != BET_VERSION {
+        return None;
+    }
+    parse_bet_body(bytes)
+}
+
+/// BES バイト列の解析（版番号チェック後に呼ぶ）。
+/// ページデータはサイズ前置きチャンク方式。
+fn parse_bes_family(bytes: &[u8]) -> Option<BrailleDocument> {
     let line_width = parse_2digit(&bytes[0x16..0x18]).map(|v| v.saturating_sub(1))?;
     let lines_per_page = parse_2digit(&bytes[0x18..0x1A])?;
     if lines_per_page == 0 {
@@ -83,6 +108,46 @@ pub fn read_bes(bytes: &[u8]) -> Option<BrailleDocument> {
         pos = chunk_end;
     }
 
+    assemble_document(pages, line_width, lines_per_page)
+}
+
+/// BET バイト列の解析（版番号チェック後に呼ぶ）。
+/// 拡張ヘッダなし。ページデータは FD バイトを区切りとする直接方式。
+fn parse_bet_body(bytes: &[u8]) -> Option<BrailleDocument> {
+    let line_width = parse_2digit(&bytes[0x16..0x18]).map(|v| v.saturating_sub(1))?;
+    let lines_per_page = parse_2digit(&bytes[0x18..0x1A])?;
+    if lines_per_page == 0 {
+        return None;
+    }
+
+    // BET: 拡張ヘッダなし。メインヘッダ(512) の直後が最初の FD。
+    let mut pos = HEADER_SIZE;
+    let mut pages: Vec<Vec<RawLine>> = Vec::new();
+    while pos < bytes.len() {
+        match bytes[pos] {
+            PAGE_MARK => {
+                pos += 1; // FD をスキップ
+                let page_start = pos;
+                // 次の PAGE_MARK か EOF_MARK までがページ内容。
+                while pos < bytes.len() && bytes[pos] != PAGE_MARK && bytes[pos] != EOF_MARK {
+                    pos += 1;
+                }
+                pages.push(parse_page(&bytes[page_start..pos]));
+            }
+            EOF_MARK => break,
+            _ => pos += 1,
+        }
+    }
+
+    assemble_document(pages, line_width, lines_per_page)
+}
+
+/// ページリストを正本ドキュメントへ組み立てる（BES/BET 共通）。
+fn assemble_document(
+    pages: Vec<Vec<RawLine>>,
+    line_width: usize,
+    lines_per_page: usize,
+) -> Option<BrailleDocument> {
     // 改ページの強制/暗黙判定 + ヘッダ行除去 → 通しの物理行へ。
     let page_count = pages.len();
     let mut raw: Vec<RawLine> = Vec::new();
@@ -196,11 +261,17 @@ mod tests {
         std::iter::repeat('⠁').take(n).collect()
     }
 
-    /// テスト用 BES バイト列を組み立てる。
+    /// テスト用 BES/BET バイト列を組み立てる。`version` は `b'4'`(BES) か `b'2'`(BET)。
     /// `pages`: 各ページの (内容, logical_end) のリスト。
-    fn make_bes(line_width: usize, lines_per_page: usize, pages: &[Vec<(&str, bool)>]) -> Vec<u8> {
+    fn make_format(
+        version: u8,
+        line_width: usize,
+        lines_per_page: usize,
+        pages: &[Vec<(&str, bool)>],
+    ) -> Vec<u8> {
         let mut out = vec![b' '; HEADER_SIZE];
         out[0..4].copy_from_slice(b"%BET");
+        out[4] = version;
         let xl_enc = line_width + 1;
         out[0x16] = b'0' + (xl_enc / 10) as u8;
         out[0x17] = b'0' + (xl_enc % 10) as u8;
@@ -236,9 +307,62 @@ mod tests {
         out
     }
 
+    fn make_bes(line_width: usize, lines_per_page: usize, pages: &[Vec<(&str, bool)>]) -> Vec<u8> {
+        make_format(BES_VERSION, line_width, lines_per_page, pages)
+    }
+
+    /// テスト用 BET バイト列を組み立てる。
+    /// 拡張ヘッダなし・FD 直接区切り・サイズ前置きなし。
+    fn make_bet(line_width: usize, lines_per_page: usize, pages: &[Vec<(&str, bool)>]) -> Vec<u8> {
+        let mut out = vec![b' '; HEADER_SIZE];
+        out[0..4].copy_from_slice(b"%BET");
+        out[4] = BET_VERSION;
+        let xl_enc = line_width + 1;
+        out[0x16] = b'0' + (xl_enc / 10) as u8;
+        out[0x17] = b'0' + (xl_enc % 10) as u8;
+        out[0x18] = b'0' + (lines_per_page / 10) as u8;
+        out[0x19] = b'0' + (lines_per_page % 10) as u8;
+        // 拡張ヘッダなし。直後からページデータ。
+
+        let last_page = pages.len().saturating_sub(1);
+        for (pi, page) in pages.iter().enumerate() {
+            out.push(PAGE_MARK); // FD
+            let last_line = page.len().saturating_sub(1);
+            for (li, (text, logical_end)) in page.iter().enumerate() {
+                for ch in text.chars() {
+                    let pattern = (ch as u32).saturating_sub(BRAILLE_BASE) as u8;
+                    out.push(CELL_BASE + pattern);
+                }
+                if pi == last_page && li == last_line {
+                    // 最終ページ最終行は FE のみ（0xFF で EOF を示す）
+                    out.push(LINE_END);
+                } else if *logical_end {
+                    out.push(CR);
+                    out.push(LINE_END);
+                } else {
+                    out.push(LINE_END);
+                }
+            }
+        }
+        out.push(EOF_MARK);
+        out
+    }
+
     #[test]
     fn rejects_non_bes() {
         assert!(read_bes(b"not a bes file at all............").is_none());
+    }
+
+    #[test]
+    fn bes_rejects_bet_version() {
+        let bytes = make_bet(32, 22, &[vec![("⠁", true)]]);
+        assert!(read_bes(&bytes).is_none());
+    }
+
+    #[test]
+    fn bet_rejects_bes_version() {
+        let bytes = make_bes(32, 22, &[vec![("⠁", true)]]);
+        assert!(read_bet(&bytes).is_none());
     }
 
     #[test]
@@ -282,12 +406,11 @@ mod tests {
             ],
         );
         let doc = read_bes(&bytes).unwrap();
-        assert!(
-            doc.paragraphs
-                .iter()
-                .flatten()
-                .all(|l| l.page_break.is_none())
-        );
+        assert!(doc
+            .paragraphs
+            .iter()
+            .flatten()
+            .all(|l| l.page_break.is_none()));
     }
 
     #[test]
@@ -297,6 +420,41 @@ mod tests {
         // ページ0 最終行（段落0の末尾）に強制改ページ
         assert!(doc.paragraphs[0].last().unwrap().page_break.is_some());
         assert!(doc.paragraphs[1].last().unwrap().page_break.is_none());
+    }
+
+    #[test]
+    fn bet_reads_xl_yl_from_header() {
+        let bytes = make_bet(32, 22, &[vec![("⠁⠃⠉", true)]]);
+        let doc = read_bet(&bytes).unwrap();
+        assert_eq!(doc.config.line_width, 32);
+        assert_eq!(doc.config.lines_per_page, 22);
+    }
+
+    #[test]
+    fn bet_groups_physical_lines_into_paragraphs() {
+        let bytes = make_bet(32, 22, &[vec![("⠁⠃", false), ("⠉⠙", true), ("⠑⠋", true)]]);
+        let doc = read_bet(&bytes).unwrap();
+        assert_eq!(doc.paragraphs.len(), 2);
+        assert_eq!(doc.paragraphs[0].len(), 2);
+        assert!(doc.paragraphs[0][1].logical_end);
+    }
+
+    #[test]
+    fn reads_real_sample_bes() {
+        let bytes = include_bytes!("../../../testdata/sample.bes");
+        let doc = read_bes(bytes).unwrap();
+        assert_eq!(doc.config.line_width, 32);
+        assert_eq!(doc.config.lines_per_page, 22);
+        assert!(!doc.paragraphs.is_empty());
+    }
+
+    #[test]
+    fn reads_real_sample_bet() {
+        let bytes = include_bytes!("../../../testdata/sample.BET");
+        let doc = read_bet(bytes).unwrap();
+        assert_eq!(doc.config.line_width, 32);
+        assert_eq!(doc.config.lines_per_page, 22);
+        assert!(!doc.paragraphs.is_empty());
     }
 
     #[test]

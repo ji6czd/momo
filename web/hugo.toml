@@ -1,6 +1,6 @@
 baseURL = 'https://momo.seiken-lab.com'
 locale = 'ja'
-title = 'Japanese Braille Translation Library MOMO Project'
+title = 'Japanese Braille Translation Software: MOMO Project'
 paginate = 5
 
 [module]
@@ -12,21 +12,22 @@ disableXML = true
 minifyOutput = true
 
 [params]
-description = 'Japanese Braille Translation Library MOMO Project'
+description = 'Japanese Braille Translation Software MOMO Project'
 author = 'Seiken Lab'
 disableThemeToggle = false
-# ShowShareButtons = true
-# ShowPostNavLinks = true
+ShowShareButtons = true
+ShareButtons = ["x", "linkedin", "facebook"]
+ShowPostNavLinks = true
 # ShowBreadCrumbs = true
 ShowCodeCopyButtons = true
 # ShowWordCount = true
-ShowRssButtonInSectionTermList = true
+# ShowRssButtonInSectionTermList = true
 UseHugoToc = true
 disableSpecial1stPost = false
 disableScrollToTop = false
 comments = false
 hidemeta = false
-hideSummary = true
+# hideSummary = true
 showtoc = false
 tocopen = false
 

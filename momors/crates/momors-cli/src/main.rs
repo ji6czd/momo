@@ -72,6 +72,10 @@ struct Cli {
     #[arg(long)]
     braille: bool,
 
+    // 予測結果→ソースの文字ごとの対応関係を出力する
+    #[arg(long)]
+    brl_src_index: bool,
+
     // ---- ファイル整形モード専用 ------------------------------------
     /// 入力ファイル（指定するとファイル整形モードに切り替わる）
     #[arg(long, short)]
@@ -293,10 +297,20 @@ fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
                 }
                 if let Some(ref converter) = braille_converter {
                     match converter.convert(result.kana_text()) {
-                        Ok(brl) => writeln!(out, "{}", brl.braille_text()).ok(),
+                        Ok(brl) => {
+                            writeln!(out, "{}", brl.braille_text()).ok();
+                            if cli.brl_src_index {
+                                let brl_char_count = brl.braille_text().chars().count();
+                                for i in result
+                                    .braille_char_to_source(brl.kana_to_braille(), brl_char_count)
+                                {
+                                    write!(out, "{i} ").ok();
+                                }
+                                writeln!(out).ok();
+                            }
+                        }
                         Err(e) => {
                             eprintln!("点字変換エラー: {e}");
-                            None
                         }
                     };
                 } else if cli.segment {

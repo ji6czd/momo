@@ -146,6 +146,14 @@ int momo_prediction_braille_char_count(const PredictionHandle* handle);
 void momo_prediction_src_to_braille(const PredictionHandle* handle, int32_t* row_ptr, int32_t* col_idx);
 
 /**
+ * 点字→原文 コードポイントインデックス配列を out に書き込む。
+ *
+ * out は braille_char_count 要素以上の領域を確保しておくこと。
+ * handle または out が NULL なら何もしない。
+ */
+void momo_prediction_braille_to_src(const PredictionHandle* handle, int32_t* out);
+
+/**
  * バイト列を点字ドキュメントへ読み込む。format: 0=MBR, 1=BES, 2=BET。
  * 失敗時（破損・不正 UTF-8・NULL）は NULL を返す。
  */

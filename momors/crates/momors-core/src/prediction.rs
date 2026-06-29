@@ -272,6 +272,61 @@ impl PredictionResult {
             })
             .collect()
     }
+
+    /// 点字のコードポイント位置 → 原文のコードポイント位置 のマッピング。
+    ///
+    /// `kana_to_braille` には `BrailleResult::kana_to_braille()` を渡す。
+    /// `braille_char_count` には点字テキストのコードポイント数を渡す。
+    ///
+    /// 各点字位置はそのセルを生成したかな文字を経由して原文位置に帰属する。
+    /// フラグ記号（⠼ ⠰ ⠤ など）はそのフラグを発動させた原文文字のインデックスに帰属する
+    /// （`BrailleConverter` が `brl_pos` をフラグ挿入前に記録するため自然にそうなる）。
+    /// 複合音（キャ → ⠈⠡）が 2 セル占める場合、両セルとも複合音の原文位置を指す。
+    pub fn braille_char_to_source(
+        &self,
+        kana_to_braille: &[usize],
+        braille_char_count: usize,
+    ) -> Vec<usize> {
+        let kana_to_src = self.kana_to_source_char();
+        let n_kana = kana_to_braille.len();
+        let mut result = vec![0usize; braille_char_count];
+
+        for i in 0..n_kana {
+            let start = kana_to_braille[i];
+            let end = if i + 1 < n_kana {
+                kana_to_braille[i + 1]
+            } else {
+                braille_char_count
+            };
+            let src = kana_to_src.get(i).copied().unwrap_or(0);
+            for p in start..end {
+                if p < braille_char_count {
+                    result[p] = src;
+                }
+            }
+        }
+
+        result
+    }
+
+    /// 原文のコードポイント位置 → 点字のコードポイント位置のリスト。
+    ///
+    /// `kana_to_braille` には `BrailleResult::kana_to_braille()` を渡す。
+    /// 複合音（キャ など）は 2 つのかな文字が同一の点字位置を指すため、
+    /// 重複を除いた昇順リストを返す。
+    pub fn source_to_braille_char(&self, kana_to_braille: &[usize]) -> Vec<Vec<usize>> {
+        self.source_to_kana_char()
+            .into_iter()
+            .map(|kana_indices| {
+                let mut braille: Vec<usize> = kana_indices
+                    .iter()
+                    .filter_map(|&ki| kana_to_braille.get(ki).copied())
+                    .collect();
+                braille.dedup();
+                braille
+            })
+            .collect()
+    }
 }
 
 // ============================================================
@@ -1281,6 +1336,124 @@ mod tests {
         for (s, kana_positions) in s2k.iter().enumerate() {
             for &kana_char_idx in kana_positions {
                 assert_eq!(k2s[kana_char_idx], s);
+            }
+        }
+    }
+
+    // ============================================================
+    // source_to_braille_char
+    // ============================================================
+
+    #[test]
+    fn source_to_braille_char_one_to_one() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // ASCII バイパス: a→kana[0], b→kana[1], c→kana[2]
+        // kana_to_braille が 1:1 のとき、source_to_braille も 1:1 になる
+        let result = predictor.predict("abc").unwrap();
+        let kana_to_braille = vec![0usize, 1, 2];
+        let s2b = result.source_to_braille_char(&kana_to_braille);
+
+        assert_eq!(s2b.len(), 3);
+        assert_eq!(s2b[0], vec![0]);
+        assert_eq!(s2b[1], vec![1]);
+        assert_eq!(s2b[2], vec![2]);
+    }
+
+    #[test]
+    fn source_to_braille_char_dedup_compound() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // ASCII バイパス: a→kana[0], b→kana[1]
+        // kana[0] と kana[1] が同じ点字位置 (複合音を模倣) → dedup されること
+        let result = predictor.predict("ab").unwrap();
+        let kana_to_braille = vec![0usize, 0]; // 両方とも点字位置 0
+        let s2b = result.source_to_braille_char(&kana_to_braille);
+
+        assert_eq!(s2b.len(), 2);
+        assert_eq!(s2b[0], vec![0]);
+        assert_eq!(s2b[1], vec![0]);
+    }
+
+    #[test]
+    fn source_to_braille_char_empty() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("").unwrap();
+        let s2b = result.source_to_braille_char(&[]);
+        assert!(s2b.is_empty());
+    }
+
+    // ============================================================
+    // braille_char_to_source
+    // ============================================================
+
+    #[test]
+    fn braille_char_to_source_empty() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("").unwrap();
+        assert!(result.braille_char_to_source(&[], 0).is_empty());
+    }
+
+    #[test]
+    fn braille_char_to_source_one_to_one() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // ASCII バイパス: a→kana[0]→braille[0], b→kana[1]→braille[1], c→kana[2]→braille[2]
+        let result = predictor.predict("abc").unwrap();
+        let b2s = result.braille_char_to_source(&[0, 1, 2], 3);
+        assert_eq!(b2s, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn braille_char_to_source_with_flag_cells() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // フラグセルを模倣: kana[0](a→src0) が braille [0,2) を占有（フラグ込み）
+        //                   kana[1](b→src1) が braille [2,4) を占有
+        let result = predictor.predict("ab").unwrap();
+        let b2s = result.braille_char_to_source(&[0, 2], 4);
+        assert_eq!(b2s, vec![0, 0, 1, 1]);
+    }
+
+    #[test]
+    fn braille_char_to_source_compound() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // 複合音を模倣: kana[0](a→src0) と kana[1](b→src1) が同じ braille pos 0 を指す。
+        // kana[0] の範囲 [0,0) は空になり、kana[1] の範囲 [0,2) が両セルを引き継ぐ。
+        // (実際の キャ では kana[0]=キ と kana[1]=ャ が同一 src を指すが、
+        //  ASCII proxy ではsrc[0] と src[1] が異なるため kana[1] の src が採用される)
+        let result = predictor.predict("abc").unwrap();
+        let b2s = result.braille_char_to_source(&[0, 0, 2], 3);
+        // pos 0,1 → kana[1](b) → src 1
+        // pos 2   → kana[2](c) → src 2
+        assert_eq!(b2s, vec![1, 1, 2]);
+    }
+
+    #[test]
+    fn braille_char_to_source_roundtrip_consistency() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // source_to_braille_char と braille_char_to_source の整合性:
+        // s2b[s] に bi が含まれるなら b2s[bi] == s でなければならない
+        let result = predictor.predict("abc").unwrap();
+        let kana_to_braille = vec![0usize, 1, 2];
+        let s2b = result.source_to_braille_char(&kana_to_braille);
+        let b2s = result.braille_char_to_source(&kana_to_braille, 3);
+
+        for (s, braille_positions) in s2b.iter().enumerate() {
+            for &bi in braille_positions {
+                assert_eq!(b2s[bi], s, "b2s[{bi}] should be {s}");
             }
         }
     }

@@ -29,8 +29,9 @@
 //!
 //! ## サイズ照会
 //! ```c
-//! int32_t momo_prediction_kana_char_count(MomoPrediction);
-//! int32_t momo_prediction_src_char_count (MomoPrediction);
+//! int32_t momo_prediction_kana_char_count   (MomoPrediction);
+//! int32_t momo_prediction_src_char_count    (MomoPrediction);
+//! int32_t momo_prediction_braille_char_count(MomoPrediction);
 //! ```
 //!
 //! ## インデックス配列（コードポイント単位）
@@ -42,6 +43,14 @@
 //! //   row_ptr: src_char_count+1 要素  (row_ptr[i]..row_ptr[i+1] が src[i] に対応するかなインデックス範囲)
 //! //   col_idx: kana_char_count 要素
 //! void momo_prediction_src_to_kana(MomoPrediction, int32_t* row_ptr, int32_t* col_idx);
+//!
+//! // src→点字: CSR 形式
+//! //   row_ptr: src_char_count+1 要素  (row_ptr[i]..row_ptr[i+1] が src[i] に対応する点字インデックス範囲)
+//! //   col_idx: 最大 braille_char_count 要素（複合音の重複を除いた実際の要素数は row_ptr 末尾値で確認）
+//! void momo_prediction_src_to_braille(MomoPrediction, int32_t* row_ptr, int32_t* col_idx);
+//!
+//! // 点字→src: braille_char_count 要素の int32_t 配列
+//! void momo_prediction_braille_to_src(MomoPrediction, int32_t* out);
 //! ```
 //!
 //! ## 点字ドキュメント（正本）の読み書き・描画
@@ -115,12 +124,20 @@ pub struct PredictionHandle {
     braille_utf8: Vec<u8>,
     /// null 終端 UTF-16 点字テキスト
     braille_utf16: Vec<u16>,
+    /// 点字のコードポイント数
+    braille_char_count: i32,
     /// かな char_idx → 原文 char_idx (kana_char_count 要素)
     kana_to_src: Vec<i32>,
     /// CSR 行ポインタ (src_char_count+1 要素)
     src_to_kana_row: Vec<i32>,
     /// CSR 列インデックス (kana_char_count 要素)
     src_to_kana_col: Vec<i32>,
+    /// CSR 行ポインタ (src_char_count+1 要素)
+    src_to_braille_row: Vec<i32>,
+    /// CSR 列インデックス (≤ braille_char_count 要素、複合音の重複を除く)
+    src_to_braille_col: Vec<i32>,
+    /// 点字 char_idx → 原文 char_idx (braille_char_count 要素)
+    braille_to_src: Vec<i32>,
 }
 
 impl PredictionHandle {
@@ -135,13 +152,17 @@ impl PredictionHandle {
         kana_utf16.push(0);
 
         // かな→点字。変換に失敗した場合は空文字列にフォールバックする。
-        let braille = converter
-            .convert(result.kana_text())
-            .map(|b| b.braille_text().to_owned())
-            .unwrap_or_default();
-        let mut braille_utf8 = braille.as_bytes().to_vec();
+        let (braille_str, kana_to_braille) = match converter.convert(result.kana_text()) {
+            Ok(b) => {
+                let k2b = b.kana_to_braille().to_vec();
+                (b.braille_text().to_owned(), k2b)
+            }
+            Err(_) => (String::new(), Vec::new()),
+        };
+        let braille_char_count = braille_str.chars().count() as i32;
+        let mut braille_utf8 = braille_str.as_bytes().to_vec();
         braille_utf8.push(0);
-        let mut braille_utf16: Vec<u16> = braille.encode_utf16().collect();
+        let mut braille_utf16: Vec<u16> = braille_str.encode_utf16().collect();
         braille_utf16.push(0);
 
         let kana_to_src: Vec<i32> = k2s.iter().map(|&i| i as i32).collect();
@@ -158,14 +179,34 @@ impl PredictionHandle {
         }
         src_to_kana_row.push(offset);
 
+        let s2b = result.source_to_braille_char(&kana_to_braille);
+        let mut src_to_braille_row = Vec::with_capacity(s2b.len() + 1);
+        let mut src_to_braille_col = Vec::new();
+        let mut offset = 0i32;
+        for brailles in &s2b {
+            src_to_braille_row.push(offset);
+            for &bi in brailles {
+                src_to_braille_col.push(bi as i32);
+            }
+            offset += brailles.len() as i32;
+        }
+        src_to_braille_row.push(offset);
+
+        let b2s_raw = result.braille_char_to_source(&kana_to_braille, braille_char_count as usize);
+        let braille_to_src: Vec<i32> = b2s_raw.iter().map(|&i| i as i32).collect();
+
         Self {
             kana_utf8,
             kana_utf16,
             braille_utf8,
             braille_utf16,
+            braille_char_count,
             kana_to_src,
             src_to_kana_row,
             src_to_kana_col,
+            src_to_braille_row,
+            src_to_braille_col,
+            braille_to_src,
         }
     }
 }
@@ -497,6 +538,72 @@ pub extern "C" fn momo_prediction_src_to_kana(
                     h.src_to_kana_col.as_ptr(),
                     col_idx,
                     h.src_to_kana_col.len(),
+                );
+            }
+        }
+    }
+}
+
+/// 点字テキストのコードポイント数を返す。handle が NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_prediction_braille_char_count(handle: *const PredictionHandle) -> c_int {
+    match unsafe { handle.as_ref() } {
+        Some(h) => h.braille_char_count,
+        None => -1,
+    }
+}
+
+/// src→点字 インデックスを CSR 形式で書き込む。
+///
+/// - row_ptr: src_char_count+1 要素以上の領域を確保すること。
+///   row_ptr[i]..row_ptr[i+1] が原文文字 i に対応する点字文字インデックスの範囲。
+/// - col_idx: braille_char_count 要素以上の領域を確保すること。
+///   複合音（キャ など）は重複が除去されるため、実際の要素数は
+///   row_ptr[src_char_count]（末尾値）で確認する。
+///
+/// handle が NULL、または両ポインタが NULL なら何もしない。
+/// 片方のみ NULL の場合は非 NULL 側だけ書く。
+#[no_mangle]
+pub extern "C" fn momo_prediction_src_to_braille(
+    handle: *const PredictionHandle,
+    row_ptr: *mut i32,
+    col_idx: *mut i32,
+) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        if !row_ptr.is_null() {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    h.src_to_braille_row.as_ptr(),
+                    row_ptr,
+                    h.src_to_braille_row.len(),
+                );
+            }
+        }
+        if !col_idx.is_null() {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    h.src_to_braille_col.as_ptr(),
+                    col_idx,
+                    h.src_to_braille_col.len(),
+                );
+            }
+        }
+    }
+}
+
+/// 点字→原文 コードポイントインデックス配列を out に書き込む。
+///
+/// out は braille_char_count 要素以上の領域を確保しておくこと。
+/// handle または out が NULL なら何もしない。
+#[no_mangle]
+pub extern "C" fn momo_prediction_braille_to_src(handle: *const PredictionHandle, out: *mut i32) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        if !out.is_null() {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    h.braille_to_src.as_ptr(),
+                    out,
+                    h.braille_to_src.len(),
                 );
             }
         }

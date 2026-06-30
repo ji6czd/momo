@@ -4,7 +4,7 @@
 //!
 //! ## 予測器ライフサイクル
 //! ```c
-//! // toml_path が NULL なら組み込みテーブルにフォールバック（モデル横の .toml も自動探索）
+//! // toml_path が NULL なら組み込みテーブルを使う
 //! MomoPredictor momo_predictor_new  (const char*     model_path_utf8,  const char*     toml_path_utf8);
 //! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16, const uint16_t* toml_path_utf16);
 //! void          momo_predictor_free (MomoPredictor predictor);
@@ -55,6 +55,19 @@
 //!
 //! // 点字→src: braille_char_count 要素の int32_t 配列
 //! void momo_prediction_braille_to_src(MomoPrediction, int32_t* out);
+//! ```
+//!
+//! ## テーブルメタデータ
+//! ```c
+//! // 現在の予測器が使用しているテーブルの name / displayname（UTF-16）。
+//! // None の場合は 0、handle が NULL なら -1 を返す。
+//! int32_t momo_predictor_table_name_w      (MomoPredictor, uint16_t* buf, int32_t len);
+//! int32_t momo_predictor_table_displayname_w(MomoPredictor, uint16_t* buf, int32_t len);
+//!
+//! // 組み込みテーブルの一覧。
+//! int32_t momo_embedded_table_count();
+//! int32_t momo_embedded_table_name_w      (int32_t idx, uint16_t* buf, int32_t len);
+//! int32_t momo_embedded_table_displayname_w(int32_t idx, uint16_t* buf, int32_t len);
 //! ```
 //!
 //! ## 点字ドキュメント（正本）の読み書き・描画
@@ -114,8 +127,7 @@ use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
 pub struct PredictorHandle {
     inner: Predictor,
-    /// かな→点字変換器。モデルと同じ場所の `japanese_grade1_braille.toml`、
-    /// 無ければ組み込みテーブルから構築する。
+    /// かな→点字変換器。組み込みテーブルまたは指定ファイルから構築する。
     converter: BrailleConverter,
 }
 
@@ -250,7 +262,7 @@ unsafe fn lpwstr_to_string(ptr: *const u16) -> Option<String> {
 /// 無ければ辞書なしにフォールバックする。
 ///
 /// `braille_table` が `Some(path)` のとき指定ファイルからテーブルを読む（失敗すれば NULL）。
-/// `None` のときはモデル横の `japanese_grade1_braille.toml` を優先し、無ければ組み込みテーブルを使う。
+/// `None` のときは組み込みテーブルを使う。
 fn build_predictor(model_path: &str, braille_table: Option<&str>) -> *mut PredictorHandle {
     let path = std::path::Path::new(model_path);
     let dir = path.parent();
@@ -270,11 +282,7 @@ fn build_predictor(model_path: &str, braille_table: Option<&str>) -> *mut Predic
 
     let converter = match braille_table {
         Some(table_path) => BrailleConverter::from_file(table_path).ok(),
-        None => dir
-            .map(|d| d.join("japanese_grade1_braille.toml"))
-            .filter(|p| p.exists())
-            .and_then(|p| BrailleConverter::from_file(&p).ok())
-            .or_else(|| BrailleConverter::from_embedded().ok()),
+        None => BrailleConverter::from_embedded().ok(),
     };
     let converter = match converter {
         Some(c) => c,
@@ -337,9 +345,84 @@ pub extern "C" fn momo_predictor_set_table_w(
     }
 }
 
+// ============================================================
+// テーブルメタデータ
+// ============================================================
+
+/// 現在の予測器が使用しているテーブルの name（UTF-16, null 終端）を buf に書く。
+/// 戻り値は必要な u16 要素数（null 含む）。name が None なら 0。handle が NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_predictor_table_name_w(
+    handle: *const PredictorHandle,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return -1,
+    };
+    match h.converter.table().name.as_deref() {
+        Some(s) => write_utf16(s, buf, buf_len),
+        None => 0,
+    }
+}
+
+/// 現在の予測器が使用しているテーブルの displayname（UTF-16, null 終端）を buf に書く。
+/// 戻り値は必要な u16 要素数（null 含む）。displayname が None なら 0。handle が NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_predictor_table_displayname_w(
+    handle: *const PredictorHandle,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return -1,
+    };
+    match h.converter.table().displayname.as_deref() {
+        Some(s) => write_utf16(s, buf, buf_len),
+        None => 0,
+    }
+}
+
+/// 組み込みテーブルの数を返す。
+#[no_mangle]
+pub extern "C" fn momo_embedded_table_count() -> c_int {
+    momors_braille::embedded_tables().len() as c_int
+}
+
+/// 組み込みテーブル idx の name（UTF-16, null 終端）を buf に書く。
+/// 戻り値は必要な u16 要素数（null 含む）。name が None なら 0。idx が範囲外なら -1。
+#[no_mangle]
+pub extern "C" fn momo_embedded_table_name_w(idx: c_int, buf: *mut u16, buf_len: c_int) -> c_int {
+    match momors_braille::embedded_tables().get(idx as usize) {
+        Some(t) => match t.name.as_deref() {
+            Some(s) => write_utf16(s, buf, buf_len),
+            None => 0,
+        },
+        None => -1,
+    }
+}
+
+/// 組み込みテーブル idx の displayname（UTF-16, null 終端）を buf に書く。
+/// 戻り値は必要な u16 要素数（null 含む）。displayname が None なら 0。idx が範囲外なら -1。
+#[no_mangle]
+pub extern "C" fn momo_embedded_table_displayname_w(
+    idx: c_int,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    match momors_braille::embedded_tables().get(idx as usize) {
+        Some(t) => match t.displayname.as_deref() {
+            Some(s) => write_utf16(s, buf, buf_len),
+            None => 0,
+        },
+        None => -1,
+    }
+}
+
 /// UTF-8 パスからモデルを読み込み予測器を作成する。
-/// `toml_path` が NULL なら自動選択（モデル横の .toml → 組み込みテーブル）。
-/// 失敗時は NULL を返す。
+/// `toml_path` が NULL なら組み込みテーブルを使う。失敗時は NULL を返す。
 #[no_mangle]
 pub extern "C" fn momo_predictor_new(
     model_path: *const c_char,
@@ -354,8 +437,7 @@ pub extern "C" fn momo_predictor_new(
 }
 
 /// UTF-16 パスからモデルを読み込み予測器を作成する。
-/// `toml_path` が NULL なら自動選択（モデル横の .toml → 組み込みテーブル）。
-/// 失敗時は NULL を返す。
+/// `toml_path` が NULL なら組み込みテーブルを使う。失敗時は NULL を返す。
 #[no_mangle]
 pub extern "C" fn momo_predictor_new_w(
     model_path: *const u16,

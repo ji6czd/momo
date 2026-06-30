@@ -252,12 +252,7 @@ fn make_braille_converter(table: Option<&PathBuf>) -> momors_braille::Result<Bra
     if let Some(path) = table {
         return BrailleConverter::from_file(path);
     }
-    let toml_path = data_dir().join("japanese_grade1_braille.toml");
-    if toml_path.exists() {
-        BrailleConverter::from_file(&toml_path)
-    } else {
-        BrailleConverter::from_embedded()
-    }
+    BrailleConverter::from_embedded()
 }
 
 // ============================================================

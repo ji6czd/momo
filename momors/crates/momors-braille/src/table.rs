@@ -1,6 +1,7 @@
 use crate::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 // ============================================================
 // TOML デシリアライズ用の中間型
@@ -34,6 +35,12 @@ impl PunctEntry {
     }
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct RawMetadata {
+    name: Option<String>,
+    displayname: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawTable {
     kana: RawKana,
@@ -63,7 +70,7 @@ struct RawFlags {
     capital: CapitalFlagDef,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct FlagDef {
     #[serde(default)]
     pub trigger_class: Vec<String>,
@@ -77,7 +84,7 @@ pub(crate) struct FlagDef {
     pub exempt_chars: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct CapitalFlagDef {
     #[serde(default)]
     pub trigger_class: Vec<String>,
@@ -89,6 +96,8 @@ pub(crate) struct CapitalFlagDef {
 
 #[derive(Debug, Deserialize)]
 struct RawBrailleFile {
+    #[serde(default)]
+    metadata: RawMetadata,
     flags: RawFlags,
     table: RawTable,
 }
@@ -99,10 +108,15 @@ struct RawBrailleFile {
 
 /// 変換テーブルとフラグ定義を保持する。
 ///
-/// [`BrailleTable::from_toml`] でビルドするか、
-/// [`BrailleTable::embedded`] でデフォルトの埋め込みテーブルを使う。
-#[derive(Debug)]
+/// [`BrailleTable::embedded`] でデフォルトの組み込みテーブルを使うか、
+/// [`embedded_tables`] で全テーブルを列挙するか、
+/// [`BrailleTable::from_toml`] でビルドする。
+#[derive(Debug, Clone)]
 pub struct BrailleTable {
+    /// テーブルの識別名（TOML `[metadata].name`）。
+    pub name: Option<String>,
+    /// テーブルの表示名（TOML `[metadata].displayname`）。
+    pub displayname: Option<String>,
     /// 複合音テーブル (2文字キー)。先に試みる。
     pub(crate) kana_compound: HashMap<String, String>,
     /// 単音テーブル (1文字キー)。
@@ -123,6 +137,40 @@ pub struct BrailleTable {
     pub(crate) flag_capital: CapitalFlagDef,
 }
 
+// ============================================================
+// 埋め込みテーブルカタログ
+// ============================================================
+
+const TOML_GRADE1: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../dataset/japanese_grade1_braille.toml"
+));
+
+const TOML_NOCONVERSION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../dataset/japanese_no_conversion_braille.toml"
+));
+
+static EMBEDDED: LazyLock<Vec<BrailleTable>> = LazyLock::new(|| {
+    vec![
+        BrailleTable::from_toml(TOML_GRADE1).expect("grade1 TOML は有効"),
+        BrailleTable::from_toml(TOML_NOCONVERSION).expect("noconversion TOML は有効"),
+    ]
+});
+
+/// 組み込みテーブルの一覧を返す。最初のエントリがデフォルト（[`BrailleTable::embedded`]）。
+pub fn embedded_tables() -> &'static [BrailleTable] {
+    &EMBEDDED
+}
+
+/// 名前で組み込みテーブルを引く。TOML の `[metadata].name` と照合する。
+pub fn embedded_table(name: &str) -> Option<BrailleTable> {
+    EMBEDDED
+        .iter()
+        .find(|t| t.name.as_deref() == Some(name))
+        .cloned()
+}
+
 impl BrailleTable {
     /// TOML 文字列からテーブルを構築する。
     pub fn from_toml(toml_str: &str) -> Result<Self> {
@@ -130,9 +178,9 @@ impl BrailleTable {
         Ok(Self::from_raw(raw))
     }
 
-    /// コンパイル時に埋め込まれたデフォルトテーブルを使う。
+    /// デフォルトの組み込みテーブル（日本語１級）を返す。
     pub fn embedded() -> Result<Self> {
-        Self::from_toml(include_str!("../data/japanese_grade1_braille.toml"))
+        Ok(EMBEDDED[0].clone())
     }
 
     /// ファイルからテーブルを読み込む。
@@ -149,6 +197,8 @@ impl BrailleTable {
         };
 
         Self {
+            name: raw.metadata.name,
+            displayname: raw.metadata.displayname,
             kana_compound: raw.table.kana.compound,
             kana_single: raw.table.kana.single,
             punct_jp: to_punct(raw.table.punct.jp),
@@ -179,6 +229,31 @@ mod tests {
         assert!(!table.latin.is_empty(), "ラテン文字テーブルが空でない");
         assert!(!table.punct_jp.is_empty(), "日本語記号テーブルが空でない");
         assert!(!table.punct_latin.is_empty(), "ASCII記号テーブルが空でない");
+    }
+
+    #[test]
+    fn embedded_table_metadata() {
+        let table = BrailleTable::embedded().unwrap();
+        assert_eq!(table.name.as_deref(), Some("japanese_grade1"));
+        assert_eq!(table.displayname.as_deref(), Some("日本語１級"));
+    }
+
+    #[test]
+    fn embedded_tables_list() {
+        let tables = embedded_tables();
+        assert!(tables.len() >= 2, "テーブルが2つ以上ある");
+        assert!(tables
+            .iter()
+            .any(|t| t.name.as_deref() == Some("japanese_grade1")));
+        assert!(tables
+            .iter()
+            .any(|t| t.name.as_deref() == Some("japanese_noconversion")));
+    }
+
+    #[test]
+    fn embedded_table_by_name() {
+        let t = embedded_table("japanese_noconversion").expect("noconversion テーブルが引ける");
+        assert_eq!(t.displayname.as_deref(), Some("日本語無変換"));
     }
 
     #[test]

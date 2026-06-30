@@ -248,7 +248,6 @@ tasks:
       - cp "{{.DATA}}/basic_data_4.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"
-      - cp "{{.DATA}}/japanese_grade1_braille.toml"    "{{.STAGE}}/data/"
       - cp "{{.DATA}}/single_character_dic.tsv"        "{{.STAGE}}/data/"
 
   dist:msi:

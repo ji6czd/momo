@@ -41,5 +41,5 @@ pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, 
 pub use error::{Error, Result};
 pub use formatter::{render, FormattedDocument, RenderedLine};
 pub use reader::{read_bes, read_bet};
-pub use table::BrailleTable;
+pub use table::{embedded_table, embedded_tables, BrailleTable};
 pub use writer::OutputFormat;

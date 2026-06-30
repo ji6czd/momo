@@ -147,8 +147,6 @@
                                   Source='$(var.StageDir)\data\basic_data_5.mbm'/>
                             <File Id='model7' Name='basic_data_7.mbm' DiskId='1'
                                   Source='$(var.StageDir)\data\basic_data_7.mbm'/>
-                            <File Id='braille_table' Name='japanese_grade1_braille.toml' DiskId='1'
-                                  Source='$(var.StageDir)\data\japanese_grade1_braille.toml'/>
                             <File Id='single_dict' Name='single_character_dic.tsv' DiskId='1'
                                   Source='$(var.StageDir)\data\single_character_dic.tsv'/>
                         </Component>

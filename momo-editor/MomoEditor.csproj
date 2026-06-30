@@ -26,9 +26,6 @@
     <None Include="..\dataset\single_character_dic.tsv" Condition="Exists('..\dataset\single_character_dic.tsv')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\dataset\japanese_grade1_braille.toml" Condition="Exists('..\dataset\japanese_grade1_braille.toml')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
   </ItemGroup>
 
 </Project>

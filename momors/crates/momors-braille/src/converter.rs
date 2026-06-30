@@ -45,6 +45,11 @@ pub struct BrailleConverter {
 }
 
 impl BrailleConverter {
+    /// 保持しているテーブルへの参照を返す。
+    pub fn table(&self) -> &BrailleTable {
+        &self.table
+    }
+
     /// テーブルを指定して変換器を作る。
     pub fn new(table: BrailleTable) -> Self {
         // 数字テーブルの各エントリの先頭セルを集める

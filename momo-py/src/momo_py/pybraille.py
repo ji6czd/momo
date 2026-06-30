@@ -1,6 +1,6 @@
 """日本語点字変換モジュール（momors-braille の Python バックポート）。
 
-テーブルは resources/japanese_braille.toml から読み込む。
+テーブルは resources/japanese_grade1_braille.toml から読み込む。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ BRAILLE_SPACE = "⠀"  # ⠀
 # ============================================================
 
 class BrailleTable:
-    """japanese_braille.toml から構築する変換テーブル。"""
+    """japanese_grade1_braille.toml から構築する変換テーブル。"""
 
     def __init__(self, raw: dict[str, Any]) -> None:
         self.kana_compound: dict[str, str] = raw["table"]["kana"]["compound"]
@@ -44,7 +44,7 @@ class BrailleTable:
     @classmethod
     def load(cls) -> BrailleTable:
         data = (
-            resources.files("momo_py") / "resources" / "japanese_braille.toml"
+            resources.files("momo_py") / "resources" / "japanese_grade1_braille.toml"
         ).read_bytes()
         return cls(tomllib.loads(data.decode("utf-8")))
 

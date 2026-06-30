@@ -28,7 +28,9 @@ static class MomoFfi
     // ---- 予測器（漢字かな交じり文 → 点字） ----
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern nint momo_predictor_new_w([MarshalAs(UnmanagedType.LPWStr)] string modelPath);
+    static extern nint momo_predictor_new_w(
+        [MarshalAs(UnmanagedType.LPWStr)] string modelPath,
+        [MarshalAs(UnmanagedType.LPWStr)] string? tomlPath);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void momo_predictor_free(nint handle);
@@ -377,7 +379,7 @@ static class MomoFfi
 
         try
         {
-            var ptr = momo_predictor_new_w(modelPath);
+            var ptr = momo_predictor_new_w(modelPath, null);
             _dllAvailable = true;
             _predictor = ptr == nint.Zero ? null : new PredictorHandle(ptr);
         }

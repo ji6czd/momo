@@ -2,12 +2,10 @@ version: "3"
 
 tasks:
   default:
-    desc: Build all components (rust + python + wasm in parallel, then vscode + hugo)
+    desc: Build all components (rust + python + wasm in parallel, then vscode)
     deps: [rust, python, wasm]
     cmds:
       - task: vscode
-      # まだ Hugo サイトは公開していないため、ビルドはスキップする
-      # - task: hugo
 
   rust:
     desc: Build Rust workspace (release)
@@ -57,12 +55,6 @@ tasks:
     dir: vscode-momo
     cmds:
       - pnpm vsce package -o out/
-
-  hugo:
-    desc: Build Hugo site
-    dir: web
-    cmds:
-      - hugo --minify
 
   test:
     desc: Run all tests
@@ -256,7 +248,7 @@ tasks:
       - cp "{{.DATA}}/basic_data_4.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"
-      - cp "{{.DATA}}/japanese_braille.toml"           "{{.STAGE}}/data/"
+      - cp "{{.DATA}}/japanese_grade1_braille.toml"    "{{.STAGE}}/data/"
       - cp "{{.DATA}}/single_character_dic.tsv"        "{{.STAGE}}/data/"
 
   dist:msi:
@@ -327,3 +319,48 @@ tasks:
       - cp "{{.SRC}}/basic_data_5.mbm" "{{.OUT}}/"
       - cp "{{.SRC}}/basic_data_7.mbm" "{{.OUT}}/"
       - cp "{{.SRC}}/single_character_dic.tsv" "{{.OUT}}/"
+
+  version:bump:
+    desc: "Bump version across all components. Usage: task version:bump V=0.9.0"
+    preconditions:
+      - sh: '[ -n "{{.V}}" ]'
+        msg: "Specify the new version: task version:bump V=<version>"
+    cmds:
+      - |
+        V="{{.V}}"
+        echo "Bumping version to $V"
+        bumptoml() {
+          sed "s/^version = \"[^\"]*\"/version = \"$V\"/" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+        }
+        bumptoml momors/Cargo.toml
+        bumptoml momo-py/pyproject.toml
+        bumptoml momors/crates/momors-pyo3/pyproject.toml
+        node -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('vscode-momo/package.json','utf8'));p.version='$V';fs.writeFileSync('vscode-momo/package.json',JSON.stringify(p,null,2)+'\n')"
+        sed "s|<Version>[^<]*</Version>|<Version>$V</Version>|" momo-editor/MomoEditor.csproj > momo-editor/MomoEditor.csproj.tmp && mv momo-editor/MomoEditor.csproj.tmp momo-editor/MomoEditor.csproj
+
+  version:check:
+    desc: Verify all components share the version in momors/Cargo.toml
+    vars:
+      V:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+    cmds:
+      - |
+        EXPECTED="{{.V}}"
+        FAIL=0
+        check() {
+          if [ "$2" = "$EXPECTED" ]; then
+            printf "OK    %s (%s)\n" "$1" "$2"
+          else
+            printf "FAIL  %s: got '%s', expected '%s'\n" "$1" "$2" "$EXPECTED"
+            FAIL=1
+          fi
+        }
+        V_MOMO_PY="$(grep '^version' momo-py/pyproject.toml | sed 's/version = "\(.*\)"/\1/')"
+        V_PYO3="$(grep '^version' momors/crates/momors-pyo3/pyproject.toml | sed 's/version = "\(.*\)"/\1/')"
+        V_JSON="$(node -e "process.stdout.write(require('./vscode-momo/package.json').version)")"
+        V_CSPROJ="$(grep '<Version>' momo-editor/MomoEditor.csproj | sed 's|.*<Version>||' | sed 's|</Version>.*||')"
+        check "momo-py/pyproject.toml" "$V_MOMO_PY"
+        check "momors-pyo3/pyproject.toml" "$V_PYO3"
+        check "vscode-momo/package.json" "$V_JSON"
+        check "momo-editor/MomoEditor.csproj" "$V_CSPROJ"
+        exit $FAIL

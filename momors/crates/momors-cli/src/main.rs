@@ -72,6 +72,10 @@ struct Cli {
     #[arg(long)]
     braille: bool,
 
+    /// 点字変換テーブルファイル (.toml) のパス（省略時は自動検索）
+    #[arg(long)]
+    table: Option<PathBuf>,
+
     // 予測結果→ソースの文字ごとの対応関係を出力する
     #[arg(long)]
     brl_src_index: bool,
@@ -172,8 +176,8 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
 
     let out = match braille_format {
         Some(format) => {
-            let converter =
-                make_braille_converter().map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
+            let converter = make_braille_converter(cli.table.as_ref())
+                .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
             let braille_list: Vec<String> = paragraphs
                 .iter()
                 .map(|p| to_braille(p, predictor, &converter))
@@ -244,8 +248,11 @@ fn to_braille(
         .map_err(|e| format!("点字変換エラー: {e}"))
 }
 
-fn make_braille_converter() -> momors_braille::Result<BrailleConverter> {
-    let toml_path = data_dir().join("japanese_braille.toml");
+fn make_braille_converter(table: Option<&PathBuf>) -> momors_braille::Result<BrailleConverter> {
+    if let Some(path) = table {
+        return BrailleConverter::from_file(path);
+    }
+    let toml_path = data_dir().join("japanese_grade1_braille.toml");
     if toml_path.exists() {
         BrailleConverter::from_file(&toml_path)
     } else {
@@ -259,7 +266,7 @@ fn make_braille_converter() -> momors_braille::Result<BrailleConverter> {
 
 fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
     let braille_converter: Option<BrailleConverter> = if cli.braille {
-        match make_braille_converter() {
+        match make_braille_converter(cli.table.as_ref()) {
             Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("点字テーブル読み込みエラー: {e}");

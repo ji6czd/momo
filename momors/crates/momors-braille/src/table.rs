@@ -65,7 +65,9 @@ struct RawFlags {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct FlagDef {
+    #[serde(default)]
     pub trigger_class: Vec<String>,
+    #[serde(default)]
     pub entry_prefix: String,
     #[serde(default)]
     pub exit_suffix: String,
@@ -77,8 +79,11 @@ pub(crate) struct FlagDef {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct CapitalFlagDef {
+    #[serde(default)]
     pub trigger_class: Vec<String>,
+    #[serde(default)]
     pub entry_prefix: String,
+    #[serde(default)]
     pub double_entry_prefix: String,
 }
 
@@ -127,7 +132,7 @@ impl BrailleTable {
 
     /// コンパイル時に埋め込まれたデフォルトテーブルを使う。
     pub fn embedded() -> Result<Self> {
-        Self::from_toml(include_str!("../data/japanese_braille.toml"))
+        Self::from_toml(include_str!("../data/japanese_grade1_braille.toml"))
     }
 
     /// ファイルからテーブルを読み込む。

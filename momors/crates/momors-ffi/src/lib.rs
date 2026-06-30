@@ -4,9 +4,13 @@
 //!
 //! ## 予測器ライフサイクル
 //! ```c
-//! MomoPredictor momo_predictor_new  (const char*     model_path_utf8);
-//! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16);
+//! // toml_path が NULL なら組み込みテーブルにフォールバック（モデル横の .toml も自動探索）
+//! MomoPredictor momo_predictor_new  (const char*     model_path_utf8,  const char*     toml_path_utf8);
+//! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16, const uint16_t* toml_path_utf16);
 //! void          momo_predictor_free (MomoPredictor predictor);
+//! // 点字テーブルのみ差し替え（モデル再読み込みなし）。失敗時は false。
+//! bool          momo_predictor_set_table  (MomoPredictor, const char*     toml_path_utf8);
+//! bool          momo_predictor_set_table_w(MomoPredictor, const uint16_t* toml_path_utf16);
 //! ```
 //!
 //! ## 予測実行
@@ -110,7 +114,7 @@ use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
 pub struct PredictorHandle {
     inner: Predictor,
-    /// かな→点字変換器。モデルと同じ場所の `japanese_braille.toml`、
+    /// かな→点字変換器。モデルと同じ場所の `japanese_grade1_braille.toml`、
     /// 無ければ組み込みテーブルから構築する。
     converter: BrailleConverter,
 }
@@ -242,10 +246,12 @@ unsafe fn lpwstr_to_string(ptr: *const u16) -> Option<String> {
 
 /// モデルパスから予測器とかな→点字変換器を構築する。失敗時は NULL。
 ///
-/// モデルと同じディレクトリにある `single_character_dic.tsv`（漢字辞書）と
-/// `japanese_braille.toml`（点字テーブル）があれば利用し、無ければ
-/// 辞書なし・組み込みテーブルにフォールバックする。
-fn build_predictor(model_path: &str) -> *mut PredictorHandle {
+/// モデルと同じディレクトリにある `single_character_dic.tsv`（漢字辞書）があれば利用し、
+/// 無ければ辞書なしにフォールバックする。
+///
+/// `braille_table` が `Some(path)` のとき指定ファイルからテーブルを読む（失敗すれば NULL）。
+/// `None` のときはモデル横の `japanese_grade1_braille.toml` を優先し、無ければ組み込みテーブルを使う。
+fn build_predictor(model_path: &str, braille_table: Option<&str>) -> *mut PredictorHandle {
     let path = std::path::Path::new(model_path);
     let dir = path.parent();
 
@@ -262,11 +268,14 @@ fn build_predictor(model_path: &str) -> *mut PredictorHandle {
         Err(_) => return std::ptr::null_mut(),
     };
 
-    let converter = dir
-        .map(|d| d.join("japanese_braille.toml"))
-        .filter(|p| p.exists())
-        .and_then(|p| BrailleConverter::from_file(&p).ok())
-        .or_else(|| BrailleConverter::from_embedded().ok());
+    let converter = match braille_table {
+        Some(table_path) => BrailleConverter::from_file(table_path).ok(),
+        None => dir
+            .map(|d| d.join("japanese_grade1_braille.toml"))
+            .filter(|p| p.exists())
+            .and_then(|p| BrailleConverter::from_file(&p).ok())
+            .or_else(|| BrailleConverter::from_embedded().ok()),
+    };
     let converter = match converter {
         Some(c) => c,
         None => return std::ptr::null_mut(),
@@ -278,24 +287,86 @@ fn build_predictor(model_path: &str) -> *mut PredictorHandle {
     }))
 }
 
-/// UTF-8 パスからモデルを読み込み予測器を作成する。
-/// 失敗時は NULL を返す。
+/// 点字テーブルのみを差し替える（UTF-8 パス）。モデルの再読み込みは行わない。
+/// 成功時 true、失敗時 false（ハンドルの変換器は変更されない）。
+/// handle が NULL または toml_path が NULL なら false を返す。
 #[no_mangle]
-pub extern "C" fn momo_predictor_new(model_path: *const c_char) -> *mut PredictorHandle {
-    match unsafe { lpstr_to_string(model_path) } {
-        Some(p) => build_predictor(&p),
-        None => std::ptr::null_mut(),
+pub extern "C" fn momo_predictor_set_table(
+    handle: *mut PredictorHandle,
+    toml_path: *const c_char,
+) -> bool {
+    let h = match unsafe { handle.as_mut() } {
+        Some(h) => h,
+        None => return false,
+    };
+    let path = match unsafe { lpstr_to_string(toml_path) } {
+        Some(p) => p,
+        None => return false,
+    };
+    match BrailleConverter::from_file(&path) {
+        Ok(c) => {
+            h.converter = c;
+            true
+        }
+        Err(_) => false,
     }
 }
 
-/// UTF-16 パスからモデルを読み込み予測器を作成する。
+/// 点字テーブルのみを差し替える（UTF-16 パス）。モデルの再読み込みは行わない。
+/// 成功時 true、失敗時 false（ハンドルの変換器は変更されない）。
+/// handle が NULL または toml_path が NULL なら false を返す。
+#[no_mangle]
+pub extern "C" fn momo_predictor_set_table_w(
+    handle: *mut PredictorHandle,
+    toml_path: *const u16,
+) -> bool {
+    let h = match unsafe { handle.as_mut() } {
+        Some(h) => h,
+        None => return false,
+    };
+    let path = match unsafe { lpwstr_to_string(toml_path) } {
+        Some(p) => p,
+        None => return false,
+    };
+    match BrailleConverter::from_file(&path) {
+        Ok(c) => {
+            h.converter = c;
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// UTF-8 パスからモデルを読み込み予測器を作成する。
+/// `toml_path` が NULL なら自動選択（モデル横の .toml → 組み込みテーブル）。
 /// 失敗時は NULL を返す。
 #[no_mangle]
-pub extern "C" fn momo_predictor_new_w(model_path: *const u16) -> *mut PredictorHandle {
-    match unsafe { lpwstr_to_string(model_path) } {
-        Some(p) => build_predictor(&p),
-        None => std::ptr::null_mut(),
-    }
+pub extern "C" fn momo_predictor_new(
+    model_path: *const c_char,
+    toml_path: *const c_char,
+) -> *mut PredictorHandle {
+    let model = match unsafe { lpstr_to_string(model_path) } {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+    let table = unsafe { lpstr_to_string(toml_path) };
+    build_predictor(&model, table.as_deref())
+}
+
+/// UTF-16 パスからモデルを読み込み予測器を作成する。
+/// `toml_path` が NULL なら自動選択（モデル横の .toml → 組み込みテーブル）。
+/// 失敗時は NULL を返す。
+#[no_mangle]
+pub extern "C" fn momo_predictor_new_w(
+    model_path: *const u16,
+    toml_path: *const u16,
+) -> *mut PredictorHandle {
+    let model = match unsafe { lpwstr_to_string(model_path) } {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+    let table = unsafe { lpwstr_to_string(toml_path) };
+    build_predictor(&model, table.as_deref())
 }
 
 /// 予測器を解放する。NULL は無視する。
@@ -1318,7 +1389,7 @@ pub extern "C" fn momo_back_translator_new() -> *mut BackTranslatorHandle {
     }
 }
 
-/// `japanese_braille.toml`（UTF-16 パス）から逆変換器を作る。失敗時は NULL。
+/// `japanese_grade1_braille.toml`（UTF-16 パス）から逆変換器を作る。失敗時は NULL。
 #[no_mangle]
 pub extern "C" fn momo_back_translator_new_from_file_w(
     toml_path: *const u16,

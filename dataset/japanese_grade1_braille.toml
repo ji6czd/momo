@@ -1,6 +1,10 @@
-# japanese_braille.toml
+# japanese_grade1_braille.toml
 # 日本語点字変換テーブルとフラグ定義
-# pybraille.py (momo-py) を元に作成
+
+[metadata]
+name = "japanese_grade1"
+displayname = "日本語１級"
+author = "MOMO Project"
 
 # ==============================================================
 # フラグ定義
@@ -10,19 +14,19 @@
 
 [flags.digit]
 trigger_class = ["digit", "fullwidth_digit"]
-entry_prefix  = "⠼"          # 数字が始まるときに挿入
-explicit_exit = "⠤"          # 点字が数字セルと衝突するとき強制終端
-exempt_chars  = [".", ","]   # 小数点・桁区切りは数字モードを終了させない
+entry_prefix = "⠼"                           # 数字が始まるときに挿入
+explicit_exit = "⠤"                          # 点字が数字セルと衝突するとき強制終端
+exempt_chars = [".", ","]                    # 小数点・桁区切りは数字モードを終了させない
 
 [flags.foreign_word]
 trigger_class = ["ascii_alpha"]
-entry_prefix  = "⠰"          # 英字列が始まるときに挿入
-exit_suffix   = "⠀"          # 日本語文字に戻るとき末尾に挿入
+entry_prefix = "⠰"              # 英字列が始まるときに挿入
+exit_suffix = "⠀"               # 日本語文字に戻るとき末尾に挿入
 
 [flags.capital]
-trigger_class       = ["ascii_upper"]
-entry_prefix        = "⠠"    # 大文字1文字のとき
-double_entry_prefix = "⠠⠠"  # 次の文字も大文字のとき（全大文字語）
+trigger_class = ["ascii_upper"]
+entry_prefix = "⠠"              # 大文字1文字のとき
+double_entry_prefix = "⠠⠠"      # 次の文字も大文字のとき（全大文字語）
 
 # ==============================================================
 # 変換テーブル
@@ -232,8 +236,8 @@ double_entry_prefix = "⠠⠠"  # 次の文字も大文字のとき（全大文�
 "ポ" = "⠠⠮"
 
 # 特殊仮名
-"ッ" = "⠂"   # 促音
-"ー" = "⠒"   # 長音符
+"ッ" = "⠂" # 促音
+"ー" = "⠒" # 長音符
 
 # --------------------------------------------------------------
 # 句読点・記号
@@ -329,7 +333,7 @@ double_entry_prefix = "⠠⠠"  # 次の文字も大文字のとき（全大文�
 "㍰" = "⠼⠃⠙⠐⠳"
 
 [table.punct.latin]
-" " = "⠀"   # 語境界スペース（ASCII 分岐で参照）
+" " = "⠀"                             # 語境界スペース（ASCII 分岐で参照）
 "." = { braille = "⠲", trailing = 2 }
 "," = { braille = "⠄", trailing = 1 }
 "!" = { braille = "⠖", trailing = 2 }

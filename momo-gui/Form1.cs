@@ -126,7 +126,7 @@ public partial class MainForm : Form
         string modelPath, string inputFile, string outputFile,
         int format, int lineWidth, int linesPerPage, string title)
     {
-        var predictor = MomoNative.momo_predictor_new_w(modelPath);
+        var predictor = MomoNative.momo_predictor_new_w(modelPath, null);
         if (predictor == 0)
             return $"モデルの読み込みに失敗しました: {Path.GetFileName(modelPath)}";
         try
@@ -209,7 +209,9 @@ internal static class MomoNative
     private const string Dll = "momors_ffi";
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern nint momo_predictor_new_w([MarshalAs(UnmanagedType.LPWStr)] string model_path);
+    public static extern nint momo_predictor_new_w(
+        [MarshalAs(UnmanagedType.LPWStr)] string model_path,
+        [MarshalAs(UnmanagedType.LPWStr)] string? toml_path);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void momo_predictor_free(nint handle);

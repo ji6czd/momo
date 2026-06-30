@@ -1,4 +1,4 @@
 *.zip
-
-.claude/
-.vscode/
+*.mbm
+*.txt
+basic_data.tsv

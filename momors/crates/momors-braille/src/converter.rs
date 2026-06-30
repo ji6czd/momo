@@ -132,12 +132,16 @@ impl BrailleConverter {
                         in_double_capital = false;
                     }
 
-                    // ラテン文字テーブルを引く（小文字キーで統一）
-                    let key = c.to_ascii_lowercase().to_string();
+                    // ラテン文字テーブルを引く。
+                    // テーブルに大文字キーがあればそちらを優先し（no-conversion など）、
+                    // なければ小文字キーで引く（grade1 など: 大文字フラグで区別）。
+                    let exact_key = c.to_string();
+                    let lower_key = c.to_ascii_lowercase().to_string();
                     let cell = self
                         .table
                         .latin
-                        .get(&key)
+                        .get(&exact_key)
+                        .or_else(|| self.table.latin.get(&lower_key))
                         .map_or(BRAILLE_SPACE.to_string(), |s| s.clone());
                     braille.push_str(&cell);
                 } else if c.is_ascii_digit() {

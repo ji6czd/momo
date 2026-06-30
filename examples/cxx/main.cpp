@@ -18,7 +18,7 @@ const uint16_t* src_text = (const uint16_t*)u"日本語のテキストを入力�
 
 int main() {
   set_console();
-  PredictorHandle* predictor = momo_predictor_new_w(model_path);
+  PredictorHandle* predictor = momo_predictor_new_w(model_path, nullptr);
   if (!predictor) {
     std::wcerr << L"Failed to create predictor." << std::endl;
     return 1;

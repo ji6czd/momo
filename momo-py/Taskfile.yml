@@ -9,7 +9,7 @@ tasks:
     desc: Build momo-py package
     cmds:
       - mkdir -p src/momo_py/resources
-      - cp {{.DATASET_DIR}}/japanese_braille.toml src/momo_py/resources/
+      - cp {{.DATASET_DIR}}/japanese_grade1_braille.toml src/momo_py/resources/
       - cp {{.DATASET_DIR}}/basic_data*.zip src/momo_py/resources/
       - cp {{.DATASET_DIR}}/single_character_dic.tsv src/momo_py/resources/
       - uv build

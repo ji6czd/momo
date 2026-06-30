@@ -13,7 +13,11 @@ fn main() {
         .with_config(config)
         .generate()
         .expect("cbindgen によるヘッダ生成に失敗")
-        .write_to_file(std::path::Path::new(&crate_dir).join("momo.h"));
+        .write_to_file(
+            std::path::Path::new(&crate_dir)
+                .join("include")
+                .join("momo.h"),
+        );
 
     // src/lib.rs が変更されたときだけ再実行する
     println!("cargo:rerun-if-changed=src/lib.rs");

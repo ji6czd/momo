@@ -4,5 +4,5 @@ testdata/sample.bes
 testdata/sample.BET
 
 # cbindgen 生成物
-crates/momors-ffi/momo.h
+crates/momors-ffi/include/momo.h
 

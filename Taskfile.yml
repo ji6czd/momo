@@ -78,9 +78,91 @@ tasks:
     cmds:
       - cargo test
 
+  sdk:
+    desc: Build C++ and C# SDKs and create distribution archives
+    deps: [sdk:zip:cpp, sdk:zip:csharp]
+
+  sdk:ffi:
+    desc: Build FFI DLL only (momors-ffi crate, release)
+    dir: momors
+    cmds:
+      - cargo build --release -p momors-ffi
+
+  sdk:cpp:
+    desc: Stage C++ SDK to dist/sdk/cpp/
+    vars:
+      OUT: "{{.ROOT_DIR}}/dist/sdk/cpp"
+      RELEASE: "{{.ROOT_DIR}}/momors/target/release"
+      HDR: "{{.ROOT_DIR}}/momors/crates/momors-ffi/include"
+      DATA: "{{.ROOT_DIR}}/dataset"
+    deps: [sdk:ffi]
+    cmds:
+      - rm -rf "{{.OUT}}"
+      - mkdir -p "{{.OUT}}/include" "{{.OUT}}/lib" "{{.OUT}}/bin" "{{.OUT}}/data" "{{.OUT}}/examples"
+      - cp "{{.HDR}}/momo.h"                                "{{.OUT}}/include/"
+      - cp "{{.HDR}}/momo_raii.hpp"                         "{{.OUT}}/include/"
+      - cp "{{.RELEASE}}/momors_ffi.dll"                    "{{.OUT}}/bin/"
+      - cp "{{.RELEASE}}/momors_ffi.dll.lib"                "{{.OUT}}/lib/"
+      - cp "{{.DATA}}/basic_data_4.mbm"                     "{{.OUT}}/data/"
+      - cp "{{.DATA}}/basic_data_5.mbm"                     "{{.OUT}}/data/"
+      - cp "{{.DATA}}/basic_data_7.mbm"                     "{{.OUT}}/data/"
+      - cp "{{.DATA}}/single_character_dic.tsv"             "{{.OUT}}/data/"
+      - cp "{{.ROOT_DIR}}/examples/cxx/main.cpp"            "{{.OUT}}/examples/"
+      - cp "{{.ROOT_DIR}}/examples/cxx/CMakeLists.txt"      "{{.OUT}}/examples/"
+
+  sdk:zip:cpp:
+    desc: Create C++ SDK ZIP archive to dist/
+    vars:
+      VERSION:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+      STAGE: "{{.ROOT_DIR}}/dist/sdk/cpp"
+      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-cpp-{{.VERSION}}.zip"
+    deps: [sdk:cpp]
+    cmds:
+      - rm -f "{{.OUT}}"
+      - powershell -NoProfile -Command "Compress-Archive -Path '{{.STAGE}}/*' -DestinationPath '{{.OUT}}'"
+
+  sdk:csharp:
+    desc: Build C# NuGet package and stage to dist/sdk/csharp/
+    vars:
+      VERSION:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+      OUT: "{{.ROOT_DIR}}/dist/sdk/csharp"
+      RELEASE: "{{.ROOT_DIR}}/momors/target/release"
+      DATA: "{{.ROOT_DIR}}/dataset"
+    deps: [sdk:ffi]
+    cmds:
+      - rm -rf "{{.OUT}}"
+      - mkdir -p "{{.OUT}}/bin" "{{.OUT}}/data"
+      - dotnet pack "{{.ROOT_DIR}}/momo-ffi-cs" -c Release -p:Version={{.VERSION}} --nologo -o "{{.OUT}}"
+      - cp "{{.RELEASE}}/momors_ffi.dll"                    "{{.OUT}}/bin/"
+      - cp "{{.DATA}}/basic_data_4.mbm"                     "{{.OUT}}/data/"
+      - cp "{{.DATA}}/basic_data_5.mbm"                     "{{.OUT}}/data/"
+      - cp "{{.DATA}}/basic_data_7.mbm"                     "{{.OUT}}/data/"
+      - cp "{{.DATA}}/single_character_dic.tsv"             "{{.OUT}}/data/"
+
+  sdk:zip:csharp:
+    desc: Create C# SDK ZIP archive to dist/
+    vars:
+      VERSION:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+      STAGE: "{{.ROOT_DIR}}/dist/sdk/csharp"
+      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-csharp-{{.VERSION}}.zip"
+    deps: [sdk:csharp]
+    cmds:
+      - rm -f "{{.OUT}}"
+      - powershell -NoProfile -Command "Compress-Archive -Path '{{.STAGE}}/*' -DestinationPath '{{.OUT}}'"
+
+  sdk:clean:
+    desc: Clean SDK artifacts
+    cmds:
+      - rm -rf "{{.ROOT_DIR}}/dist/sdk"
+      - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-cpp-"*.zip
+      - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-csharp-"*.zip
+
   clean:
     desc: Clean all build artifacts
-    deps: [clean:rust, python:clean, clean:vscode]
+    deps: [clean:rust, python:clean, clean:vscode, sdk:clean]
 
   clean:rust:
     dir: momors

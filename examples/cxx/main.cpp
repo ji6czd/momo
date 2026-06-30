@@ -30,7 +30,7 @@ int main() {
   std::vector<uint16_t> kana_buffer(len);
   std::vector<uint16_t> braille_buffer(len);
 
-  auto result = momo_predict_w(predictor, src_text);
+  PredictionHandle* result = momo_predict_w(predictor, src_text);
   if (result != nullptr) {
     // かなテキストを取得
     int kana_len = momo_prediction_kana_w(result, kana_buffer.data(), static_cast<int>(kana_buffer.size()));

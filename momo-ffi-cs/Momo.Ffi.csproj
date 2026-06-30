@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Momo</RootNamespace>
+    <AssemblyName>Momo.Ffi</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PackageId>Momo.Ffi</PackageId>
+    <Authors>KIRIAKE Masanori</Authors>
+    <Description>C# P/Invoke bindings for momors-ffi — Japanese Braille conversion engine</Description>
+    <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
+  </PropertyGroup>
+</Project>

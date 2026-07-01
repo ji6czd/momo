@@ -263,6 +263,7 @@ double_entry_prefix = "⠠⠠"      # 次の文字も大文字のとき（全大
 "【" = "⠐⠤"
 "】" = "⠤⠂"
 "…" = "⠂⠂⠂"
+"～" = "⠤⠤"
 "①" = "⠶⠼⠁⠶"
 "②" = "⠶⠼⠃⠶"
 "③" = "⠶⠼⠉⠶"
@@ -333,7 +334,9 @@ double_entry_prefix = "⠠⠠"      # 次の文字も大文字のとき（全大
 "㍰" = "⠼⠃⠙⠐⠳"
 
 [table.punct.latin]
+# Spaces
 " " = "⠀"                             # 語境界スペース（ASCII 分岐で参照）
+" " = "⠀"
 "." = { braille = "⠲", trailing = 2 }
 "," = { braille = "⠄", trailing = 1 }
 "!" = { braille = "⠖", trailing = 2 }

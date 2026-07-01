@@ -16,6 +16,9 @@
 //! bool          momo_predictor_set_table_w(MomoPredictor, const uint16_t* toml_path_utf16);
 //! // 組み込みテーブルを名前で切り替える（[metadata].name と照合）。失敗時は false。
 //! bool          momo_predictor_set_embedded_table_w(MomoPredictor, const uint16_t* name_utf16);
+//! // テーブル未定義文字のポリシーを設定する。テーブル差し替え後も引き継がれる。
+//! // policy: 0=Space（デフォルト）, 1=PassThrough（スクリーンリーダー用途）
+//! void          momo_predictor_set_unknown_char_policy(MomoPredictor, int32_t policy);
 //! ```
 //!
 //! ## 予測実行
@@ -123,7 +126,7 @@ use std::os::raw::{c_char, c_int};
 use momors_braille::document::{BrailleDocument, DocumentConfig, PageBreak, PhysicalLine};
 use momors_braille::formatter::{render, wrap_line, wrap_suffix, FormattedDocument, RenderedLine};
 use momors_braille::writer::OutputFormat;
-use momors_braille::{BackTransResult, BrailleBackTranslator, BrailleConverter};
+use momors_braille::{BackTransResult, BrailleBackTranslator, BrailleConverter, UnknownCharPolicy};
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
 // ============================================================
@@ -134,6 +137,8 @@ pub struct PredictorHandle {
     inner: Predictor,
     /// かな→点字変換器。組み込みテーブルまたは指定ファイルから構築する。
     converter: BrailleConverter,
+    /// テーブル差し替え後も引き継ぐポリシー。
+    unknown_char_policy: UnknownCharPolicy,
 }
 
 pub struct PredictionHandle {
@@ -306,6 +311,7 @@ fn build_predictor(
     Box::into_raw(Box::new(PredictorHandle {
         inner: predictor,
         converter,
+        unknown_char_policy: UnknownCharPolicy::default(),
     }))
 }
 
@@ -326,7 +332,8 @@ pub extern "C" fn momo_predictor_set_table(
         None => return false,
     };
     match BrailleConverter::from_file(&path) {
-        Ok(c) => {
+        Ok(mut c) => {
+            c.set_unknown_char_policy(h.unknown_char_policy);
             h.converter = c;
             true
         }
@@ -351,7 +358,8 @@ pub extern "C" fn momo_predictor_set_table_w(
         None => return false,
     };
     match BrailleConverter::from_file(&path) {
-        Ok(c) => {
+        Ok(mut c) => {
+            c.set_unknown_char_policy(h.unknown_char_policy);
             h.converter = c;
             true
         }
@@ -452,12 +460,33 @@ pub extern "C" fn momo_predictor_set_embedded_table_w(
         None => return false,
     };
     match BrailleConverter::from_embedded_name(&name) {
-        Ok(c) => {
+        Ok(mut c) => {
+            c.set_unknown_char_policy(h.unknown_char_policy);
             h.converter = c;
             true
         }
         Err(_) => false,
     }
+}
+
+/// テーブル未定義文字の扱いを設定する。テーブルを差し替えても引き継がれる。
+/// policy: 0=Space（デフォルト）, 1=PassThrough（スクリーンリーダー用途）。
+/// handle が NULL なら何もしない。
+#[no_mangle]
+pub extern "C" fn momo_predictor_set_unknown_char_policy(
+    handle: *mut PredictorHandle,
+    policy: c_int,
+) {
+    let h = match unsafe { handle.as_mut() } {
+        Some(h) => h,
+        None => return,
+    };
+    let p = match policy {
+        1 => UnknownCharPolicy::PassThrough,
+        _ => UnknownCharPolicy::Space,
+    };
+    h.unknown_char_policy = p;
+    h.converter.set_unknown_char_policy(p);
 }
 
 /// UTF-8 パスからモデルを読み込み予測器を作成する。

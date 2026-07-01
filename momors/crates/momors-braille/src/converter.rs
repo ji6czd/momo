@@ -3,6 +3,16 @@ use std::collections::HashSet;
 
 const BRAILLE_SPACE: char = '⠀'; // U+2800
 
+/// テーブルに定義されていない文字の扱い。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UnknownCharPolicy {
+    /// 点字スペース（U+2800）に置換する（デフォルト）。
+    #[default]
+    Space,
+    /// 元の文字をそのまま出力する（スクリーンリーダー用途）。
+    PassThrough,
+}
+
 // ============================================================
 // BrailleResult
 // ============================================================
@@ -38,10 +48,12 @@ impl BrailleResult {
 ///
 /// [`BrailleConverter::from_embedded`] で組み込みテーブルを使うか、
 /// [`BrailleConverter::new`] でテーブルを直接渡す。
+/// テーブル未定義文字の扱いは [`BrailleConverter::with_unknown_char_policy`] で変更できる。
 pub struct BrailleConverter {
     table: BrailleTable,
     /// 数字モードで使われる点字セルの先頭文字集合。⠤ 挿入判定に使う。
     digit_cells: HashSet<char>,
+    unknown_char: UnknownCharPolicy,
 }
 
 impl BrailleConverter {
@@ -58,7 +70,11 @@ impl BrailleConverter {
             .values()
             .filter_map(|s| s.chars().next())
             .collect();
-        Self { table, digit_cells }
+        Self {
+            table,
+            digit_cells,
+            unknown_char: UnknownCharPolicy::default(),
+        }
     }
 
     /// デフォルトの組み込みテーブル（日本語１級）で変換器を作る。
@@ -78,6 +94,17 @@ impl BrailleConverter {
     /// ファイルからテーブルを読み込んで変換器を作る。
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
         Ok(Self::new(BrailleTable::from_file(path)?))
+    }
+
+    /// テーブル未定義文字の扱いを設定する（ビルダーメソッド）。
+    pub fn with_unknown_char_policy(mut self, policy: UnknownCharPolicy) -> Self {
+        self.unknown_char = policy;
+        self
+    }
+
+    /// テーブル未定義文字の扱いをその場で変更する。
+    pub fn set_unknown_char_policy(&mut self, policy: UnknownCharPolicy) {
+        self.unknown_char = policy;
     }
 
     /// かな文字列を点字に変換する。
@@ -151,13 +178,16 @@ impl BrailleConverter {
                     // なければ小文字キーで引く（grade1 など: 大文字フラグで区別）。
                     let exact_key = c.to_string();
                     let lower_key = c.to_ascii_lowercase().to_string();
-                    let cell = self
+                    if let Some(cell) = self
                         .table
                         .latin
                         .get(&exact_key)
                         .or_else(|| self.table.latin.get(&lower_key))
-                        .map_or(BRAILLE_SPACE.to_string(), |s| s.clone());
-                    braille.push_str(&cell);
+                    {
+                        braille.push_str(cell);
+                    } else {
+                        self.emit_unknown(&mut braille, c);
+                    }
                 } else if c.is_ascii_digit() {
                     // 外来語モード終了（exit_suffix なし: ⠼ がモード変更を示す）
                     in_foreign_word = false;
@@ -171,12 +201,11 @@ impl BrailleConverter {
                     }
 
                     let key = c.to_string();
-                    let cell = self
-                        .table
-                        .digit
-                        .get(&key)
-                        .map_or(BRAILLE_SPACE.to_string(), |s| s.clone());
-                    braille.push_str(&cell);
+                    if let Some(cell) = self.table.digit.get(&key) {
+                        braille.push_str(cell);
+                    } else {
+                        self.emit_unknown(&mut braille, c);
+                    }
                 } else if c == '.' || c == ',' {
                     // 数字の小数点・桁区切りの可能性: 数字モードをリセットしない。
                     // 外来語モード中なら punct_latin を、そうでなければ punct_jp を参照。
@@ -189,7 +218,7 @@ impl BrailleConverter {
                             .get(&key)
                             .or_else(|| self.table.punct_latin.get(&key))
                     };
-                    self.emit_punct(&mut braille, entry);
+                    self.emit_punct(&mut braille, entry, c);
                 } else {
                     // その他 ASCII（スペース含む）: 全フラグをリセット
                     in_foreign_word = false;
@@ -199,7 +228,7 @@ impl BrailleConverter {
 
                     let key = c.to_string();
                     let entry = self.table.punct_latin.get(&key);
-                    self.emit_punct(&mut braille, entry);
+                    self.emit_punct(&mut braille, entry, c);
                 }
 
                 kana_to_braille.push(brl_pos);
@@ -251,7 +280,7 @@ impl BrailleConverter {
                         braille.push(BRAILLE_SPACE);
                     }
                 } else {
-                    braille.push(BRAILLE_SPACE);
+                    self.emit_unknown(&mut braille, c);
                 }
 
                 kana_to_braille.push(brl_pos);
@@ -269,16 +298,23 @@ impl BrailleConverter {
     // private helpers
     // ============================================================
 
-    /// 句読点エントリを braille に追記する。
-    /// エントリがなければ点字スペース（⠀）を追記する。
-    fn emit_punct(&self, braille: &mut String, entry: Option<&(String, usize)>) {
+    /// 句読点エントリを braille に追記する。エントリがなければ `fallback` 文字で `emit_unknown` する。
+    fn emit_punct(&self, braille: &mut String, entry: Option<&(String, usize)>, fallback: char) {
         if let Some((brl, trailing)) = entry {
             braille.push_str(brl);
             for _ in 0..*trailing {
                 braille.push(BRAILLE_SPACE);
             }
         } else {
-            braille.push(BRAILLE_SPACE);
+            self.emit_unknown(braille, fallback);
+        }
+    }
+
+    /// テーブル未定義文字を `unknown_char` ポリシーに従って出力する。
+    fn emit_unknown(&self, braille: &mut String, c: char) {
+        match self.unknown_char {
+            UnknownCharPolicy::Space => braille.push(BRAILLE_SPACE),
+            UnknownCharPolicy::PassThrough => braille.push(c),
         }
     }
 

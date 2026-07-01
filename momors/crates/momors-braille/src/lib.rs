@@ -36,7 +36,7 @@ pub mod writer;
 pub use backtranslator::{
     BackTransResult, BackTransSegment, BackTransState, BrailleBackTranslator, StepResult,
 };
-pub use converter::{BrailleConverter, BrailleResult};
+pub use converter::{BrailleConverter, BrailleResult, UnknownCharPolicy};
 pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
 pub use error::{Error, Result};
 pub use formatter::{render, FormattedDocument, RenderedLine};

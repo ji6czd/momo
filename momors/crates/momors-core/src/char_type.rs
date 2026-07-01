@@ -63,7 +63,7 @@ pub enum CharType {
     Kanji = 0x42,
     JapaneseNumeric = 0x43,
 
-    /// スキップ系（NBSP・ZWJ など）。
+    /// スキップ系（ZWJ・ゼロ幅文字など）。
     /// 仮名テキストには現れず、`src_to_kana_index` のエントリだけ保持される。
     Skip = 0x50,
 
@@ -169,14 +169,15 @@ impl CharType {
 /// [`JapaneseNumeric`]: CharType::JapaneseNumeric
 /// [`Kanji`]: CharType::Kanji
 pub fn get_char_type(c: char) -> CharType {
-    // --- 空白 ---
-    if matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{3000}') {
+    // --- 空白（Unicode White_Space プロパティ全体）---
+    // Python の str.isspace() と等価。NBSP・全角スペース・各種幅スペースをすべて含む。
+    if c.is_whitespace() {
         return CharType::Space;
     }
 
     let cp = c as u32;
 
-    // --- スキップ文字（NBSP・ゼロ幅・フォーマット制御）---
+    // --- スキップ文字（ゼロ幅・フォーマット制御）---
     if is_skip_cp(cp) {
         return CharType::Skip;
     }
@@ -233,13 +234,13 @@ pub fn get_char_type(c: char) -> CharType {
 
 /// スキップすべきコードポイントか。
 ///
-/// NBSP・ゼロ幅文字・Unicode フォーマット制御文字など、
+/// ゼロ幅文字・Unicode フォーマット制御文字など、
 /// 仮名・点字出力には現れるべきでない文字を列挙する。
+/// 可視スペース系（NBSP 等）は `is_whitespace()` で Space に分類されるため含まない。
 fn is_skip_cp(cp: u32) -> bool {
     matches!(
         cp,
-        0x00A0 // NO-BREAK SPACE (NBSP)
-        | 0x00AD // SOFT HYPHEN
+        0x00AD // SOFT HYPHEN
         | 0x200B // ZERO WIDTH SPACE
         | 0x200C // ZERO WIDTH NON-JOINER
         | 0x200D // ZERO WIDTH JOINER
@@ -315,7 +316,6 @@ mod tests {
 
     #[test]
     fn skip_chars() {
-        assert_eq!(get_char_type('\u{00A0}'), CharType::Skip); // NBSP
         assert_eq!(get_char_type('\u{200B}'), CharType::Skip); // ZERO WIDTH SPACE
         assert_eq!(get_char_type('\u{200D}'), CharType::Skip); // ZWJ
         assert_eq!(get_char_type('\u{2060}'), CharType::Skip); // WORD JOINER
@@ -330,6 +330,10 @@ mod tests {
         assert_eq!(get_char_type(' '), CharType::Space);
         assert_eq!(get_char_type('\t'), CharType::Space);
         assert_eq!(get_char_type('\n'), CharType::Space);
+        assert_eq!(get_char_type('\u{00A0}'), CharType::Space); // NO-BREAK SPACE
+        assert_eq!(get_char_type('\u{2003}'), CharType::Space); // EM SPACE
+        assert_eq!(get_char_type('\u{202F}'), CharType::Space); // NARROW NO-BREAK SPACE
+        assert_eq!(get_char_type('\u{205F}'), CharType::Space); // MEDIUM MATHEMATICAL SPACE
         assert_eq!(get_char_type('\u{3000}'), CharType::Space); // 全角スペース
     }
 

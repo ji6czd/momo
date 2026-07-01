@@ -28,10 +28,9 @@ class CharType(str, Enum):
 # 常に JAPANESE_NUMERIC となる漢数字
 JAPANESE_NUMERIC_CHARS = frozenset("〇一二三四五六七八九")
 
-# 仮名・点字に現れるべきでないスキップ文字
-# （NBSP は Python の isspace() で True になるため、SPACE より先に判定する）
+# ゼロ幅文字・フォーマット制御文字など、仮名・点字出力には現れるべきでないスキップ文字。
+# 可視スペース系（NBSP 等）は isspace() == True のため SPACE に分類される（ここに含めない）。
 _SKIP_CHARS = frozenset({
-    " ",  # NO-BREAK SPACE (NBSP)
     "­",  # SOFT HYPHEN
     "​",  # ZERO WIDTH SPACE
     "‌",  # ZERO WIDTH NON-JOINER

@@ -61,9 +61,18 @@ impl BrailleConverter {
         Self { table, digit_cells }
     }
 
-    /// 組み込みテーブルで変換器を作る。
+    /// デフォルトの組み込みテーブル（日本語１級）で変換器を作る。
     pub fn from_embedded() -> Result<Self> {
         Ok(Self::new(BrailleTable::embedded()?))
+    }
+
+    /// 名前で組み込みテーブルを指定して変換器を作る。
+    ///
+    /// `name` は TOML の `[metadata].name` と照合する。見つからない場合はエラー。
+    pub fn from_embedded_name(name: &str) -> Result<Self> {
+        let table = crate::table::embedded_table(name)
+            .ok_or_else(|| crate::Error::UnknownTable(name.to_owned()))?;
+        Ok(Self::new(table))
     }
 
     /// ファイルからテーブルを読み込んで変換器を作る。

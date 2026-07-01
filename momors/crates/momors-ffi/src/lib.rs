@@ -5,12 +5,17 @@
 //! ## 予測器ライフサイクル
 //! ```c
 //! // toml_path が NULL なら組み込みテーブルを使う
-//! MomoPredictor momo_predictor_new  (const char*     model_path_utf8,  const char*     toml_path_utf8);
-//! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16, const uint16_t* toml_path_utf16);
+//! // table_name: 組み込みテーブル名（[metadata].name）。非 NULL ならこちらを優先。
+//! // toml_path: 外部 TOML ファイルパス。table_name が NULL のとき参照。
+//! // 両方 NULL なら既定の組み込みテーブル（日本語１級）を使う。
+//! MomoPredictor momo_predictor_new  (const char*     model_path_utf8,  const char*     table_name_utf8,  const char*     toml_path_utf8);
+//! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16, const uint16_t* table_name_utf16, const uint16_t* toml_path_utf16);
 //! void          momo_predictor_free (MomoPredictor predictor);
 //! // 点字テーブルのみ差し替え（モデル再読み込みなし）。失敗時は false。
 //! bool          momo_predictor_set_table  (MomoPredictor, const char*     toml_path_utf8);
 //! bool          momo_predictor_set_table_w(MomoPredictor, const uint16_t* toml_path_utf16);
+//! // 組み込みテーブルを名前で切り替える（[metadata].name と照合）。失敗時は false。
+//! bool          momo_predictor_set_embedded_table_w(MomoPredictor, const uint16_t* name_utf16);
 //! ```
 //!
 //! ## 予測実行
@@ -261,9 +266,15 @@ unsafe fn lpwstr_to_string(ptr: *const u16) -> Option<String> {
 /// モデルと同じディレクトリにある `single_character_dic.tsv`（漢字辞書）があれば利用し、
 /// 無ければ辞書なしにフォールバックする。
 ///
-/// `braille_table` が `Some(path)` のとき指定ファイルからテーブルを読む（失敗すれば NULL）。
-/// `None` のときは組み込みテーブルを使う。
-fn build_predictor(model_path: &str, braille_table: Option<&str>) -> *mut PredictorHandle {
+/// テーブル選択の優先順位:
+/// 1. `table_name` が `Some` → 組み込みテーブルを名前で選択（失敗すれば NULL）
+/// 2. `toml_path` が `Some` → 外部ファイルを読む（失敗すれば NULL）
+/// 3. 両方 `None` → 既定の組み込みテーブル（日本語１級）
+fn build_predictor(
+    model_path: &str,
+    table_name: Option<&str>,
+    toml_path: Option<&str>,
+) -> *mut PredictorHandle {
     let path = std::path::Path::new(model_path);
     let dir = path.parent();
 
@@ -280,9 +291,12 @@ fn build_predictor(model_path: &str, braille_table: Option<&str>) -> *mut Predic
         Err(_) => return std::ptr::null_mut(),
     };
 
-    let converter = match braille_table {
-        Some(table_path) => BrailleConverter::from_file(table_path).ok(),
-        None => BrailleConverter::from_embedded().ok(),
+    let converter = if let Some(name) = table_name {
+        BrailleConverter::from_embedded_name(name).ok()
+    } else if let Some(table_path) = toml_path {
+        BrailleConverter::from_file(table_path).ok()
+    } else {
+        BrailleConverter::from_embedded().ok()
     };
     let converter = match converter {
         Some(c) => c,
@@ -421,34 +435,67 @@ pub extern "C" fn momo_embedded_table_displayname_w(
     }
 }
 
+/// 組み込みテーブルを名前（UTF-16）で切り替える。`[metadata].name` と照合する。
+/// 成功時 true、見つからない場合は false（ハンドルの変換器は変更されない）。
+/// handle または name が NULL なら false を返す。
+#[no_mangle]
+pub extern "C" fn momo_predictor_set_embedded_table_w(
+    handle: *mut PredictorHandle,
+    name: *const u16,
+) -> bool {
+    let h = match unsafe { handle.as_mut() } {
+        Some(h) => h,
+        None => return false,
+    };
+    let name = match unsafe { lpwstr_to_string(name) } {
+        Some(n) => n,
+        None => return false,
+    };
+    match BrailleConverter::from_embedded_name(&name) {
+        Ok(c) => {
+            h.converter = c;
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// UTF-8 パスからモデルを読み込み予測器を作成する。
-/// `toml_path` が NULL なら組み込みテーブルを使う。失敗時は NULL を返す。
+/// `table_name` が非 NULL なら組み込みテーブルを名前で選択。
+/// `table_name` が NULL で `toml_path` が非 NULL なら外部ファイルを使う。
+/// 両方 NULL なら既定の組み込みテーブル（日本語１級）を使う。失敗時は NULL を返す。
 #[no_mangle]
 pub extern "C" fn momo_predictor_new(
     model_path: *const c_char,
+    table_name: *const c_char,
     toml_path: *const c_char,
 ) -> *mut PredictorHandle {
     let model = match unsafe { lpstr_to_string(model_path) } {
         Some(p) => p,
         None => return std::ptr::null_mut(),
     };
-    let table = unsafe { lpstr_to_string(toml_path) };
-    build_predictor(&model, table.as_deref())
+    let name = unsafe { lpstr_to_string(table_name) };
+    let path = unsafe { lpstr_to_string(toml_path) };
+    build_predictor(&model, name.as_deref(), path.as_deref())
 }
 
 /// UTF-16 パスからモデルを読み込み予測器を作成する。
-/// `toml_path` が NULL なら組み込みテーブルを使う。失敗時は NULL を返す。
+/// `table_name` が非 NULL なら組み込みテーブルを名前で選択。
+/// `table_name` が NULL で `toml_path` が非 NULL なら外部ファイルを使う。
+/// 両方 NULL なら既定の組み込みテーブル（日本語１級）を使う。失敗時は NULL を返す。
 #[no_mangle]
 pub extern "C" fn momo_predictor_new_w(
     model_path: *const u16,
+    table_name: *const u16,
     toml_path: *const u16,
 ) -> *mut PredictorHandle {
     let model = match unsafe { lpwstr_to_string(model_path) } {
         Some(p) => p,
         None => return std::ptr::null_mut(),
     };
-    let table = unsafe { lpwstr_to_string(toml_path) };
-    build_predictor(&model, table.as_deref())
+    let name = unsafe { lpwstr_to_string(table_name) };
+    let path = unsafe { lpwstr_to_string(toml_path) };
+    build_predictor(&model, name.as_deref(), path.as_deref())
 }
 
 /// 予測器を解放する。NULL は無視する。

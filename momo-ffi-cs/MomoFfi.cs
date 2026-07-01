@@ -30,6 +30,7 @@ public static class MomoFfi
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern nint momo_predictor_new_w(
         [MarshalAs(UnmanagedType.LPWStr)] string modelPath,
+        [MarshalAs(UnmanagedType.LPWStr)] string? tableName,
         [MarshalAs(UnmanagedType.LPWStr)] string? tomlPath);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -377,7 +378,7 @@ public static class MomoFfi
 
         try
         {
-            var ptr = momo_predictor_new_w(modelPath, null);
+            var ptr = momo_predictor_new_w(modelPath, null, null);
             _dllAvailable = true;
             _predictor = ptr == nint.Zero ? null : new PredictorHandle(ptr);
         }

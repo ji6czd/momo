@@ -895,6 +895,7 @@ class Predictor:
                         label,
                         confidence,
                         source_seq,
+                        raw_labels,
                     )
                 else:
                     label, last_fallback_reading, _, decision = (
@@ -991,15 +992,19 @@ class Predictor:
         label: str,
         confidence: float,
         source_seq: List[SourceEntry],
+        raw_labels: List[str],
     ) -> Tuple[str, float, str]:
         """アラビア数字（NUMERIC）の採否ロジック。
 
         モデルを信用し、出力の種類で採否を決める:
           - モデルが数字を返した: 原文と一致→採用 / 不一致→原文の数字に戻す（数の崩壊防止）
-          - モデルがかなを返した: 左右どちらも数字（＝多桁の内部）→原文の数字に戻す /
-                                  それ以外→採用（みっか・はつか等の助数詞読み）
-        多桁の端の桁（例「120日」の 0）は局所文脈が「20日」と同一で守れないため、
-        対比データ（120日・20日間 等の負例）＋回帰セットで監視する。
+          - モデルがかなを返した: 直後が既知の訓読み助数詞シグナル（日→カ・タチ、つ→ツ、
+                                  人→リ）→採用（みっか・はつか等の助数詞読み） /
+                                  それ以外→原文の数字に戻す
+
+        助数詞シグナルが立つのは直後が具体的な訓読みの助数詞のときだけなので、数字が
+        隣接する場合（多桁数の内部、例「120日」の 0）や、直後に何もない孤立した数字
+        （例「3:5」の 5）は自然に revert される。
         """
         # CONTINUE/SKIP はラベルではないので数字をそのまま素通し。
         if label in (LABEL_CONTINUE, LABEL_SKIP):
@@ -1010,14 +1015,13 @@ class Predictor:
                 # 取り違え（例 7→1）→ 原文の数字に戻す
                 return char, confidence, DecisionSource.FALLBACK_NUMERIC
             return label, confidence, DecisionSource.LR
-        # ② モデルがかなを返した: 多桁の内部（左右どちらも数字）だけ数字に戻す
+        # ② モデルがかなを返した: 直後が訓読み助数詞シグナルのときだけ信用する
         n = len(source_seq)
-        numeric_ctypes = (CharType.NUMERIC, CharType.JAPANESE_NUMERIC)
-        left_num = i > 0 and source_seq[i - 1][2] in numeric_ctypes
-        right_num = i < n - 1 and source_seq[i + 1][2] in numeric_ctypes
-        if left_num and right_num:
-            return char, confidence, DecisionSource.FALLBACK_NUMERIC
-        return label, confidence, DecisionSource.LR
+        if i + 1 < n and i + 1 < len(raw_labels):
+            next_signal = (source_seq[i + 1][0], raw_labels[i + 1])
+            if next_signal in _KUN_COUNTER_SIGNALS:
+                return label, confidence, DecisionSource.LR
+        return char, confidence, DecisionSource.FALLBACK_NUMERIC
 
     def _apply_kanji_fallback(
         self,

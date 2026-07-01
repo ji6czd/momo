@@ -569,11 +569,14 @@ impl Predictor {
             // NUMERIC (アラビア数字) の採否（モデルを信用する）
             //
             //   - モデルが数字を返した: 原文と一致→採用 / 不一致→原文に戻す（数の崩壊防止）
-            //   - モデルがかなを返した: 左右どちらも数字（＝多桁の内部）→原文に戻す /
-            //                          それ以外→採用（みっか・はつか等の助数詞読み）
+            //   - モデルがかなを返した: 直後が既知の訓読み助数詞シグナル（日→カ・タチ、
+            //                          つ→ツ、人→リ）→採用（みっか・はつか等） /
+            //                          それ以外→原文に戻す
             //
-            // 多桁の端の桁（例「120日」の 0）は局所文脈が「20日」と同一で守れないため、
-            // 対比データ＋回帰で監視する。CONTINUE/SKIP は後段の救済に委ねる。
+            // 助数詞シグナルが立つのは直後が具体的な訓読みの助数詞のときだけなので、
+            // 数字が隣接する場合（多桁数の内部、例「120日」の 0）や、直後に何もない
+            // 孤立した数字（例「3:5」の 5）は自然に revert される。
+            // CONTINUE/SKIP は後段の救済に委ねる。
             // ============================================================
             if entry.ctype == CharType::Numeric && label != LABEL_CONTINUE && label != LABEL_SKIP {
                 let src_ch = char::from_u32(entry.cp)
@@ -582,12 +585,22 @@ impl Predictor {
                 let revert = if is_digit_label(label) {
                     label != src_ch
                 } else {
-                    let n = source_seq.len();
-                    let is_num =
-                        |ct: CharType| matches!(ct, CharType::Numeric | CharType::JapaneseNumeric);
-                    let left = i > 0 && is_num(source_seq[i - 1].ctype);
-                    let right = i + 1 < n && is_num(source_seq[i + 1].ctype);
-                    left && right
+                    let next_is_kun_counter = if i + 1 < n {
+                        let (next_cls, _) = self.read_argmax(
+                            &source_seq[i + 1],
+                            &all_feat_ids[i + 1],
+                            &mut int_scores,
+                            &mut scores,
+                        );
+                        let next_label = self.model.read_class(next_cls as u32).unwrap_or("");
+                        let next_char = char::from_u32(source_seq[i + 1].cp)
+                            .map(|c| c.to_string())
+                            .unwrap_or_default();
+                        is_kun_counter_signal(&next_char, next_label)
+                    } else {
+                        false
+                    };
+                    !next_is_kun_counter
                 };
                 if revert {
                     let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;

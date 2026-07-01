@@ -407,6 +407,12 @@ impl Predictor {
     /// - LABEL_SKIP 救済 (NUMERIC)
     /// - 境界モデルによるスペース挿入
     pub fn predict(&self, text: &str) -> Result<PredictionResult> {
+        // --- 正規化 ---
+        // 康煕部首・CJK互換漢字等を正規のCJK統合漢字へ畳み込む。
+        // Python 版 predict() の normalize_compat_ideographs() 呼び出しと対応。
+        let normalized = crate::normalize::normalize_compat_ideographs(text);
+        let text = normalized.as_str();
+
         // --- 初期化 ---
         let mut result = PredictionResult {
             source_text: text.to_string(),
@@ -1227,6 +1233,16 @@ mod tests {
 
         let result = predictor.predict("a、b").unwrap();
         assert_eq!(result.kana_text(), "a、b");
+    }
+
+    #[test]
+    fn predict_normalizes_compat_ideographs_in_source_text() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // ⺟ (U+2E9F, CJK部首補助) は正規のKANJI「母」(U+6BCD) に畳み込まれる。
+        let result = predictor.predict("⺟").unwrap();
+        assert_eq!(result.source_text(), "母");
     }
 
     #[test]

@@ -37,6 +37,7 @@ mod feature;
 mod featurize;
 mod loader;
 mod model;
+mod normalize;
 mod numeric;
 
 // ============================================================

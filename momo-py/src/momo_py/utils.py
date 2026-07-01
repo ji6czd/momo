@@ -132,7 +132,8 @@ def normalize_compat_ideographs(text: str) -> str:
     return "".join(
         unicodedata.normalize("NFKC", c)
         if (
-            "\u2f00" <= c <= "\u2fd5"  # 康煕部首
+            "\u2e80" <= c <= "\u2eff"  # CJK部首補助
+            or "\u2f00" <= c <= "\u2fd5"  # 康煕部首
             or "\uf900" <= c <= "\ufaff"  # CJK互換漢字
             or "\U0002f800" <= c <= "\U0002fa1f"  # CJK互換漢字補助
         )

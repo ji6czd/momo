@@ -7,30 +7,93 @@ use std::sync::LazyLock;
 // TOML デシリアライズ用の中間型
 // ============================================================
 
-/// 句読点エントリ: 文字列だけか、trailing 付きのインラインテーブルか。
+/// 記号クラスに対する一致条件。
+///
+/// ```toml
+/// suppress_before = ["stop"]              # 次の class がこの中にあれば一致（include）
+/// suppress_before = { exclude = ["open"] } # 次の class がこの中になければ一致（exclude）
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ClassMatcher {
+    Include(Vec<String>),
+    Exclude { exclude: Vec<String> },
+}
+
+impl ClassMatcher {
+    /// `class` が条件に一致するか。
+    pub(crate) fn matches(&self, class: &str) -> bool {
+        match self {
+            ClassMatcher::Include(list) => list.iter().any(|c| c == class),
+            ClassMatcher::Exclude { exclude } => !exclude.iter().any(|c| c == class),
+        }
+    }
+}
+
+/// 句読点エントリ: 文字列だけか、trailing・class 付きのインラインテーブルか。
 ///
 /// ```toml
 /// "ー" = "⠒"
-/// "。" = { braille = "⠲", trailing = 2 }
+/// "。" = { braille = "⠲", trailing = 2, class = "stop", suppress_before = ["stop"] }
 /// ```
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum PunctEntry {
     Simple(String),
-    WithTrailing { braille: String, trailing: usize },
+    WithTrailing {
+        braille: String,
+        #[serde(default)]
+        trailing: usize,
+        /// この記号自身の分類（例: "stop", "pause"）。省略時は無分類。
+        #[serde(default)]
+        class: Option<String>,
+        /// 次の文字の class がこの条件に一致するとき、自分の trailing を出さない。
+        #[serde(default)]
+        suppress_before: Option<ClassMatcher>,
+    },
 }
 
 impl PunctEntry {
-    fn braille(&self) -> &str {
+    fn into_cell(self) -> PunctCell {
         match self {
-            PunctEntry::Simple(s) => s,
-            PunctEntry::WithTrailing { braille, .. } => braille,
+            PunctEntry::Simple(braille) => PunctCell {
+                braille,
+                trailing: 0,
+                class: None,
+                suppress_before: None,
+            },
+            PunctEntry::WithTrailing {
+                braille,
+                trailing,
+                class,
+                suppress_before,
+            } => PunctCell {
+                braille,
+                trailing,
+                class,
+                suppress_before,
+            },
         }
     }
-    fn trailing(&self) -> usize {
-        match self {
-            PunctEntry::Simple(_) => 0,
-            PunctEntry::WithTrailing { trailing, .. } => *trailing,
+}
+
+/// 句読点テーブルの 1 エントリ。
+#[derive(Debug, Clone)]
+pub(crate) struct PunctCell {
+    pub braille: String,
+    pub trailing: usize,
+    /// この記号自身の分類（例: "stop", "pause"）。未分類なら `None`。
+    pub class: Option<String>,
+    /// 次の文字の class がこの条件に一致するとき、`trailing` を出さない。
+    pub suppress_before: Option<ClassMatcher>,
+}
+
+impl PunctCell {
+    /// 次の文字の class（分類がなければ `"none"`）を踏まえた実効 trailing 数。
+    pub(crate) fn effective_trailing(&self, next_class: &str) -> usize {
+        match &self.suppress_before {
+            Some(matcher) if matcher.matches(next_class) => 0,
+            _ => self.trailing,
         }
     }
 }
@@ -73,21 +136,18 @@ struct RawFlags {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct FlagDef {
     #[serde(default)]
-    pub trigger_class: Vec<String>,
-    #[serde(default)]
     pub entry_prefix: String,
     #[serde(default)]
     pub exit_suffix: String,
     #[serde(default)]
     pub explicit_exit: String,
+    /// このモード中に現れても数字モードを終了させない文字（例: 小数点・桁区切り）。
     #[serde(default)]
     pub exempt_chars: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct CapitalFlagDef {
-    #[serde(default)]
-    pub trigger_class: Vec<String>,
     #[serde(default)]
     pub entry_prefix: String,
     #[serde(default)]
@@ -121,12 +181,12 @@ pub struct BrailleTable {
     pub(crate) kana_compound: HashMap<String, String>,
     /// 単音テーブル (1文字キー)。
     pub(crate) kana_single: HashMap<String, String>,
-    /// 日本語（全角）記号テーブル。値は (点字文字列, 後続スペース数)。
+    /// 日本語（全角）記号テーブル。
     /// foreign_word フラグが OFF のとき参照する。
-    pub(crate) punct_jp: HashMap<String, (String, usize)>,
-    /// ASCII 記号テーブル。値は (点字文字列, 後続スペース数)。
+    pub(crate) punct_jp: HashMap<String, PunctCell>,
+    /// ASCII 記号テーブル。
     /// foreign_word フラグが ON のとき参照する。
-    pub(crate) punct_latin: HashMap<String, (String, usize)>,
+    pub(crate) punct_latin: HashMap<String, PunctCell>,
     /// 数字テーブル。
     pub(crate) digit: HashMap<String, String>,
     /// ラテン文字テーブル。
@@ -190,10 +250,8 @@ impl BrailleTable {
     }
 
     fn from_raw(raw: RawBrailleFile) -> Self {
-        let to_punct = |map: HashMap<String, PunctEntry>| -> HashMap<String, (String, usize)> {
-            map.into_iter()
-                .map(|(k, v)| (k, (v.braille().to_owned(), v.trailing())))
-                .collect()
+        let to_punct = |map: HashMap<String, PunctEntry>| -> HashMap<String, PunctCell> {
+            map.into_iter().map(|(k, v)| (k, v.into_cell())).collect()
         };
 
         Self {
@@ -277,20 +335,53 @@ mod tests {
         let table = BrailleTable::embedded().unwrap();
 
         // 日本語記号
-        let (brl, trailing) = table.punct_jp.get("。").unwrap();
-        assert_eq!(brl.as_str(), "⠲");
-        assert_eq!(*trailing, 2);
-        let (brl2, trailing2) = table.punct_jp.get("、").unwrap();
-        assert_eq!(brl2.as_str(), "⠰");
-        assert_eq!(*trailing2, 1);
+        let cell = table.punct_jp.get("。").unwrap();
+        assert_eq!(cell.braille.as_str(), "⠲");
+        assert_eq!(cell.trailing, 2);
+        let cell2 = table.punct_jp.get("、").unwrap();
+        assert_eq!(cell2.braille.as_str(), "⠰");
+        assert_eq!(cell2.trailing, 1);
 
-        // ASCII 記号
-        let (brl3, trailing3) = table.punct_latin.get(".").unwrap();
-        assert_eq!(brl3.as_str(), "⠲");
-        assert_eq!(*trailing3, 2);
-        let (brl4, trailing4) = table.punct_latin.get("-").unwrap();
-        assert_eq!(brl4.as_str(), "⠤");
-        assert_eq!(*trailing4, 0);
+        // ASCII 記号（"." "," "!" "?" ":" ";" は trailing なし。全角の日本語記号と違い、
+        // ASCII 文脈では後続スペースを付けない仕様）
+        let cell3 = table.punct_latin.get(".").unwrap();
+        assert_eq!(cell3.braille.as_str(), "⠲");
+        assert_eq!(cell3.trailing, 0);
+        let cell4 = table.punct_latin.get("-").unwrap();
+        assert_eq!(cell4.braille.as_str(), "⠤");
+        assert_eq!(cell4.trailing, 0);
+    }
+
+    #[test]
+    fn punct_class_and_suppress_before() {
+        let table = BrailleTable::embedded().unwrap();
+
+        // 「！」「？」「。」は stop クラスで、次が stop なら trailing を抑制する
+        for key in ["。", "！", "？"] {
+            let cell = table.punct_jp.get(key).unwrap();
+            assert_eq!(cell.class.as_deref(), Some("stop"), "class of {key}");
+            assert_eq!(cell.effective_trailing("stop"), 0, "suppressed before stop");
+            assert_eq!(cell.effective_trailing("none"), 2, "normal trailing");
+        }
+
+        // 「、」「・」は pause クラス、抑制条件は今のところ設定していない
+        for key in ["、", "・"] {
+            let cell = table.punct_jp.get(key).unwrap();
+            assert_eq!(cell.class.as_deref(), Some("pause"), "class of {key}");
+        }
+    }
+
+    #[test]
+    fn class_matcher_include_and_exclude() {
+        let include = ClassMatcher::Include(vec!["stop".to_string()]);
+        assert!(include.matches("stop"));
+        assert!(!include.matches("pause"));
+
+        let exclude = ClassMatcher::Exclude {
+            exclude: vec!["open".to_string()],
+        };
+        assert!(exclude.matches("stop"));
+        assert!(!exclude.matches("open"));
     }
 
     #[test]

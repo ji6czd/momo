@@ -175,12 +175,12 @@ impl BrailleBackTranslator {
             }
         }
 
-        let to_rev = |m: &HashMap<String, (String, usize)>| -> HashMap<char, (String, u8)> {
+        let to_rev = |m: &HashMap<String, crate::table::PunctCell>| -> HashMap<char, (String, u8)> {
             let mut r = HashMap::new();
-            for (ch, (brl, trailing)) in m {
-                let cells: Vec<char> = brl.chars().collect();
+            for (ch, cell) in m {
+                let cells: Vec<char> = cell.braille.chars().collect();
                 if cells.len() == 1 {
-                    r.insert(cells[0], (ch.clone(), *trailing as u8));
+                    r.insert(cells[0], (ch.clone(), cell.trailing as u8));
                 }
             }
             r

@@ -53,6 +53,8 @@ pub struct BrailleConverter {
     table: BrailleTable,
     /// 数字モードで使われる点字セルの先頭文字集合。⠤ 挿入判定に使う。
     digit_cells: HashSet<char>,
+    /// 数字モード中に現れても数字モードを終了させない文字（`flags.digit.exempt_chars` 由来）。
+    digit_exempt_chars: HashSet<char>,
     unknown_char: UnknownCharPolicy,
 }
 
@@ -70,9 +72,16 @@ impl BrailleConverter {
             .values()
             .filter_map(|s| s.chars().next())
             .collect();
+        let digit_exempt_chars = table
+            .flag_digit
+            .exempt_chars
+            .iter()
+            .filter_map(|s| s.chars().next())
+            .collect();
         Self {
             table,
             digit_cells,
+            digit_exempt_chars,
             unknown_char: UnknownCharPolicy::default(),
         }
     }
@@ -131,8 +140,7 @@ impl BrailleConverter {
         // フラグ状態
         let mut in_digit = false; // ⠼ が有効な数字モード
         let mut in_foreign_word = false; // ⠰ が有効な外来語モード
-        let mut in_capital_word = false; // 大文字モード（先頭 ⠠ 済み）
-        let mut in_double_capital = false; // 全大文字モード（⠠⠠ 済み）
+        let mut in_capital_word = false; // 大文字モード（先頭 ⠠ か ⠠⠠ 済み）
 
         let mut i = 0;
         while i < n {
@@ -158,19 +166,17 @@ impl BrailleConverter {
                     // 大文字フラグ
                     if c.is_ascii_uppercase() {
                         if !in_capital_word {
-                            // 1文字目の大文字: ⠠ を 1 つ挿入
-                            braille.push_str(&self.table.flag_capital.entry_prefix);
+                            // 語頭で次も大文字なら全大文字モード（⠠⠠）、そうでなければ単独大文字（⠠）
+                            if i + 1 < n && chars[i + 1].is_ascii_uppercase() {
+                                braille.push_str(&self.table.flag_capital.double_entry_prefix);
+                            } else {
+                                braille.push_str(&self.table.flag_capital.entry_prefix);
+                            }
                         }
                         in_capital_word = true;
-                        // 次も大文字なら全大文字モード: さらに ⠠ を 1 つ追加（合計 ⠠⠠）
-                        if i + 1 < n && chars[i + 1].is_ascii_uppercase() && !in_double_capital {
-                            braille.push_str(&self.table.flag_capital.entry_prefix);
-                            in_double_capital = true;
-                        }
                     } else if in_capital_word {
                         // 小文字に戻ったら大文字モード解除
                         in_capital_word = false;
-                        in_double_capital = false;
                     }
 
                     // ラテン文字テーブルを引く。
@@ -192,7 +198,6 @@ impl BrailleConverter {
                     // 外来語モード終了（exit_suffix なし: ⠼ がモード変更を示す）
                     in_foreign_word = false;
                     in_capital_word = false;
-                    in_double_capital = false;
 
                     // 数字モード開始（初回のみ ⠼ を挿入）
                     if !in_digit {
@@ -206,8 +211,8 @@ impl BrailleConverter {
                     } else {
                         self.emit_unknown(&mut braille, c);
                     }
-                } else if c == '.' || c == ',' {
-                    // 数字の小数点・桁区切りの可能性: 数字モードをリセットしない。
+                } else if self.digit_exempt_chars.contains(&c) {
+                    // 数字モード中の小数点・桁区切り（flags.digit.exempt_chars）: 数字モードをリセットしない。
                     // 外来語モード中なら punct_latin を、そうでなければ punct_jp を参照。
                     let key = c.to_string();
                     let entry = if in_foreign_word {
@@ -218,17 +223,16 @@ impl BrailleConverter {
                             .get(&key)
                             .or_else(|| self.table.punct_latin.get(&key))
                     };
-                    self.emit_punct(&mut braille, entry, c);
+                    self.emit_punct(&mut braille, entry, c, chars.get(i + 1).copied());
                 } else {
                     // その他 ASCII（スペース含む）: 全フラグをリセット
                     in_foreign_word = false;
                     in_digit = false;
                     in_capital_word = false;
-                    in_double_capital = false;
 
                     let key = c.to_string();
                     let entry = self.table.punct_latin.get(&key);
-                    self.emit_punct(&mut braille, entry, c);
+                    self.emit_punct(&mut braille, entry, c, chars.get(i + 1).copied());
                 }
 
                 kana_to_braille.push(brl_pos);
@@ -254,7 +258,6 @@ impl BrailleConverter {
                 in_digit = false;
                 in_foreign_word = false;
                 in_capital_word = false;
-                in_double_capital = false;
 
                 // 複合音（2文字キー）を先に試みる
                 if i + 1 < n {
@@ -274,9 +277,10 @@ impl BrailleConverter {
                 let key = c.to_string();
                 if let Some(brl) = self.table.kana_single.get(&key) {
                     braille.push_str(brl);
-                } else if let Some((brl, trailing)) = self.table.punct_jp.get(&key) {
-                    braille.push_str(brl);
-                    for _ in 0..*trailing {
+                } else if let Some(cell) = self.table.punct_jp.get(&key) {
+                    braille.push_str(&cell.braille);
+                    let next_class = self.class_of(chars.get(i + 1).copied());
+                    for _ in 0..cell.effective_trailing(&next_class) {
                         braille.push(BRAILLE_SPACE);
                     }
                 } else {
@@ -299,15 +303,39 @@ impl BrailleConverter {
     // ============================================================
 
     /// 句読点エントリを braille に追記する。エントリがなければ `fallback` 文字で `emit_unknown` する。
-    fn emit_punct(&self, braille: &mut String, entry: Option<&(String, usize)>, fallback: char) {
-        if let Some((brl, trailing)) = entry {
-            braille.push_str(brl);
-            for _ in 0..*trailing {
+    /// `next` は後続文字（trailing 抑制の判定に使う）。
+    fn emit_punct(
+        &self,
+        braille: &mut String,
+        entry: Option<&crate::table::PunctCell>,
+        fallback: char,
+        next: Option<char>,
+    ) {
+        if let Some(cell) = entry {
+            braille.push_str(&cell.braille);
+            let next_class = self.class_of(next);
+            for _ in 0..cell.effective_trailing(&next_class) {
                 braille.push(BRAILLE_SPACE);
             }
         } else {
             self.emit_unknown(braille, fallback);
         }
+    }
+
+    /// 文字 `c` の句読点としての class を返す（未分類・非句読点なら `"none"`）。
+    /// ASCII なら `punct_latin`、それ以外は `punct_jp` を参照する。
+    fn class_of(&self, c: Option<char>) -> String {
+        let Some(c) = c else {
+            return "none".to_string();
+        };
+        let key = c.to_string();
+        let cell = if (c as u32) < 0x80 {
+            self.table.punct_latin.get(&key)
+        } else {
+            self.table.punct_jp.get(&key)
+        };
+        cell.and_then(|cell| cell.class.clone())
+            .unwrap_or_else(|| "none".to_string())
     }
 
     /// テーブル未定義文字を `unknown_char` ポリシーに従って出力する。
@@ -335,8 +363,8 @@ impl BrailleConverter {
         if let Some(brl) = self.table.kana_single.get(&key) {
             return brl.chars().next();
         }
-        if let Some((brl, _)) = self.table.punct_jp.get(&key) {
-            return brl.chars().next();
+        if let Some(cell) = self.table.punct_jp.get(&key) {
+            return cell.braille.chars().next();
         }
         Some(BRAILLE_SPACE)
     }
@@ -387,6 +415,28 @@ mod tests {
         assert_eq!(r.braille_text(), "⠪⠴⠇⠗⠄⠰⠀⠻⠡⠃⠖⠀⠀");
     }
 
+    #[test]
+    fn stop_marks_collapse_trailing() {
+        // ！？ はどちらも class = "stop"。直前の！は次が stop なので trailing を出さず、
+        // 最後の？の trailing（2）だけが残る。
+        let r = conv().convert("！？").unwrap();
+        assert_eq!(r.braille_text(), "⠖⠢⠀⠀");
+    }
+
+    #[test]
+    fn stop_mark_alone_keeps_trailing() {
+        // 単独の！は次が stop でないので通常通り trailing = 2。
+        let r = conv().convert("！ア").unwrap();
+        assert_eq!(r.braille_text(), "⠖⠀⠀⠁");
+    }
+
+    #[test]
+    fn three_stop_marks_collapse_to_last() {
+        // ！？！ の 3 連続でも、trailing を出すのは最後の記号だけ。
+        let r = conv().convert("！？！").unwrap();
+        assert_eq!(r.braille_text(), "⠖⠢⠖⠀⠀");
+    }
+
     // --- 数字モード ---
 
     #[test]
@@ -418,11 +468,11 @@ mod tests {
 
     #[test]
     fn decimal_point_preserves_digit_mode() {
-        // 3.14 → ⠼⠉⠲⠀⠀⠁⠙
-        // '.' は数字モードをリセットしない
+        // 3.14 → ⠼⠉⠲⠁⠙
+        // '.' は数字モードをリセットしない。ASCII 記号なので trailing なし。
         let r = conv().convert("3.14").unwrap();
-        // ⠼⠉ (3) + ⠲⠀⠀ (.) + ⠁ (1) + ⠙ (4)
-        assert_eq!(r.braille_text(), "⠼⠉⠲⠀⠀⠁⠙");
+        // ⠼⠉ (3) + ⠲ (.) + ⠁ (1) + ⠙ (4)
+        assert_eq!(r.braille_text(), "⠼⠉⠲⠁⠙");
     }
 
     #[test]

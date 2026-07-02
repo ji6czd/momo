@@ -23,8 +23,7 @@ public partial class MainForm : Form
     private string SelectedOutputExtension => cmbOutputFormat.SelectedIndex switch
     {
         0 => ".mbr",
-        1 => ".bse",
-        _ => ".brf"
+        _ => ".bse"
     };
 
     private void cmbOutputFormat_SelectedIndexChanged(object sender, EventArgs e)
@@ -38,8 +37,7 @@ public partial class MainForm : Form
         var filter = cmbOutputFormat.SelectedIndex switch
         {
             0 => "MOMO文書ファイル (*.mbr)|*.mbr",
-            1 => "BASEファイル (*.bse)|*.bse",
-            _ => "点字テキスト (*.brf)|*.brf",
+            _ => "BASEファイル (*.bse)|*.bse",
         };
         using var dlg = new SaveFileDialog
         {
@@ -84,7 +82,7 @@ public partial class MainForm : Form
         try
         {
             string input = txtInput.Text, output = txtOutput.Text;
-            int format = cmbOutputFormat.SelectedIndex switch { 0 => 0, 1 => 2, _ => 3 };
+            int format = cmbOutputFormat.SelectedIndex switch { 0 => 0, _ => 3 };
             int lw = (int)numLineWidth.Value, lpp = (int)numLinesPerPage.Value;
             string title = txtTitle.Text;
 

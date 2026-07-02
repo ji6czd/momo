@@ -83,8 +83,7 @@ partial class MainForm
         cmbOutputFormat.Items.AddRange(new object[]
         {
             "MOMO文書ファイル (.mbr)",
-            "BASEファイル (.bse)",
-            "点字テキスト (.brf)"
+            "BASEファイル (.bse)"
         });
         cmbOutputFormat.SelectedIndex = 1;
         cmbOutputFormat.SelectedIndexChanged += cmbOutputFormat_SelectedIndexChanged;

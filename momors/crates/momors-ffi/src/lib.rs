@@ -1101,8 +1101,19 @@ pub extern "C" fn momo_doc_builder_add_line(
     }
 }
 
-/// ビルダーからドキュメントを確定して返す。ビルダーは解放される（再利用・再解放不可）。
+/// ビルダーからドキュメントを確定して返す。
+///
 /// b が NULL なら NULL。
+///
+/// # 注意（他の `_free` 関数との非対称性）
+/// 本関数はビルダーを消費し、内部で解放する。他のハンドル型は「対応する
+/// `_free` 関数を呼ぶまで有効」という単純な1対1の対応だが、
+/// `BrailleDocBuilder` だけは `momo_doc_builder_build` と
+/// `momo_doc_builder_free` の**どちらでも**無効化されうる。呼び出し側は
+/// 本関数を呼んだ後、同じポインタを `momo_doc_builder_add_line` や
+/// `momo_doc_builder_free` に**絶対に**渡してはならない（use-after-free /
+/// 二重解放になる。呼び出し後にポインタを NULL にすることを推奨する。
+/// `momo_raii.hpp` の `DocBuilder::build()` はこれを内部で行っている）。
 #[no_mangle]
 pub extern "C" fn momo_doc_builder_build(b: *mut BrailleDocBuilder) -> *mut BrailleDocHandle {
     if b.is_null() {

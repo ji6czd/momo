@@ -237,11 +237,11 @@ author = "MOMO Project"
 
 [table.punct.jp]
 "　" = "⠀⠀"
-"。" = { braille = "⠲", trailing = 2 }
-"、" = { braille = "⠰", trailing = 1 }
-"・" = { braille = "⠐", trailing = 1 }
-"！" = { braille = "⠖", trailing = 2 }
-"？" = { braille = "⠢", trailing = 2 }
+"。" = { braille = "⠲", trailing = 2, class = "stop", suppress_before = ["stop"] }
+"、" = { braille = "⠰", trailing = 1, class = "pause" }
+"・" = { braille = "⠐", trailing = 1, class = "pause" }
+"！" = { braille = "⠖", trailing = 2, class = "stop", suppress_before = ["stop"] }
+"？" = { braille = "⠢", trailing = 2, class = "stop", suppress_before = ["stop"] }
 "「" = "⠤"
 "」" = "⠤"
 "『" = "⠰⠤"

@@ -25,5 +25,5 @@ Momoでは、従来型の形態素解析と分かち書きルールを用いた�
 
 ## 各種資料
 
-- [CRF機械学習]（docs/crf-plan.md）
-- [MOMOデータセットとルール]（docs/dataset_raw_rule.md）
+- [CRF機械学習](docs/crf-plan.md)
+- [MOMOデータセットとルール](docs/dataset_raw_rule.md)

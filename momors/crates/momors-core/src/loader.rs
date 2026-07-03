@@ -65,6 +65,12 @@ use crate::{Error, Result};
 
 const MAGIC: [u8; 4] = *b"MOMO";
 
+/// ヘッダ由来のカウント値（n_classes / n_features / n_nonzero）の妥当性上限。
+/// これを超える値をそのまま `Vec::with_capacity` 等に渡すと、壊れた/不正な
+/// `.mbm` ファイル1つで巨大メモリ確保・OOM を引き起こしうるため、
+/// 本クレートが現実的に扱う規模を大幅に超える値は早期に `CorruptModel` で弾く。
+const MAX_REASONABLE_COUNT: u32 = 50_000_000;
+
 // ============================================================
 // 公開エントリポイント
 // ============================================================
@@ -112,6 +118,19 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     let n_classes = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     let n_features = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
 
+    if n_classes == 0 {
+        return Err(Error::CorruptModel {
+            reason: "n_classes が 0 です（読みラベルが1つも無いモデルは不正）".to_string(),
+        });
+    }
+    if n_classes > MAX_REASONABLE_COUNT || n_features > MAX_REASONABLE_COUNT {
+        return Err(Error::CorruptModel {
+            reason: format!(
+                "n_classes={n_classes} または n_features={n_features} が大きすぎます（上限 {MAX_REASONABLE_COUNT}）"
+            ),
+        });
+    }
+
     // ---- モデル本体を構築 ----
     let mut model = MomoModel::new();
     model.n_classes = n_classes;
@@ -125,7 +144,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 
     // ---- 読みモデル重み (CSR → CSC) ----
     let (read_scale, csr_indptr, csr_indices, csr_data) =
-        read_csr_weights(reader, n_classes, path)?;
+        read_csr_weights(reader, n_classes, n_features, path)?;
     model.read_scale = read_scale;
 
     let (colptr, rowind, data_csc) = csr_to_csc(
@@ -219,13 +238,24 @@ fn read_labels<R: Read>(reader: &mut R, n_classes: u32, path: &Path) -> Result<V
 
 /// 読みモデル重み (CSR 形式) を読む。
 /// 戻り値: `(quant_scale[n_classes], indptr, indices, data)`
+///
+/// `indptr`/`indices` はファイルから読んだ生の値であり、`csr_to_csc` で
+/// そのまま配列添字として使われる。壊れたファイルによる範囲外アクセス
+/// panic を防ぐため、ここで整合性を検証してから返す。
 fn read_csr_weights<R: Read>(
     reader: &mut R,
     n_classes: u32,
+    n_features: u32,
     path: &Path,
 ) -> Result<(Vec<f32>, Vec<u32>, Vec<u32>, Vec<i8>)> {
     let scales = read_f32_vec(reader, n_classes as usize, path)?;
-    let n_nonzero = reader.read_u32::<LittleEndian>().map_err(io_err(path))? as usize;
+    let n_nonzero = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+    if n_nonzero > MAX_REASONABLE_COUNT {
+        return Err(Error::CorruptModel {
+            reason: format!("n_nonzero={n_nonzero} が大きすぎます（上限 {MAX_REASONABLE_COUNT}）"),
+        });
+    }
+    let n_nonzero = n_nonzero as usize;
 
     let indptr_len = n_classes as usize + 1;
     let mut indptr = vec![0u32; indptr_len];
@@ -233,6 +263,19 @@ fn read_csr_weights<R: Read>(
         *slot = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     }
 
+    // 整合性チェック: indptr は単調非減少で、各要素は n_nonzero 以下であること
+    // （csr_to_csc がこれを前提に範囲外チェック無しで添字アクセスするため）。
+    let mut prev = 0u32;
+    for (row, &p) in indptr.iter().enumerate() {
+        if p < prev || p as usize > n_nonzero {
+            return Err(Error::CorruptModel {
+                reason: format!(
+                    "CSR indptr[{row}]={p} が不正です（直前の値={prev}, n_nonzero={n_nonzero}）"
+                ),
+            });
+        }
+        prev = p;
+    }
     // 整合性チェック: indptr の最後の値は n_nonzero と一致するはず
     if *indptr.last().unwrap() as usize != n_nonzero {
         return Err(Error::CorruptModel {
@@ -247,6 +290,15 @@ fn read_csr_weights<R: Read>(
     let mut indices = vec![0u32; n_nonzero];
     for slot in &mut indices {
         *slot = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+    }
+    // 整合性チェック: 各特徴量IDは n_features 未満であること
+    // （csc_colptr/csc_rowind の構築時にこの範囲を前提に添字アクセスするため）。
+    if let Some(&bad) = indices.iter().find(|&&col| col >= n_features) {
+        return Err(Error::CorruptModel {
+            reason: format!(
+                "CSR indices に不正な特徴量ID {bad} があります（n_features={n_features}）"
+            ),
+        });
     }
 
     let data = read_i8_vec(reader, n_nonzero, path)?;
@@ -474,6 +526,67 @@ mod tests {
             result,
             Err(Error::UnsupportedVersion { version: 0x99 })
         ));
+    }
+
+    /// ヘッダのみ (16 bytes) を組み立てるヘルパー。
+    fn build_header_bytes(n_classes: u32, n_features: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"MOMO");
+        bytes.push(0x02);
+        bytes.extend_from_slice(&[0, 0, 0]); // reserved
+        bytes.extend_from_slice(&n_classes.to_le_bytes());
+        bytes.extend_from_slice(&n_features.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn n_classes_zero_returns_corrupt_model_error() {
+        let bytes = build_header_bytes(0, 5);
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
+    }
+
+    #[test]
+    fn n_features_too_large_returns_corrupt_model_error() {
+        let bytes = build_header_bytes(3, MAX_REASONABLE_COUNT + 1);
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
+    }
+
+    #[test]
+    fn csr_index_out_of_range_returns_error() {
+        // n_classes=2, n_features=3, n_nonzero=1
+        // indices[0] = 5 は n_features=3 の範囲外
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0.01f32.to_le_bytes()); // scales[0]
+        bytes.extend_from_slice(&0.02f32.to_le_bytes()); // scales[1]
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // n_nonzero
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // indptr[0]
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // indptr[1]
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // indptr[2]
+        bytes.extend_from_slice(&5u32.to_le_bytes()); // indices[0] = 5 (範囲外)
+        bytes.push(10u8); // data[0]
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = read_csr_weights(&mut cursor, 2, 3, Path::new("test"));
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
+    }
+
+    #[test]
+    fn csr_indptr_non_monotonic_returns_error() {
+        // n_classes=2, n_features=3, n_nonzero=3
+        // indptr = [0, 3, 1] は単調非減少ではない
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0.01f32.to_le_bytes()); // scales[0]
+        bytes.extend_from_slice(&0.02f32.to_le_bytes()); // scales[1]
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // n_nonzero
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // indptr[0]
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // indptr[1]
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // indptr[2] = 1 < 直前の 3
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = read_csr_weights(&mut cursor, 2, 3, Path::new("test"));
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
     // --- CSR → CSC 変換の独立テスト ---

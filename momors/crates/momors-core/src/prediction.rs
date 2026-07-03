@@ -776,16 +776,13 @@ impl Predictor {
         if entry.ctype == CharType::Kanji && !self.kanji_dict.is_empty() {
             if let Some(ch) = char::from_u32(entry.cp) {
                 if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
-                    let mut best = 0usize;
-                    let mut best_s = f32::NEG_INFINITY;
-                    for cls in 0..n_cls {
-                        let lbl = self.model.read_class(cls as u32).unwrap_or("");
-                        if readings.iter().any(|r| r.as_str() == lbl) && scores[cls] > best_s {
-                            best_s = scores[cls];
-                            best = cls;
-                        }
+                    // 辞書の読みが1つもモデルのクラスに存在しない場合は None。
+                    // その場合は制約なし argmax にフォールバックする。
+                    if let Some(result) =
+                        constrained_argmax(scores, &self.model.read_classes, readings)
+                    {
+                        return result;
                     }
-                    return (best, best_s);
                 }
             }
         }
@@ -891,6 +888,8 @@ impl Predictor {
 // ============================================================
 
 /// スコア配列の argmax を返す。
+///
+/// `n_classes >= 1` は loader (`MomoModel` 読み込み時) が保証する不変条件。
 fn unconstrained_argmax(scores: &[f32]) -> (usize, f32) {
     scores
         .iter()
@@ -898,6 +897,26 @@ fn unconstrained_argmax(scores: &[f32]) -> (usize, f32) {
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, &s)| (i, s))
         .expect("n_classes >= 1")
+}
+
+/// 辞書の読み候補 `readings` のいずれかと一致するクラスの中で、
+/// 最もスコアが高いものを返す。一致するクラスが1つも無ければ `None`
+/// （呼び出し側で `unconstrained_argmax` にフォールバックする）。
+fn constrained_argmax(
+    scores: &[f32],
+    class_labels: &[String],
+    readings: &[String],
+) -> Option<(usize, f32)> {
+    let mut best: Option<(usize, f32)> = None;
+    for (cls, lbl) in class_labels.iter().enumerate() {
+        if readings.iter().any(|r| r == lbl) {
+            let s = scores[cls];
+            if best.is_none_or(|(_, best_s)| s > best_s) {
+                best = Some((cls, s));
+            }
+        }
+    }
+    best
 }
 
 /// 漢字辞書 TSV を読み込み、char でソートされた Vec を返す。
@@ -1157,6 +1176,50 @@ mod tests {
         assert!((sigmoid(0.0) - 0.5).abs() < 1e-6);
         assert!(sigmoid(10.0) > 0.99);
         assert!(sigmoid(-10.0) < 0.01);
+    }
+
+    #[test]
+    fn constrained_argmax_picks_best_matching_class() {
+        let scores = vec![1.0, 5.0, 3.0];
+        let labels = vec!["カ".to_string(), "キ".to_string(), "ク".to_string()];
+        // 「キ」と「ク」が辞書候補 → スコアが高い「キ」(index 1) を選ぶ
+        let readings = vec!["キ".to_string(), "ク".to_string()];
+        assert_eq!(
+            constrained_argmax(&scores, &labels, &readings),
+            Some((1, 5.0))
+        );
+    }
+
+    #[test]
+    fn constrained_argmax_returns_none_when_no_reading_matches() {
+        let scores = vec![1.0, 5.0, 3.0];
+        let labels = vec!["カ".to_string(), "キ".to_string(), "ク".to_string()];
+        // 辞書の読みがモデルのどのクラスラベルとも一致しない
+        let readings = vec!["ケ".to_string(), "コ".to_string()];
+        assert_eq!(constrained_argmax(&scores, &labels, &readings), None);
+    }
+
+    #[test]
+    fn read_argmax_falls_back_to_unconstrained_when_dict_readings_absent_from_model() {
+        // dummy.mbm はクラス [カ, キ, ク] のみを持つ。
+        // 辞書の読みがどれとも一致しない場合、read_argmax は
+        // best_s=NEG_INFINITY のまま class 0 を返してはならず、
+        // unconstrained_argmax と同じ結果にフォールバックすること。
+        let dict_path = std::env::temp_dir().join(format!(
+            "momors_test_kanji_dict_no_match_{}.tsv",
+            std::process::id()
+        ));
+        // "漢" (U+6F22) の読みを、モデルに存在しない読みだけにする
+        std::fs::write(&dict_path, "漢\tケ\tコ\n").unwrap();
+
+        let config = PredictorConfig::new(dummy_model_path()).with_kanji_dict_path(&dict_path);
+        let predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("漢").unwrap();
+        std::fs::remove_file(&dict_path).ok();
+        // フォールバックが機能していれば、confidence は NEG_INFINITY 由来の
+        // sigmoid(-inf)=0.0 ではなく、モデルの素の argmax に基づく値になる。
+        assert!(result.confidences[0] > 0.0);
     }
 
     #[test]

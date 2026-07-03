@@ -276,12 +276,17 @@ fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
     let stdout = io::stdout();
     let mut out = stdout.lock();
 
+    // 1行だけ不正 (例: 不正な UTF-8 バイト列) でも、それ以降の正常な行の
+    // 処理を継続する。ストリーム全体を打ち切らず、その行だけ警告してスキップする。
+    let mut had_error = false;
+
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(l) => l,
             Err(e) => {
                 eprintln!("入力エラー: {e}");
-                return ExitCode::FAILURE;
+                had_error = true;
+                continue;
             }
         };
 
@@ -334,5 +339,9 @@ fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
         }
     }
 
-    ExitCode::SUCCESS
+    if had_error {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }

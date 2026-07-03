@@ -215,6 +215,17 @@ pub fn get_char_type(c: char) -> CharType {
         return CharType::Kanji;
     }
 
+    // --- CJK統合漢字拡張B〜F・I (U+20000–U+2EE5F、サロゲートペア必須) ---
+    // 拡張B (𠮟 U+20B9F 等、人名・地名用漢字を含む) が実用上重要。
+    if (0x20000..=0x2EE5F).contains(&cp) {
+        return CharType::Kanji;
+    }
+
+    // --- CJK統合漢字拡張G・H (U+30000–U+323AF、サロゲートペア必須) ---
+    if (0x30000..=0x323AF).contains(&cp) {
+        return CharType::Kanji;
+    }
+
     // --- 漢字繰り返し符号 (U+3005 々, U+303B 〻) ---
     // CJK Symbols and Punctuation ブロック内のため範囲判定では拾えない。
     if matches!(c, '々' | '〻') {
@@ -416,5 +427,24 @@ mod tests {
     fn other() {
         // 絵文字 (BMP外) は OTHER
         assert_eq!(get_char_type('🐕'), CharType::Other);
+    }
+
+    #[test]
+    fn kanji_extension_b() {
+        // 𠮟る の「𠮟」(U+20B9F、人名・地名用漢字) は拡張B
+        assert_eq!(get_char_type('\u{20B9F}'), CharType::Kanji);
+    }
+
+    #[test]
+    fn kanji_extension_g_h() {
+        assert_eq!(get_char_type('\u{30000}'), CharType::Kanji); // 拡張G 先頭
+        assert_eq!(get_char_type('\u{323AF}'), CharType::Kanji); // 拡張H 末尾
+    }
+
+    #[test]
+    fn kanji_extension_gap_is_other() {
+        // 拡張B〜F・I の直後 (U+2EE60) と 拡張G直前 (U+2FFFF) は非漢字ブロック
+        assert_eq!(get_char_type('\u{2EE60}'), CharType::Other);
+        assert_eq!(get_char_type('\u{2FFFF}'), CharType::Other);
     }
 }

@@ -71,6 +71,12 @@ def get_basic_char_category(c: str) -> CharType:
         return CharType.JAPANESE_NUMERIC
     if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF:
         return CharType.KANJI
+    # 拡張B〜F・I (サロゲートペア必須。𠮟 U+20B9F 等の人名・地名用漢字を含む拡張Bが実用上重要)
+    if 0x20000 <= cp <= 0x2EE5F:
+        return CharType.KANJI
+    # 拡張G・H (サロゲートペア必須)
+    if 0x30000 <= cp <= 0x323AF:
+        return CharType.KANJI
     if c in _KANJI_ITERATION_MARKS:
         return CharType.KANJI
     if (

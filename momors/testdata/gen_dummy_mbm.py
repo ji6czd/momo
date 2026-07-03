@@ -59,7 +59,10 @@ VOCAB = [
 # クラス1=キ: feature 0,2,3 にスコア
 # クラス2=ク: feature 0,4 にスコア
 # 値は int8 量子化済みとして直接書く
-QUANT_SCALE_READ = 0.01  # 推論時の実値 = data * 0.01
+# version 0x02 以降、量子化scaleはクラス(行)ごと。
+# あえて 3 クラスとも異なる値にして per-row scale が正しく
+# インデックスされることをテストで検証できるようにする。
+QUANT_SCALES_READ = [0.01, 0.02, 0.005]  # 推論時の実値 = data * QUANT_SCALES_READ[class_id]
 
 # CSR: 行 (クラス) ごとの非ゼロエントリ
 CSR_ROWS = [
@@ -99,7 +102,7 @@ def is_uint8_payload(ft: int) -> bool:
 def build_header() -> bytes:
     return struct.pack(
         '<4sBBBBII',
-        b'MOMO', 0x01, 0x00, 0x00, 0x00,
+        b'MOMO', 0x02, 0x00, 0x00, 0x00,
         N_CLASSES, N_FEATURES,
     )
 
@@ -134,7 +137,7 @@ def build_labels() -> bytes:
 
 
 def build_read_weights() -> bytes:
-    """CSR フォーマット: indptr + indices + data"""
+    """CSR フォーマット: quant_scale[n_classes] + indptr + indices + data"""
     indptr = [0]
     indices = []
     data = []
@@ -146,7 +149,7 @@ def build_read_weights() -> bytes:
 
     n_nonzero = len(data)
     buf = bytearray()
-    buf += struct.pack('<f', QUANT_SCALE_READ)
+    buf += struct.pack(f'<{N_CLASSES}f', *QUANT_SCALES_READ)
     buf += struct.pack('<I', n_nonzero)
     buf += struct.pack(f'<{len(indptr)}I', *indptr)
     buf += struct.pack(f'<{n_nonzero}I', *indices)

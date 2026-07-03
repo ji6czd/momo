@@ -41,7 +41,8 @@ pub type VocabEntry = (FeatureKey, u32);
 ///
 /// - `csc_colptr[f]..csc_colptr[f+1]` が 特徴量 `f` の非ゼロ要素のインデックス範囲
 /// - `csc_rowind[j]` が 非ゼロ要素の行インデックス (= class_id)
-/// - `csc_data[j]` が int8 量子化された重み値（実値は `csc_data[j] * read_scale`）
+/// - `csc_data[j]` が int8 量子化された重み値
+///   （実値は `csc_data[j] * read_scale[csc_rowind[j]]`。scale はクラスごと）
 ///
 /// 推論時は「アクティブな特徴量ID列」が分かっているので、その列だけを
 /// 走査して全クラスのスコアに加算する。
@@ -57,8 +58,9 @@ pub struct MomoModel {
     pub(crate) read_classes: Vec<String>,
 
     // --- 読みモデル重み (CSC・int8 量子化) ---
-    /// 量子化スケール係数 (実値 = `csc_data[j] * read_scale`)
-    pub(crate) read_scale: f32,
+    /// クラスごとの量子化スケール係数 (size: `n_classes`)
+    /// 実値 = `csc_data[j] * read_scale[csc_rowind[j]]`
+    pub(crate) read_scale: Vec<f32>,
     /// CSC 列ポインタ (size: `n_features + 1`)
     pub(crate) csc_colptr: Vec<u32>,
     /// CSC 行インデックス = クラスID (size: `n_nonzero`)
@@ -129,16 +131,18 @@ impl MomoModel {
 impl Default for MomoModel {
     /// C++ 版と同じ初期値で構築する。
     ///
-    /// 特に `read_scale` と `boundary_scale` は `1.0` で初期化する
+    /// 特に `boundary_scale` は `1.0` で初期化する
     /// (C++ 版の `float read_scale = 1.0f;` と一致)。
     /// 実際には loader がファイルから値を読み込んで上書きするが、
     /// 初期値が `0.0` だと万一上書きされない場合に全スコアが消失するため
     /// 安全側の初期値として `1.0` を採用する。
+    /// `read_scale` はクラスごとの配列のため、loader が必ず `n_classes` 件で
+    /// 埋めることを前提に空 `Vec` で初期化する。
     fn default() -> Self {
         Self {
             vocab: Vec::new(),
             read_classes: Vec::new(),
-            read_scale: 1.0,
+            read_scale: Vec::new(),
             csc_colptr: Vec::new(),
             csc_rowind: Vec::new(),
             csc_data: Vec::new(),
@@ -167,8 +171,8 @@ mod tests {
         let m = MomoModel::default();
         assert_eq!(m.n_classes, 0);
         assert_eq!(m.n_features, 0);
-        // C++ 版の `float read_scale = 1.0f;` と一致
-        assert_eq!(m.read_scale, 1.0);
+        // read_scale はクラスごとの配列。loader が埋める前は空。
+        assert!(m.read_scale.is_empty());
         assert_eq!(m.boundary_scale, 1.0);
         assert_eq!(m.boundary_intercept, [0.0, 0.0]);
         assert!(m.vocab.is_empty());

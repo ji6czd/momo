@@ -767,9 +767,9 @@ impl Predictor {
         int_scores.fill(0);
         self.compute_read_scores(feat_ids, int_scores);
 
-        let scale = self.model.read_scale;
         for cls in 0..n_cls {
-            scores[cls] = self.model.intercept_read[cls] + (int_scores[cls] as f32) * scale;
+            scores[cls] = self.model.intercept_read[cls]
+                + (int_scores[cls] as f32) * self.model.read_scale[cls];
         }
 
         // 漢字辞書制約付き argmax

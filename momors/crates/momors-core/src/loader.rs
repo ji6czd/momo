@@ -9,7 +9,7 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x01
+//!   version      : u8      0x02
 //!   _reserved    : u8[3]   0x00 × 3
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
@@ -25,8 +25,8 @@
 //!   len          : u8
 //!   utf8         : u8[len]
 //!
-//! [読みモデル重み (CSR・int8 量子化)]
-//!   quant_scale  : f32 LE
+//! [読みモデル重み (CSR・int8 量子化・クラスごとscale)]
+//!   quant_scale  : f32 × n_classes  クラス(行)ごとの量子化スケール
 //!   n_nonzero    : u32 LE
 //!   indptr       : u32 × (n_classes + 1)
 //!   indices      : u32 × n_nonzero
@@ -101,7 +101,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     }
 
     let version = reader.read_u8().map_err(io_err(path))?;
-    if version != 0x01 {
+    if version != 0x02 {
         return Err(Error::UnsupportedVersion { version });
     }
 
@@ -218,13 +218,13 @@ fn read_labels<R: Read>(reader: &mut R, n_classes: u32, path: &Path) -> Result<V
 }
 
 /// 読みモデル重み (CSR 形式) を読む。
-/// 戻り値: `(quant_scale, indptr, indices, data)`
+/// 戻り値: `(quant_scale[n_classes], indptr, indices, data)`
 fn read_csr_weights<R: Read>(
     reader: &mut R,
     n_classes: u32,
     path: &Path,
-) -> Result<(f32, Vec<u32>, Vec<u32>, Vec<i8>)> {
-    let scale = reader.read_f32::<LittleEndian>().map_err(io_err(path))?;
+) -> Result<(Vec<f32>, Vec<u32>, Vec<u32>, Vec<i8>)> {
+    let scales = read_f32_vec(reader, n_classes as usize, path)?;
     let n_nonzero = reader.read_u32::<LittleEndian>().map_err(io_err(path))? as usize;
 
     let indptr_len = n_classes as usize + 1;
@@ -251,7 +251,7 @@ fn read_csr_weights<R: Read>(
 
     let data = read_i8_vec(reader, n_nonzero, path)?;
 
-    Ok((scale, indptr, indices, data))
+    Ok((scales, indptr, indices, data))
 }
 
 /// f32 ベクタを読む。
@@ -413,8 +413,11 @@ mod tests {
     fn load_dummy_read_weights() {
         let model = load(dummy_path()).unwrap();
 
-        // QUANT_SCALE_READ = 0.01
-        assert!((model.read_scale - 0.01).abs() < 1e-6);
+        // QUANT_SCALES_READ = [0.01, 0.02, 0.005]（クラスごと）
+        assert_eq!(model.read_scale.len(), 3);
+        assert!((model.read_scale[0] - 0.01).abs() < 1e-6);
+        assert!((model.read_scale[1] - 0.02).abs() < 1e-6);
+        assert!((model.read_scale[2] - 0.005).abs() < 1e-6);
 
         // CSC 形式の検証。
         // 期待される CSR:

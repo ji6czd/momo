@@ -24,6 +24,19 @@ class TestGetCharType:
         assert get_char_type("漢") == "KANJI"
         assert get_char_type("字") == "KANJI"
 
+    def test_kanji_extension_b(self):
+        # 𠮟る の「𠮟」(U+20B9F、人名・地名用漢字) は拡張B
+        assert get_char_type("\U00020B9F") == "KANJI"
+
+    def test_kanji_extension_g_h(self):
+        assert get_char_type("\U00030000") == "KANJI"  # 拡張G 先頭
+        assert get_char_type("\U000323AF") == "KANJI"  # 拡張H 末尾
+
+    def test_kanji_extension_gap_is_other(self):
+        # 拡張B〜F・I の直後と拡張G直前は非漢字ブロック
+        assert get_char_type("\U0002EE60") == "OTHER"
+        assert get_char_type("\U0002FFFF") == "OTHER"
+
     def test_alpha(self):
         assert get_char_type("A") == "ALPHA"
         assert get_char_type("z") == "ALPHA"

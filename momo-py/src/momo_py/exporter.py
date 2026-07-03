@@ -22,8 +22,8 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
   len          : uint8      UTF-8バイト長
   utf8         : uint8[len] ラベル文字列（UTF-8）
 
-[読みモデル重み（CSR・int8量子化）]
-  quant_scale  : float32    量子化スケール係数
+[読みモデル重み（CSR・int8量子化・クラスごとscale）]
+  quant_scale  : float32 × n_classes   クラス(行)ごとの量子化スケール係数
   n_nonzero    : uint32     非ゼロ要素数
   indptr       : uint32 × (n_classes + 1)
   indices      : uint32 × n_nonzero
@@ -342,6 +342,34 @@ def quantize_to_int8(
     return scale, quantized
 
 
+def quantize_csr_per_row_to_int8(
+    csr,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    CSR 行列を行 (クラス) ごとに独立した scale で int8 量子化する。
+
+    全体で 1 つの scale を使う `quantize_to_int8` と違い、行ごとに
+    |最大値| / 127.0 を計算するため、重みの大きさがクラス間で偏っていても
+    各クラスがほぼフルの int8 分解能を使える。
+
+    戻り値: (scales[n_classes], int8_data[n_nonzero])
+    推論時のスコア: data[j] * scales[row(j)] ≈ 元の float32 値
+    """
+    n_rows = csr.shape[0]
+    data_f32 = csr.data.astype(np.float32)
+    quantized = np.zeros_like(data_f32, dtype=np.int8)
+    scales = np.zeros(n_rows, dtype=np.float32)
+    for row in range(n_rows):
+        start, end = csr.indptr[row], csr.indptr[row + 1]
+        if start == end:
+            scales[row] = 1.0
+            continue
+        scale, row_int8 = quantize_to_int8(data_f32[start:end])
+        scales[row] = scale
+        quantized[start:end] = row_int8
+    return scales, quantized
+
+
 # =====================================================================
 # エクスポート本体
 # =====================================================================
@@ -404,15 +432,14 @@ def export(zip_path: str, out_path: str) -> None:
         label_bytes.append(len(encoded))
         label_bytes += encoded
 
-    # --- 読みモデル重み（CSR → int8量子化）---
+    # --- 読みモデル重み（CSR → int8量子化・クラスごとscale）---
     print("🔨 読みモデル重み量子化中...")
     # coef_sparse は CSR (n_classes × n_features)
     csr = coef_sparse.tocsr()
-    data_f32 = csr.data.astype(np.float32)
-    scale_r, data_int8 = quantize_to_int8(data_f32)
+    scales_r, data_int8 = quantize_csr_per_row_to_int8(csr)
 
     read_weight_bytes = bytearray()
-    read_weight_bytes += struct.pack('<f', scale_r)
+    read_weight_bytes += struct.pack(f'<{n_classes}f', *scales_r.tolist())
     read_weight_bytes += struct.pack('<I', len(data_int8))
     read_weight_bytes += struct.pack('<' + 'I' * (n_classes + 1), *csr.indptr.tolist())
     read_weight_bytes += struct.pack('<' + 'I' * len(csr.indices), *csr.indices.tolist())
@@ -441,10 +468,11 @@ def export(zip_path: str, out_path: str) -> None:
     boundary_bytes += struct.pack('<ff', b_intercept[0], b_intercept[1])
 
     # --- ファイルヘッダ ---
+    # version 0x02: 読みモデルの量子化scaleをクラスごと(n_classes個)に変更
     header = struct.pack(
         '<4sBBBBII',
         b'MOMO',          # magic
-        0x01,             # version
+        0x02,             # version
         0x00, 0x00, 0x00, # reserved
         n_classes,
         n_features,
@@ -464,7 +492,7 @@ def export(zip_path: str, out_path: str) -> None:
     print(f"✅ 完了: {size_mb:.1f} MB")
     print(f"   語彙テーブル  : {len(vocab_bytes):>10,} bytes")
     print(f"   読みラベル    : {len(label_bytes):>10,} bytes")
-    print(f"   読みモデル重み: {len(read_weight_bytes):>10,} bytes  (scale={scale_r:.6f})")
+    print(f"   読みモデル重み: {len(read_weight_bytes):>10,} bytes  (scale: min={scales_r.min():.6f} max={scales_r.max():.6f})")
     print(f"   読み intercept: {len(intercept_r_bytes):>10,} bytes")
     print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (scale={scale_b:.6f})")
 

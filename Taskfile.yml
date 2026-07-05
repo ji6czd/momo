@@ -245,11 +245,11 @@ tasks:
       - cp "{{.RUST_BIN}}/momors_ffi.dll"                 "{{.STAGE}}/bin/"
       - cp "{{.GUI_BIN}}"/*.* "{{.STAGE}}/bin/"
       - cp "{{.EDITOR_BIN}}"/*.* "{{.STAGE}}/bin/"
+      # 辞書類（single_character_dic.tsv / person_name_dic.tsv）は
+      # .mbm に同梱されるため配布しない
       - cp "{{.DATA}}/basic_data_4.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"
-      - cp "{{.DATA}}/single_character_dic.tsv"        "{{.STAGE}}/data/"
-      - cp "{{.DATA}}/person_name_dic.tsv"             "{{.STAGE}}/data/"
 
   dist:msi:
     desc: Build Windows installer (.msi) — requires WiX Toolset v3

@@ -5,7 +5,13 @@ trainer.py の単体テスト
   - KUTOUTEN 定数
 """
 import pytest
-from momo_py.trainer import is_suspicious, process_line_to_tsv, KUTOUTEN
+from momo_py.trainer import (
+    KUTOUTEN,
+    _load_sentences,
+    create_data,
+    is_suspicious,
+    process_line_to_tsv,
+)
 
 
 # ------------------------------------------------------------------ #
@@ -99,13 +105,14 @@ class TestProcessLineToTsv:
         assert any("+S" in lbl for lbl in labels)
 
     def test_single_char_row_format(self):
-        # 1文字は「原文\t読み\t文字種\t原文位置」の4列で返る
+        # 1文字は「原文\t読み\t文字種\t原文位置\t人名フラグ」の5列で返る
         rows = process_line_to_tsv("あ\tア", 1)
         cols = rows[0].split("\t")
         assert cols[0] == "あ"
         assert cols[1] == "ア"
         assert cols[2] == "HIRAGANA"
         assert cols[3] == "0"
+        assert cols[4] == "O"
 
     def test_compound_mora_is_single_row(self):
         # 拗音「きゃ」は1ユニット → LABEL_CONTINUE を使わず1行で格納される
@@ -113,6 +120,93 @@ class TestProcessLineToTsv:
         assert len(rows) == 2
         assert rows[0].startswith("きゃ\t")
         assert rows[1].startswith("く\t")
+
+    def test_name_marks(self):
+        # {…} マークは除去され、人名フラグ列（B/I/O）が付与される
+        rows = process_line_to_tsv("{佐藤}さんだ。\tサ/トー/ /サ/ン/ダ/。", 1)
+        cells = [r.split("\t") for r in rows]
+        assert [c[0] for c in cells] == ["佐", "藤", "さ", "ん", "だ", "。"]
+        assert [c[4] for c in cells] == ["B", "I", "O", "O", "O", "O"]
+        # 人名と敬称の間には +S（空白）が付く
+        assert cells[1][1] == "トー+S"
+
+    def test_name_marks_surname_and_given(self):
+        rows = process_line_to_tsv(
+            "{佐藤}{太郎}さんだ。\tサ/トー/ /タ/ロー/ /サ/ン/ダ/。", 1
+        )
+        cells = [r.split("\t") for r in rows]
+        assert [c[4] for c in cells] == ["B", "I", "B", "I", "O", "O", "O", "O"]
+
+    def test_unmatched_name_mark_raises(self):
+        with pytest.raises(ValueError, match="対応の取れていない"):
+            process_line_to_tsv("{佐藤さんだ。\tサ/トー/ /サ/ン/ダ/。", 1)
+
+
+# ------------------------------------------------------------------ #
+# _load_sentences
+# ------------------------------------------------------------------ #
+class TestLoadSentences:
+    def test_space_source_char_row_is_preserved(self, tmp_path):
+        # 原文列が空白文字の行（ASCII連内のスペース）で列がずれないこと。
+        # strip() でパースすると先頭列が消え、文字種列に OrigIdx が入る
+        # 列ズレが起き、export が不正な特徴量キーで失敗する（回帰テスト）。
+        tsv = tmp_path / "data.tsv"
+        tsv.write_text(
+            "#原文\t読み\t文字種\tOrigIdx\t人名\n"
+            "N\t_\tALPHA\t0\tO\n"
+            " \t_\tALPHA\t1\tO\n"
+            "B\t_\tALPHA\t2\tO\n",
+            encoding="utf-8",
+        )
+        sentences = _load_sentences(str(tsv))
+        assert len(sentences) == 1
+        rows = sentences[0]
+        assert len(rows) == 3
+        assert rows[1][0] == " "  # 原文列に空白文字が残る
+        assert rows[1][2] == "ALPHA"  # 文字種列がずれていない
+
+    def test_sentence_split_on_blank_line(self, tmp_path):
+        tsv = tmp_path / "data.tsv"
+        tsv.write_text(
+            "あ\tア\tHIRAGANA\t0\tO\n\nい\tイ\tHIRAGANA\t0\tO\n",
+            encoding="utf-8",
+        )
+        sentences = _load_sentences(str(tsv))
+        assert len(sentences) == 2
+
+
+# ------------------------------------------------------------------ #
+# create_data（人名辞書の自動生成）
+# ------------------------------------------------------------------ #
+class TestCreateDataNameDict:
+    def test_creates_name_dict(self, tmp_path):
+        raw = tmp_path / "basic_raw.tsv"
+        raw.write_text(
+            "{佐藤}さんだ。\tサ/トー/ /サ/ン/ダ/。\n"
+            "{佐藤}{花子}さんだ。\tサ/トー/ /ハナ/コ/ /サ/ン/ダ/。\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "basic_data.tsv"
+        create_data(str(raw), str(out))
+
+        tsv = out.read_text(encoding="utf-8")
+        assert tsv.splitlines()[0] == "#原文\t読み\t文字種\tOrigIdx\t人名"
+        assert "佐\tサ\tKANJI\t0\tB" in tsv
+        assert "藤\tトー+S\tKANJI\t1\tI" in tsv
+
+        dict_path = tmp_path / "person_name_dic.tsv"
+        assert dict_path.exists()
+        content = dict_path.read_text(encoding="utf-8")
+        # 読みは +S 除去済みのユニット別 '/' 区切りで自動抽出される
+        assert "佐藤\tサ/トー\t2" in content
+        assert "花子\tハナ/コ\t1" in content
+
+    def test_no_marks_no_dict_file(self, tmp_path):
+        raw = tmp_path / "basic_raw.tsv"
+        raw.write_text("東京だ。\tトー/キョー/ダ/。\n", encoding="utf-8")
+        out = tmp_path / "basic_data.tsv"
+        create_data(str(raw), str(out))
+        assert not (tmp_path / "person_name_dic.tsv").exists()
 
 
 # ------------------------------------------------------------------ #

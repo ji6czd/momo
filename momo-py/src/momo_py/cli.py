@@ -136,6 +136,12 @@ def main():
         help="単一漢字用辞書ファイルのパス（省略時は実行ファイルと同じ場所またはパッケージ内蔵の辞書を使用）",
     )
     predict_parser.add_argument(
+        "--name-dict",
+        dest="name_dict",
+        default=None,
+        help="人名辞書ファイルのパス（人名B/Iフラグ特徴量。省略時はモデルまたは実行ファイルと同じ場所の person_name_dic.tsv を自動検出）",
+    )
+    predict_parser.add_argument(
         "--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する"
     )
     predict_parser.add_argument(
@@ -190,6 +196,12 @@ def main():
 
     create_data_parser = subparsers.add_parser("createdata")
     create_data_parser.add_argument("--raw", required=True)
+    create_data_parser.add_argument(
+        "--name-dict",
+        dest="name_dict",
+        default=None,
+        help="{…} マークから抽出した人名辞書の出力先（省略時は出力TSVと同じディレクトリの person_name_dic.tsv）",
+    )
 
     trainer_parser = subparsers.add_parser("train")
     trainer_parser.add_argument("--tsv", required=True)
@@ -220,6 +232,12 @@ def main():
         default=4,
         help="読みモデルの One-vs-Rest 学習を並列実行するワーカ数（デフォルト: 4）",
     )
+    trainer_parser.add_argument(
+        "--name-dict",
+        dest="name_dict",
+        default=None,
+        help="人名辞書ファイルのパス（省略時はTSVと同じディレクトリの person_name_dic.tsv を自動検出）",
+    )
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -228,7 +246,7 @@ def main():
     if args.command == "createdata":
         out = args.raw.rsplit("_", 1)[0] + "_data.tsv"
         try:
-            create_data(args.raw, out)
+            create_data(args.raw, out, name_dict_path=args.name_dict)
         except ValueError as e:
             print(f"\n❌ Error: {e}", file=sys.stderr)
             sys.exit(1)
@@ -241,23 +259,34 @@ def main():
             dry_run=args.dry_run,
             use_svc=not args.sgd,
             n_jobs=args.jobs,
+            name_dict=args.name_dict,
         )
 
     elif args.command == "predict":
         # --trace なしのときは explain_top_n=0 にして計算を省略
         explain_top_n = args.explain if args.trace else 0
 
+        exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+
         single_dict_path = args.single_dict
         if single_dict_path is None:
-            exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
             candidate = os.path.join(exe_dir, "single_character_dic.tsv")
             if os.path.isfile(candidate):
                 single_dict_path = candidate
+
+        # 人名辞書: 明示指定がなければ実行ファイルと同じ場所を探す
+        # （モデルファイルと同じディレクトリは Predictor 側が自動検出する）
+        name_dict_path = args.name_dict
+        if name_dict_path is None:
+            candidate = os.path.join(exe_dir, "person_name_dic.tsv")
+            if os.path.isfile(candidate):
+                name_dict_path = candidate
 
         config = PredictorConfig(
             model_path=args.model,
             custom_dict_path=args.custom_dict,
             single_kanji_dict_path=single_dict_path,
+            person_name_dict_path=name_dict_path,
             explain_top_n=explain_top_n,
             window=args.window,
         )

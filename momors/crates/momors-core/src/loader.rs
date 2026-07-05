@@ -9,7 +9,7 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x02
+//!   version      : u8      0x03
 //!   _reserved    : u8[3]   0x00 × 3
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
@@ -40,7 +40,19 @@
 //!   data         : i8 × n_features
 //!   intercept    : f32 × 2
 //!
+//! [人名辞書テーブル]        version 0x03 で追加、0x04 で読みを追加
+//!   n_names      : u32 LE  人名エントリ数（辞書なしモデルは 0）
+//!   以下 n_names エントリ:
+//!     len        : u8
+//!     utf8       : u8[len] 表層形 (UTF-8)
+//!     n_readings : u8      ユニット別読みの個数（0 = 読みなし）
+//!     以下 n_readings 個:
+//!       len      : u8
+//!       utf8     : u8[len] ユニット読み (カタカナ、UTF-8)
 //! ```
+//!
+//! version 0x03 以前は読めない。フォーマット互換性を装って誤動作するより
+//! 明示的にエラーにする方針（人名特徴量・読みの有無が精度に直結するため）。
 //!
 //! ## CSR → CSC 変換
 //!
@@ -107,7 +119,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     }
 
     let version = reader.read_u8().map_err(io_err(path))?;
-    if version != 0x02 {
+    if version != 0x04 {
         return Err(Error::UnsupportedVersion { version });
     }
 
@@ -168,6 +180,10 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
         reader.read_f32::<LittleEndian>().map_err(io_err(path))?,
         reader.read_f32::<LittleEndian>().map_err(io_err(path))?,
     ];
+
+    // ---- 人名辞書テーブル (version 0x04: 表層形 + ユニット別読み) ----
+    let names = read_name_dict(reader, path)?;
+    model.name_dict = crate::name_dict::build_name_index(&names);
 
     // ---- 後処理: vocab を Rust の Ord で再ソート ----
     // C++ 版とソート順が異なるため、binary_search できるように改めて整列する。
@@ -304,6 +320,50 @@ fn read_csr_weights<R: Read>(
     let data = read_i8_vec(reader, n_nonzero, path)?;
 
     Ok((scales, indptr, indices, data))
+}
+
+/// 人名辞書テーブルを読む。
+///
+/// 表層形は Python 側 exporter が正規化済みだが、入力テキストの正規化
+/// （[`normalize_compat_ideographs`]）と確実に揃えるためここでも適用する。
+///
+/// [`normalize_compat_ideographs`]: crate::normalize::normalize_compat_ideographs
+fn read_name_dict<R: Read>(
+    reader: &mut R,
+    path: &Path,
+) -> Result<Vec<(String, Option<Vec<String>>)>> {
+    let n_names = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+    if n_names > MAX_REASONABLE_COUNT {
+        return Err(Error::CorruptModel {
+            reason: format!("n_names={n_names} が大きすぎます（上限 {MAX_REASONABLE_COUNT}）"),
+        });
+    }
+
+    let mut names = Vec::with_capacity(n_names as usize);
+    let mut buf = Vec::new();
+    let mut read_str = |reader: &mut R, buf: &mut Vec<u8>| -> Result<String> {
+        let len = reader.read_u8().map_err(io_err(path))? as usize;
+        buf.clear();
+        buf.resize(len, 0u8);
+        reader.read_exact(buf).map_err(io_err(path))?;
+        String::from_utf8(buf.clone()).map_err(|e| Error::InvalidLabelUtf8 { source: e })
+    };
+    for _ in 0..n_names {
+        let surface = read_str(reader, &mut buf)?;
+        let surface = crate::normalize::normalize_compat_ideographs(&surface);
+        let n_readings = reader.read_u8().map_err(io_err(path))? as usize;
+        let readings = if n_readings == 0 {
+            None
+        } else {
+            let mut readings = Vec::with_capacity(n_readings);
+            for _ in 0..n_readings {
+                readings.push(read_str(reader, &mut buf)?);
+            }
+            Some(readings)
+        };
+        names.push((surface, readings));
+    }
+    Ok(names)
 }
 
 /// f32 ベクタを読む。
@@ -528,11 +588,60 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn old_version_v2_returns_error() {
+        // 旧バージョンは明示的にエラー（人名辞書セクションが無く、黙って読めると
+        // 人名特徴量・読みなしで誤動作するため）
+        let bad_data = b"MOMO\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut cursor = std::io::Cursor::new(&bad_data[..]);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedVersion { version: 0x02 })
+        ));
+    }
+
+    #[test]
+    fn old_version_v3_returns_error() {
+        // v3（読みなし人名テーブル）も読めない
+        let bad_data = b"MOMO\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut cursor = std::io::Cursor::new(&bad_data[..]);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedVersion { version: 0x03 })
+        ));
+    }
+
+    #[test]
+    fn load_dummy_name_dict() {
+        let model = load(dummy_path()).unwrap();
+        // gen_dummy_mbm.py の NAME_DICT = [("佐藤", ["サ","トー"]), ("太郎", None)]
+        // インデックスは先頭コードポイント引き
+        let sa = model
+            .name_dict
+            .get(&('佐' as u32))
+            .expect("佐藤 が載っていること");
+        assert_eq!(sa.len(), 1);
+        assert_eq!(sa[0].units.len(), 2); // 佐・藤 の2ユニット
+        assert_eq!(
+            sa[0].readings.as_deref(),
+            Some(&["サ".to_string(), "トー".to_string()][..])
+        );
+        // 太郎 は読みなしエントリ
+        let ta = model
+            .name_dict
+            .get(&('太' as u32))
+            .expect("太郎 が載っていること");
+        assert_eq!(ta[0].readings, None);
+        assert!(!model.name_dict.contains_key(&('鈴' as u32)));
+    }
+
     /// ヘッダのみ (16 bytes) を組み立てるヘルパー。
     fn build_header_bytes(n_classes: u32, n_features: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"MOMO");
-        bytes.push(0x02);
+        bytes.push(0x04);
         bytes.extend_from_slice(&[0, 0, 0]); // reserved
         bytes.extend_from_slice(&n_classes.to_le_bytes());
         bytes.extend_from_slice(&n_features.to_le_bytes());

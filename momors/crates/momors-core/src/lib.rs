@@ -37,6 +37,7 @@ mod feature;
 mod featurize;
 mod loader;
 mod model;
+mod name_dict;
 mod normalize;
 mod numeric;
 

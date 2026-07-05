@@ -6,7 +6,7 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 
 [ファイルヘッダ]          16 bytes
   magic        : uint8[4]   "MOMO"
-  version      : uint8      0x01
+  version      : uint8      0x04
   _reserved    : uint8[3]   0x00 x3
   n_classes    : uint32     読みラベル数
   n_features   : uint32     特徴量次元数（語彙サイズ）
@@ -36,6 +36,28 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
   quant_scale  : float32
   data         : int8 × n_features   （クラス1の重みベクトル）
   intercept    : float32 × 2         （クラス0, クラス1）
+
+[人名辞書テーブル]        version 0x03 で追加、0x04 で読みを追加
+  n_names      : uint32     人名エントリ数（辞書なしモデルは 0）
+  以下 n_names エントリ:
+    len        : uint8      UTF-8バイト長
+    utf8       : uint8[len] 表層形（UTF-8）
+    n_readings : uint8      ユニット別読みの個数（0=読みなし。
+                            非0なら表層形のユニット数と一致する）
+    以下 n_readings 個:
+      len      : uint8      UTF-8バイト長
+      utf8     : uint8[len] ユニット読み（カタカナ、UTF-8）
+  推論側はこの辞書に対して get_units() 相当のユニット単位で最長一致を行い、
+  文字ごとの人名フラグ（1=B: スパン先頭, 2=I: 継続）を NAME_FLAG_* 特徴量
+  として発火させる（Python 側 name_dict.compute_name_matches と同一の手順）。
+  読みが登録されているスパンでは、読みモデルが低自信度のとき辞書読みで
+  置換するフォールバックに使う（人名の読みは文脈で変化しないため固定辞書）。
+
+バージョン履歴
+  0x01: 初版
+  0x02: 読みモデルの量子化scaleをクラスごと(n_classes個)に変更
+  0x03: 人名辞書テーブルと NAME_FLAG_* 特徴量（0xC3-0xC5）を追加
+  0x04: 人名辞書テーブルにユニット別読みを追加（低自信度フォールバック用）
 """
 
 import re
@@ -48,6 +70,8 @@ from typing import Tuple
 
 import joblib
 import numpy as np
+
+from .name_dict import NAME_DICT_FILENAME, parse_name_dict_text
 
 
 # =====================================================================
@@ -131,6 +155,9 @@ class FT:
     KANJI_RUN_LEN                 = 0xC0   # uint8
     JAPANESE_NUMERIC_RUN_LEN      = 0xC1
     PREV_JAPANESE_NUMERIC_RUN_LEN = 0xC2
+    NAME_FLAG_SELF                = 0xC3   # uint8: 1=B, 2=I
+    NAME_FLAG_PREV1               = 0xC4
+    NAME_FLAG_NEXT1               = 0xC5
 
 
 def chartype_count(ft: int) -> int:
@@ -155,6 +182,9 @@ def is_uint8_payload(ft: int) -> bool:
 
 # run_len の文字列値 → uint8
 _RUN_LEN_MAP = {"1": 1, "2": 2, "3": 3, "4": 4, "5+": 5}
+
+# 人名フラグの文字列値 → uint8
+_NAME_FLAG_MAP = {"B": 1, "I": 2}
 
 
 def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
@@ -185,6 +215,19 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
     m = re.fullmatch(r'jnum_run_p1=(.+)', key)
     if m:
         return FT.PREV_JAPANESE_NUMERIC_RUN_LEN, [], [], _RUN_LEN_MAP[m.group(1)]
+
+    # --- 人名フラグ系（uint8ペイロード: 1=B, 2=I）---
+    m = re.fullmatch(r'name_s=([BI])', key)
+    if m:
+        return FT.NAME_FLAG_SELF, [], [], _NAME_FLAG_MAP[m.group(1)]
+
+    m = re.fullmatch(r'name_p1=([BI])', key)
+    if m:
+        return FT.NAME_FLAG_PREV1, [], [], _NAME_FLAG_MAP[m.group(1)]
+
+    m = re.fullmatch(r'name_n1=([BI])', key)
+    if m:
+        return FT.NAME_FLAG_NEXT1, [], [], _NAME_FLAG_MAP[m.group(1)]
 
     # --- type_tri （CharType×3）---
     m = re.fullmatch(r'type_tri_p2_p1_s=(.+)-(.+)-(.+)', key)
@@ -381,12 +424,18 @@ def export(zip_path: str, out_path: str) -> None:
     # --- モデルのロード ---
     print(f"📦 モデル読み込み中: {zip_path}")
     tmp_dir = tempfile.mkdtemp()
+    name_entries: list = []  # [(表層形, ユニット別読み or None), ...]
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             import json
             version_info = json.loads(zf.read("version_info.json").decode("utf-8"))
             bundle_name = version_info["model_bundle"]
             zf.extract(bundle_name, tmp_dir)
+            # 学習時に同梱された人名辞書（なければ空 = n_names 0 で書き出す）
+            if NAME_DICT_FILENAME in zf.namelist():
+                name_entries = parse_name_dict_text(
+                    zf.read(NAME_DICT_FILENAME).decode("utf-8")
+                )
         bundle = joblib.load(os.path.join(tmp_dir, bundle_name))
     finally:
         import shutil
@@ -413,7 +462,15 @@ def export(zip_path: str, out_path: str) -> None:
     print("🔨 語彙テーブル変換中...")
     vocab_bytes = bytearray()
     for key in sorted_keys:
-        ft, ct_vals, cp_vals, u8_val = parse_feature_key(key)
+        try:
+            ft, ct_vals, cp_vals, u8_val = parse_feature_key(key)
+        except (ValueError, KeyError) as e:
+            # KeyError は type_* 系のペイロードが CharType 名でない場合など。
+            # 学習データの列ズレ等が原因なので、キーを添えて原因調査できるようにする。
+            raise ValueError(
+                f"特徴量キーの解析に失敗しました: {key!r} ({e!r})。"
+                "学習TSVの列ズレや不正な文字種が混入していないか確認してください。"
+            ) from None
         vocab_bytes.append(ft)
         for ct in ct_vals:
             vocab_bytes.append(ct)
@@ -467,12 +524,32 @@ def export(zip_path: str, out_path: str) -> None:
     boundary_bytes += bytes(b_int8.tobytes())
     boundary_bytes += struct.pack('<ff', b_intercept[0], b_intercept[1])
 
+    # --- 人名辞書テーブル ---
+    print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
+    name_dict_bytes = bytearray()
+    name_dict_bytes += struct.pack('<I', len(name_entries))
+    for surface, readings in name_entries:
+        encoded = surface.encode("utf-8")
+        assert len(encoded) <= 255, f"人名が長すぎます: {surface!r}"
+        name_dict_bytes.append(len(encoded))
+        name_dict_bytes += encoded
+        if readings is None:
+            name_dict_bytes.append(0)
+        else:
+            assert len(readings) <= 255
+            name_dict_bytes.append(len(readings))
+            for reading in readings:
+                r_enc = reading.encode("utf-8")
+                assert len(r_enc) <= 255, f"読みが長すぎます: {reading!r}"
+                name_dict_bytes.append(len(r_enc))
+                name_dict_bytes += r_enc
+
     # --- ファイルヘッダ ---
-    # version 0x02: 読みモデルの量子化scaleをクラスごと(n_classes個)に変更
+    # version 0x04: 人名辞書テーブルにユニット別読みを追加
     header = struct.pack(
         '<4sBBBBII',
         b'MOMO',          # magic
-        0x02,             # version
+        0x04,             # version
         0x00, 0x00, 0x00, # reserved
         n_classes,
         n_features,
@@ -487,6 +564,7 @@ def export(zip_path: str, out_path: str) -> None:
         f.write(read_weight_bytes)
         f.write(intercept_r_bytes)
         f.write(boundary_bytes)
+        f.write(name_dict_bytes)
 
     size_mb = os.path.getsize(out_path) / 1024 / 1024
     print(f"✅ 完了: {size_mb:.1f} MB")
@@ -495,6 +573,7 @@ def export(zip_path: str, out_path: str) -> None:
     print(f"   読みモデル重み: {len(read_weight_bytes):>10,} bytes  (scale: min={scales_r.min():.6f} max={scales_r.max():.6f})")
     print(f"   読み intercept: {len(intercept_r_bytes):>10,} bytes")
     print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (scale={scale_b:.6f})")
+    print(f"   人名辞書      : {len(name_dict_bytes):>10,} bytes  ({len(name_entries)} エントリ)")
 
 
 # =====================================================================

@@ -2,6 +2,7 @@ import gc
 import json
 import os
 import io
+import sys
 import zipfile
 from dataclasses import dataclass, field
 from typing import List, Tuple, Set, Dict, Optional, Any
@@ -24,6 +25,14 @@ from .utils import (
     CharType,
     normalize_compat_ideographs,
     convert_to_katakana,
+)
+from .name_dict import (
+    NAME_DICT_FILENAME,
+    NameIndex,
+    build_name_index,
+    compute_name_matches,
+    load_name_dict,
+    parse_name_dict_text,
 )
 from .pybraille import to_braille, to_jp_braille
 
@@ -179,6 +188,11 @@ class PredictorConfig:
         window: 特徴量ウィンドウサイズ（4, 5, 7）
         single_kanji_dict_path: 単一漢字辞書jsonのパス（省略可）
         custom_dict_path: カスタム辞書ファイルのパス（省略可）
+        person_name_dict_path: 人名辞書ファイルのパス（省略可）。
+            指定すると辞書マッチによる人名B/Iフラグ特徴量を付与する。
+            省略時はモデルファイルと同じディレクトリの person_name_dic.tsv を
+            自動検出する。人名特徴量付きで学習したモデルには、学習時と
+            同じ辞書を渡すこと。
         numeric_confidence_threshold: JAPANESE_NUMERICルールベース変換を発動させる自信度の上限
         explain_top_n: トレース時に表示する特徴量寄与度の上位件数（0=無効）
     """
@@ -187,6 +201,7 @@ class PredictorConfig:
     window: int = 7
     single_kanji_dict_path: Optional[str] = None
     custom_dict_path: Optional[str] = None
+    person_name_dict_path: Optional[str] = None
     numeric_confidence_threshold: float = 0.5
     explain_top_n: int = 8
 
@@ -203,6 +218,7 @@ class DecisionSource:
     FALLBACK_REPEAT = "FALLBACK_々"  # 々の繰り返し処理
     FALLBACK_KANA = "FALLBACK_KANA"  # かな直接変換フォールバック
     DICT = "DICT"  # カスタム辞書による強制置換
+    DICT_NAME = "DICT_NAME"  # 人名辞書読み（低自信度フォールバック）
     BYPASS = "BYPASS"  # ASCIIバイパス
 
 
@@ -216,6 +232,7 @@ _ANSI = {
     DecisionSource.FALLBACK_REPEAT: "\033[35m",  # マゼンタ
     DecisionSource.FALLBACK_KANA: "\033[96m",  # 明るいシアン
     DecisionSource.DICT: "\033[34m",  # 青
+    DecisionSource.DICT_NAME: "\033[94m",  # 明るい青
     DecisionSource.BYPASS: "\033[90m",  # グレー
 }
 _ANSI_RESET = "\033[0m"
@@ -259,8 +276,22 @@ def _kurai_fallback(
 # ==========================================
 # 🌟 カスタム辞書のロードとインデックス構築
 # ==========================================
-def load_custom_dict(path: str) -> Dict[str, List[str]]:
-    result: Dict[str, List[str]] = {}
+# カスタム辞書のユニット別エントリ: (読み, 直後で区切るか)
+DictUnit = Tuple[str, bool]
+
+
+def load_custom_dict(path: str) -> Dict[str, List[DictUnit]]:
+    """カスタム辞書を読み込む。
+
+    フォーマット: 表層形[TAB]読み。読みは学習データ（basic_raw.tsv）と同じ
+    記法で、ユニット別に '/' 区切り、空ブロック（`/ /`）は「直前のユニットの
+    後ろで区切る」ことを表す（例: `佐藤太郎  サ/トー/ /タ/ロー`）。
+
+    エントリ内部の境界は辞書が確定する（空ブロックの位置でだけ区切り、
+    それ以外は区切らない）。エントリ両端の境界は次に来る語に依存するため
+    境界モデルに委ねる（先頭・末尾の区切り指定はエラー）。
+    """
+    result: Dict[str, List[DictUnit]] = {}
     with open(path, encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
             line = line.rstrip("\n")
@@ -272,24 +303,55 @@ def load_custom_dict(path: str) -> Dict[str, List[str]]:
                     f"カスタム辞書 {path} の {lineno} 行目の形式が不正です: {line!r}"
                 )
             surface, reading_str = parts
-            readings = [
+            blocks = [
                 b.replace(r"\/", "/") for b in split_on_unescaped_slash(reading_str)
             ]
+
+            units: List[DictUnit] = []
+            for block in blocks:
+                if block == " ":
+                    if not units:
+                        raise ValueError(
+                            f"カスタム辞書 {path} の {lineno} 行目: "
+                            "エントリ先頭に区切り指定（/ /）は置けません"
+                            "（両端の境界は文脈依存のため境界モデルが判定します）。"
+                        )
+                    if units[-1][1]:
+                        raise ValueError(
+                            f"カスタム辞書 {path} の {lineno} 行目: "
+                            "区切り指定（/ /）が連続しています。"
+                        )
+                    units[-1] = (units[-1][0], True)
+                elif block == "":
+                    raise ValueError(
+                        f"カスタム辞書 {path} の {lineno} 行目: "
+                        f"読みに空のブロックが含まれています: {reading_str!r}"
+                    )
+                else:
+                    units.append((block, False))
+
+            if units and units[-1][1]:
+                raise ValueError(
+                    f"カスタム辞書 {path} の {lineno} 行目: "
+                    "エントリ末尾に区切り指定（/ /）は置けません"
+                    "（両端の境界は文脈依存のため境界モデルが判定します）。"
+                )
+
             surface_units = [u[0] for u in get_units(surface)]
-            if len(readings) != len(surface_units):
+            if len(units) != len(surface_units):
                 raise ValueError(
                     f"カスタム辞書 {path} の {lineno} 行目: "
                     f"表層形 {surface!r} のユニット数（{len(surface_units)}）と "
-                    f"読みブロック数（{len(readings)}）が一致しません。"
+                    f"読みブロック数（{len(units)}、区切り指定は数えない）が一致しません。"
                 )
-            result[surface] = readings
+            result[surface] = units
     return result
 
 
 def build_dict_index(
-    custom_dict: Dict[str, List[str]],
-) -> Dict[str, List[Tuple[str, List[str]]]]:
-    index: Dict[str, List[Tuple[str, List[str]]]] = {}
+    custom_dict: Dict[str, List[DictUnit]],
+) -> Dict[str, List[Tuple[str, List[DictUnit]]]]:
+    index: Dict[str, List[Tuple[str, List[DictUnit]]]] = {}
     for surface, readings in custom_dict.items():
         key = surface[0]
         index.setdefault(key, []).append((surface, readings))
@@ -299,10 +361,10 @@ def build_dict_index(
 
 
 def find_longest_match(
-    index: Dict[str, List[Tuple[str, List[str]]]],
+    index: Dict[str, List[Tuple[str, List[DictUnit]]]],
     source_seq: List[SourceEntry],
     pos: int,
-) -> Optional[Tuple[int, List[str]]]:
+) -> Optional[Tuple[int, List[DictUnit]]]:
     char = source_seq[pos][0]
     first_char = char[0]  # 複合ユニットの場合は先頭1文字でインデックス引き
     candidates = index.get(first_char)
@@ -540,6 +602,11 @@ class Predictor:
                     f"❌ ZIPファイル内に {bundle_name} が見つかりません: {zip_source}"
                 )
 
+            # 学習時に同梱された人名辞書（train が書き込む。旧モデルには無い）
+            embedded_name_dict_text: Optional[str] = None
+            if NAME_DICT_FILENAME in namelist:
+                embedded_name_dict_text = zf.read(NAME_DICT_FILENAME).decode("utf-8")
+
             bundle: LRModelBundle = joblib.load(io.BytesIO(zf.read(bundle_name)))
             self._vectorizer_read = bundle.vectorizer_read
             self._vectorizer_boundary = bundle.vectorizer_boundary
@@ -573,10 +640,41 @@ class Predictor:
             self._single_kanji_dict = _parse_kanji_dict_tsv(tsv_text)
 
         # カスタム辞書のロードとインデックス構築
-        self._dict_index: Dict[str, List[Tuple[str, List[str]]]] = {}
+        self._dict_index: Dict[str, List[Tuple[str, List[DictUnit]]]] = {}
         if config.custom_dict_path:
             custom_dict = load_custom_dict(config.custom_dict_path)
             self._dict_index = build_dict_index(custom_dict)
+
+        # 人名辞書のロード（B/Iフラグ特徴量用。学習時と同じ辞書マッチを適用する）
+        # 優先順位:
+        #   1. config.person_name_dict_path の明示指定
+        #   2. モデルZIPに同梱された辞書（学習時と同一であることが保証される）
+        #   3. モデルファイルと同じディレクトリの person_name_dic.tsv
+        self._name_index: NameIndex = {}
+        if config.person_name_dict_path:
+            self._name_index = build_name_index(
+                load_name_dict(config.person_name_dict_path)
+            )
+        elif embedded_name_dict_text is not None:
+            self._name_index = build_name_index(
+                parse_name_dict_text(embedded_name_dict_text)
+            )
+        else:
+            candidate = (
+                os.path.join(
+                    os.path.dirname(os.path.abspath(model_path)), NAME_DICT_FILENAME
+                )
+                if config.model_path
+                else None
+            )
+            if candidate and os.path.isfile(candidate):
+                self._name_index = build_name_index(load_name_dict(candidate))
+            elif (self._version_info or {}).get("name_dict_entries"):
+                print(
+                    "⚠️  このモデルは人名辞書特徴量付きで学習されていますが、"
+                    "人名辞書が指定されていません。人名まわりの分かち書き精度が低下します。",
+                    file=sys.stderr,
+                )
 
     def get_version_info(self) -> dict[str, Any] | None:
         return self._version_info
@@ -635,15 +733,20 @@ class Predictor:
             return PredictionResult("", "", [], [], [])
         text = normalize_compat_ideographs(text)
 
-        source_seq, bypass_indices, ascii_overrides, dict_overrides = (
+        source_seq, bypass_indices, ascii_overrides, dict_overrides, dict_boundaries = (
             self._preprocess_text(text)
         )
         if not source_seq:
             return PredictionResult(text, "", [], [], [[] for _ in text])
 
-        raw_labels, boundary_labels, max_scores, boundary_proba, src_features = (
-            self._run_inference(source_seq)
-        )
+        (
+            raw_labels,
+            boundary_labels,
+            max_scores,
+            boundary_proba,
+            src_features,
+            name_readings,
+        ) = self._run_inference(source_seq)
 
         refined_labels, raw_confidences, has_splits, decision_sources = (
             self._refine_predictions(
@@ -655,6 +758,8 @@ class Predictor:
                 bypass_indices,
                 ascii_overrides,
                 dict_overrides,
+                dict_boundaries,
+                name_readings,
             )
         )
 
@@ -686,7 +791,9 @@ class Predictor:
     # ==========================================
     def _preprocess_text(
         self, text: str
-    ) -> Tuple[List[SourceEntry], Set[int], Dict[int, str], Dict[int, str]]:
+    ) -> Tuple[
+        List[SourceEntry], Set[int], Dict[int, str], Dict[int, str], Dict[int, bool]
+    ]:
         units_info = get_units(text)
         source_seq: List[SourceEntry] = []
         bypass_indices: Set[int] = set()
@@ -724,6 +831,9 @@ class Predictor:
                 char_idx += 1
 
         dict_overrides: Dict[int, str] = {}
+        # 辞書エントリ内部の境界（True=区切る / False=区切らない）。
+        # エントリ末尾ユニットは登録しない = 境界モデルに委ねる。
+        dict_boundaries: Dict[int, bool] = {}
         if self._dict_index:
             i = 0
             while i < len(source_seq):
@@ -733,20 +843,29 @@ class Predictor:
                 match = find_longest_match(self._dict_index, source_seq, i)
                 if match:
                     length, readings = match
-                    for j, reading in enumerate(readings):
+                    for j, (reading, split_after) in enumerate(readings):
                         dict_overrides[i + j] = reading
+                        if j < length - 1:
+                            dict_boundaries[i + j] = split_after
                     i += length
                 else:
                     i += 1
 
-        return source_seq, bypass_indices, ascii_overrides, dict_overrides
+        return source_seq, bypass_indices, ascii_overrides, dict_overrides, dict_boundaries
 
     # ==========================================
     # 🌟 ステップ 2: 推論（LinearSVC版）
     # ==========================================
     def _run_inference(
         self, source_seq: List[SourceEntry]
-    ) -> Tuple[List[str], List[str], np.ndarray, np.ndarray, List[Dict[str, float]]]:
+    ) -> Tuple[
+        List[str],
+        List[str],
+        np.ndarray,
+        np.ndarray,
+        List[Dict[str, float]],
+        List[Optional[str]],
+    ]:
         """
         読みモデル（LinearSVC）と境界モデル（SGDClassifier）を推論する。
 
@@ -757,8 +876,18 @@ class Predictor:
                               全クラス分の密行列は作らず、argmax クラスのスコアのみ保持する
             boundary_proba  : 境界の確率 shape=(n, 2)
             src_features    : 特徴量辞書リスト（explain用）
+            name_readings   : 人名辞書のユニット別読み（低自信度フォールバック用）
         """
-        src_features = compute_source_features(source_seq, window=self._window_size)
+        if self._name_index:
+            name_flags, name_readings = compute_name_matches(
+                source_seq, self._name_index
+            )
+        else:
+            name_flags = None
+            name_readings = [None] * len(source_seq)
+        src_features = compute_source_features(
+            source_seq, window=self._window_size, name_flags=name_flags
+        )
         # vectorizer.dtype=float32 をロード時に設定済みなので、transform は直接 float32 を返す
         X_read = self._vectorizer_read.transform(src_features)
         X_boundary = self._vectorizer_boundary.transform(src_features)
@@ -788,7 +917,14 @@ class Predictor:
         boundary_labels = [str(b) for b in boundary_raw]
         boundary_proba = self._model_boundary.predict_proba(X_boundary)
 
-        return raw_labels, boundary_labels, max_scores, boundary_proba, src_features
+        return (
+            raw_labels,
+            boundary_labels,
+            max_scores,
+            boundary_proba,
+            src_features,
+            name_readings,
+        )
 
     def _get_read_confidence(self, max_scores: np.ndarray, i: int) -> float:
         """
@@ -810,6 +946,8 @@ class Predictor:
         bypass_indices: Set[int],
         ascii_overrides: Dict[int, str],
         dict_overrides: Dict[int, str],
+        dict_boundaries: Dict[int, bool],
+        name_readings: List[Optional[str]],
     ) -> Tuple[List[str], List[float], List[bool], List[str]]:
         refined_labels: List[str] = []
         confidences: List[float] = []
@@ -836,7 +974,12 @@ class Predictor:
                 confidence = 1.0
                 decision = DecisionSource.DICT
                 last_fallback_reading = ""
-                has_split = boundary_labels[i] == "1"
+                # エントリ内部の境界は辞書が確定する（/ / 記法）。
+                # エントリ末端の境界は次語に依存するため境界モデルに委ねる。
+                if i in dict_boundaries:
+                    has_split = dict_boundaries[i]
+                else:
+                    has_split = boundary_labels[i] == "1"
 
             else:
                 label = raw_labels[i]
@@ -906,6 +1049,21 @@ class Predictor:
                             last_fallback_reading,
                         )
                     )
+                    # 人名辞書読みフォールバック:
+                    # 人名スパン内 かつ モデルが低自信度のときだけ、辞書の固定読みで
+                    # 置換する。自信のある予測は尊重するので「湧き出る清水」のような
+                    # 同表層の別語（非人名）を壊さない。
+                    if (
+                        decision == DecisionSource.LR
+                        and name_readings[i] is not None
+                        and confidence < _LR_LOW_THRESHOLD
+                        and label not in (LABEL_CONTINUE, LABEL_SKIP)
+                        and label != name_readings[i]
+                    ):
+                        label = name_readings[i]
+                        decision = DecisionSource.DICT_NAME
+                        if ctype == "KANJI":
+                            last_fallback_reading = label  # 々のために伝播
                     if decision == DecisionSource.LR:
                         if (
                             confidence < _LR_LOW_THRESHOLD

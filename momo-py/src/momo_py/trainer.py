@@ -25,6 +25,17 @@ from .features import (
     LABEL_SKIP,
 )
 from .utils import split_on_unescaped_slash, CharType
+from .name_dict import (
+    NAME_DICT_FILENAME,
+    NAME_FLAG_BEGIN,
+    NAME_FLAG_INSIDE,
+    NAME_FLAG_OUT,
+    build_name_index,
+    compute_name_flags,
+    load_name_dict,
+    name_flag_for_unit,
+    parse_name_marks,
+)
 from .predictor import LRModelBundle
 from .exporter import export
 
@@ -58,8 +69,10 @@ def build_stats_from_tsv(tsvdata: str) -> dict:
 
     with open(tsvdata, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
+            # strip() ではなく rstrip("\n"): 原文列が空白文字の行
+            # （ASCII連内のスペース等）の列ズレを防ぐ
+            line = line.rstrip("\n")
+            if not line.strip() or line.startswith("#"):
                 continue
 
             parts = line.split("\t")
@@ -150,13 +163,24 @@ def _check_alignment_anomalies(
 # ==========================================
 # 🌟 3. TSV行の生成（フォーマッタ）
 # ==========================================
+def _expand_name_flag(name_flag: str, i: int) -> str:
+    """ユニットを複数行に展開するとき、i 文字目のフラグを返す（先頭以外は I）。"""
+    if i == 0:
+        return name_flag
+    return NAME_FLAG_INSIDE if name_flag != NAME_FLAG_OUT else NAME_FLAG_OUT
+
+
 def _create_tsv_rows(
-    target_chars: str, ctype: str, r_label: str, orig_idx: int
+    target_chars: str,
+    ctype: str,
+    r_label: str,
+    orig_idx: int,
+    name_flag: str = NAME_FLAG_OUT,
 ) -> List[str]:
     """1ブロック分の文字列とラベルから、TSV行リストを生成する"""
     if ctype in _SKIP_CTYPES:
         return [
-            f"{char}\t{LABEL_SKIP}\t{ctype}\t{orig_idx + i}"
+            f"{char}\t{LABEL_SKIP}\t{ctype}\t{orig_idx + i}\t{_expand_name_flag(name_flag, i)}"
             for i, char in enumerate(target_chars)
         ]
     # 数字（NUMERIC）は1文字ずつ学習する（推論側も1文字に展開するため整合させる）。
@@ -164,16 +188,18 @@ def _create_tsv_rows(
     #   多桁     : 桁ごとに恒等（"120"→ 1,2,0）。多桁のかな読み（はつか等）は扱わず
     #              漢数字（二十日）で表現する。
     if ctype == CharType.NUMERIC:
-        return [f"{target_chars}\t{r_label}\t{ctype}\t{orig_idx}"]
+        return [f"{target_chars}\t{r_label}\t{ctype}\t{orig_idx}\t{name_flag}"]
     # 拗音（ひらがな/カタカナ複合ユニット）は1行にまとめる。
     # 推論時も get_units() が同じユニットとして認識するため整合が取れる。
     # 漢字などは LABEL_CONTINUE で1文字ずつに分割する（推論は1文字単位のため）。
     if len(target_chars) == 1 or ctype in (CharType.HIRAGANA, CharType.KATAKANA):
-        return [f"{target_chars}\t{r_label}\t{ctype}\t{orig_idx}"]
+        return [f"{target_chars}\t{r_label}\t{ctype}\t{orig_idx}\t{name_flag}"]
     rows = []
     for i, char in enumerate(target_chars):
         r_val = r_label if i == 0 else LABEL_CONTINUE
-        rows.append(f"{char}\t{r_val}\t{ctype}\t{orig_idx + i}")
+        rows.append(
+            f"{char}\t{r_val}\t{ctype}\t{orig_idx + i}\t{_expand_name_flag(name_flag, i)}"
+        )
     return rows
 
 
@@ -192,6 +218,13 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
         )
 
     raw_part, read_full = parts[0], parts[1]
+
+    # {…} 人名マークを除去し、人名スパン（除去後座標）を得る。
+    # マークは読み列には書かないので、除去後の原文と読みの1:1整列は保たれる。
+    try:
+        raw_part, name_spans = parse_name_marks(raw_part)
+    except ValueError as e:
+        raise ValueError(f"(Line {line_num}): {e}") from None
 
     read_blocks_raw = split_on_unescaped_slash(read_full)
     if any(b == "" for b in read_blocks_raw[1:-1]):
@@ -231,7 +264,11 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
             target_chars, ctype, r_label, orig_idx, label_idx, line_num, stats
         )
 
-        rows = _create_tsv_rows(target_chars, ctype, r_label, orig_idx)
+        try:
+            name_flag = name_flag_for_unit(orig_idx, len(target_chars), name_spans)
+        except ValueError as e:
+            raise ValueError(f"(Line {line_num}): {e}") from None
+        rows = _create_tsv_rows(target_chars, ctype, r_label, orig_idx, name_flag)
         tsv_rows.extend(rows)
         raw_ptr += 1
 
@@ -245,17 +282,56 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
 
 
 # ==========================================
+# 🌟 4.5 人名エントリ抽出（辞書構築用）
+# ==========================================
+def _extract_name_entries(rows: List[str]) -> List[tuple]:
+    """TSV行リストから (人名表層形, ユニット別読み '/'区切り) を抽出する。
+
+    人名フラグ列（B/I）の連続を1スパンとし、読みは +S を除去した
+    ラベル列（LABEL_CONTINUE は直前ユニットの継続なのでスキップ）。
+    """
+    entries: List[tuple] = []
+    surface = ""
+    blocks: List[str] = []
+
+    def flush() -> None:
+        nonlocal surface, blocks
+        if surface:
+            entries.append((surface, "/".join(blocks)))
+        surface, blocks = "", []
+
+    for row in rows:
+        cols = row.split("\t")
+        flag = cols[4] if len(cols) > 4 else NAME_FLAG_OUT
+        if flag == NAME_FLAG_BEGIN:
+            flush()
+        if flag in (NAME_FLAG_BEGIN, NAME_FLAG_INSIDE):
+            surface += cols[0]
+            clean = cols[1].replace("+S", "")
+            if clean != LABEL_CONTINUE:
+                blocks.append(clean)
+        else:
+            flush()
+    flush()
+    return entries
+
+
+# ==========================================
 # 🌟 5. メインルーチン
 # ==========================================
-def create_data(rawdata: str, tsvdata: str) -> None:
+def create_data(
+    rawdata: str, tsvdata: str, name_dict_path: str | None = None
+) -> None:
     print(f"📊 過去の実績 ({tsvdata}) から統計辞書を構築中...")
     stats = build_stats_from_tsv(tsvdata)
 
     with open(rawdata, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
-    all_tsv = ["#原文\t読み\t文字種\tOrigIdx"]
+    all_tsv = ["#原文\t読み\t文字種\tOrigIdx\t人名"]
     success = 0
+    # (表層形, 読み) → 出現回数
+    name_counts: dict[tuple, int] = defaultdict(int)
     for i, line in enumerate(lines, 1):
         if not line.strip() or line.startswith("#"):
             continue
@@ -264,10 +340,59 @@ def create_data(rawdata: str, tsvdata: str) -> None:
             all_tsv.extend(rows)
             all_tsv.append("")
             success += 1
+            # {…} マークから人名と読みを収集（辞書構築用）
+            for surface, reading in _extract_name_entries(rows):
+                name_counts[(surface, reading)] += 1
 
     with open(tsvdata, "w", encoding="utf-8") as f:
         f.write("\n".join(all_tsv))
     print(f"✅ TSV作成完了 ({success}行): {tsvdata}")
+
+    # 人名辞書の書き出し。
+    # フラグ特徴量は学習・推論ともこの辞書へのマッチで計算する。
+    # 読みは推論時の低自信度フォールバック（固定読み）に使う。
+    if name_counts:
+        if name_dict_path is None:
+            name_dict_path = os.path.join(
+                os.path.dirname(tsvdata) or ".", NAME_DICT_FILENAME
+            )
+        # 表層形ごとに読みを集計し、最頻の読みを採用する
+        by_surface: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for (surface, reading), count in name_counts.items():
+            by_surface[surface][reading] += count
+
+        dict_lines = [
+            "# 自動生成: 学習データの {…} 人名マークから抽出（createdata 実行時に上書きされる）",
+            "#表層形\t読み\t出現回数",
+        ]
+        for surface in sorted(by_surface):
+            readings = by_surface[surface]
+            total = sum(readings.values())
+            reading = max(readings, key=lambda r: readings[r])
+            if len(readings) > 1:
+                others = ", ".join(
+                    f"{r}×{c}"
+                    for r, c in sorted(readings.items(), key=lambda x: -x[1])
+                )
+                print(
+                    f"⚠️  人名 {surface!r} に複数の読みがあります（{others}）"
+                    f" → 最頻の {reading!r} を採用します。誤記でないか確認してください。"
+                )
+            blocks = reading.split("/")
+            if reading and LABEL_SKIP not in blocks and len(blocks) == len(
+                get_units(surface)
+            ):
+                dict_lines.append(f"{surface}\t{reading}\t{total}")
+            else:
+                # 読みがユニットと整合しない場合は表層形のみ登録（フラグ特徴量には使える）
+                print(
+                    f"⚠️  人名 {surface!r} の読み {reading!r} がユニット数と一致しない"
+                    "ため、読みなしで登録します。"
+                )
+                dict_lines.append(f"{surface}\t{total}")
+        with open(name_dict_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(dict_lines) + "\n")
+        print(f"👤 人名辞書作成完了 ({len(by_surface)} エントリ): {name_dict_path}")
 
 
 # ==========================================
@@ -283,6 +408,34 @@ def _split_labels(raw_labels: List[str]) -> tuple:
         for label in raw_labels
     ]
     return y_read, y_boundary
+
+
+# ==========================================
+# 🌟 6.2 学習用TSVの読み込み
+# ==========================================
+def _load_sentences(tsvdata: str) -> List[List[List[str]]]:
+    """学習用TSVを文（空行/コメント行区切り）ごとの行リストに読み込む。
+
+    注意: 行を strip() してはならない。原文列が空白文字の行
+    （ASCII連内のスペース等、例 " \\t_\\tALPHA\\t16\\tO"）で先頭列が
+    消えて列がずれ、文字種列に OrigIdx が入った状態で学習されてしまう。
+    """
+    sentences: List[List[List[str]]] = []
+    current: List[List[str]] = []
+    with open(tsvdata, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if line.startswith("#") or not line.strip():
+                if current:
+                    sentences.append(current)
+                current = []
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 4:
+                current.append(parts)
+    if current:
+        sentences.append(current)
+    return sentences
 
 
 # ==========================================
@@ -328,6 +481,7 @@ def train(
     dry_run: bool = False,
     use_svc: bool = True,
     n_jobs: int = 4,
+    name_dict: str | None = None,
 ) -> None:
     """
     TSVから読みモデルと境界モデル（SGDClassifier）を学習し、1つのZIPにまとめる。
@@ -340,23 +494,29 @@ def train(
             - 2値分類（0/1）
             - predict_proba が使える（漢数字フォールバック判定に使用）
 
+    人名特徴量:
+        name_dict に人名辞書のパスを指定すると（None のときは tsvdata と同じ
+        ディレクトリの person_name_dic.tsv を自動検出）、推論時と同一の辞書マッチで
+        B/I フラグ特徴量を付与して学習する。TSVの人名列（正解マーク）は使わない。
+
     出力ファイル:
         basename_bundle.pkl  - モデル一式（joblib）
         basename.zip         - 上記をまとめたパッケージ
     """
-    sentences, current = [], []
-    with open(tsvdata, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.startswith("#") or not line.strip():
-                if current:
-                    sentences.append(current)
-                current = []
-                continue
-            parts = line.strip().split("\t")
-            if len(parts) >= 4:
-                current.append(parts)
-    if current:
-        sentences.append(current)
+    name_index: dict = {}
+    name_dict_entries = 0
+    name_dict_path = name_dict
+    if name_dict_path is None:
+        candidate = os.path.join(os.path.dirname(tsvdata) or ".", NAME_DICT_FILENAME)
+        if os.path.isfile(candidate):
+            name_dict_path = candidate
+    if name_dict_path:
+        names = load_name_dict(name_dict_path)
+        name_index = build_name_index(names)
+        name_dict_entries = len(names)
+        print(f"👤 人名辞書: {name_dict_entries} エントリ ({name_dict_path})")
+
+    sentences = _load_sentences(tsvdata)
 
     X_dicts: List[FeatureDict] = []
     Y_read: List[str] = []
@@ -373,7 +533,10 @@ def train(
         ]
         raw_labels = [p[1] for p in sentence]
 
-        features = compute_source_features(source_seq, window=window)
+        name_flags = compute_name_flags(source_seq, name_index) if name_index else None
+        features = compute_source_features(
+            source_seq, window=window, name_flags=name_flags
+        )
         X_dicts.extend(features)
 
         y_read, y_boundary = _split_labels(raw_labels)
@@ -500,6 +663,7 @@ def train(
         "model_bundle": bundle_name,
         "algorithm": "LinearSVC+SGD",
         "window_size": window,
+        "name_dict_entries": name_dict_entries,
     }
     bundle_buf = io.BytesIO()
     joblib.dump(bundle, bundle_buf, compress=0)
@@ -508,9 +672,17 @@ def train(
         zf.writestr(
             "version_info.json", json.dumps(version_info, ensure_ascii=False, indent=2)
         )
+        # 学習に使った人名辞書をそのまま同梱する。
+        # 推論（Python の Predictor / .mbm 経由の Rust）はこの同梱辞書を使うことで、
+        # 学習時と完全に同一の辞書マッチが保証される。
+        if name_dict_path and name_dict_entries:
+            with open(name_dict_path, encoding="utf-8") as f:
+                zf.writestr(NAME_DICT_FILENAME, f.read())
 
     print(f"\n📦 ZIPパッケージ作成完了: {zip_path}")
     print(f"   ├ {bundle_name}")
+    if name_dict_path and name_dict_entries:
+        print(f"   ├ {NAME_DICT_FILENAME}")
     print(f"   └ version_info.json")
     export(zip_path, mbm_path)
     print(f"量子化モデル (MBM) エクスポート完了: {mbm_path}")

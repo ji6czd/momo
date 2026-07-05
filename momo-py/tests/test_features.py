@@ -197,3 +197,39 @@ class TestComputeSourceFeatures:
         features = compute_source_features(seq)
         assert not any(k.startswith("char_p1=") for k in features[0])
         assert not any(k.startswith("char_n1=") for k in features[0])
+
+
+# ------------------------------------------------------------------ #
+# 人名フラグ特徴量（name_s / name_p1 / name_n1）
+# ------------------------------------------------------------------ #
+class TestNameFlagFeatures:
+    def _make_seq(self, text):
+        return get_units(text)
+
+    def test_flags_emit_positional_features(self):
+        seq = self._make_seq("佐藤さん")
+        flags = ["B", "I", "O", "O"]
+        features = compute_source_features(seq, name_flags=flags)
+
+        # 佐: 自分=B、次=I
+        assert features[0].get("name_s=B") == 1.0
+        assert features[0].get("name_n1=I") == 1.0
+        # 藤: 自分=I、前=B、次はO（人名の右端 → name_n1 なし）
+        assert features[1].get("name_s=I") == 1.0
+        assert features[1].get("name_p1=B") == 1.0
+        assert not any(k.startswith("name_n1=") for k in features[1])
+        # さ: 自分はO（name_s なし）、前=I
+        assert not any(k.startswith("name_s=") for k in features[2])
+        assert features[2].get("name_p1=I") == 1.0
+        # ん: 人名特徴量なし
+        assert not any(k.startswith("name_") for k in features[3])
+
+    def test_none_flags_emit_nothing(self):
+        seq = self._make_seq("佐藤さん")
+        features = compute_source_features(seq)
+        assert not any(k.startswith("name_") for feats in features for k in feats)
+
+    def test_length_mismatch_raises(self):
+        seq = self._make_seq("佐藤さん")
+        with pytest.raises(ValueError, match="name_flags"):
+            compute_source_features(seq, name_flags=["B", "I"])

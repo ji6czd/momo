@@ -7,6 +7,7 @@
 //! [`Predictor`]: crate::Predictor
 
 use crate::feature::FeatureKey;
+use crate::name_dict::NameIndex;
 
 // ============================================================
 // 語彙テーブル
@@ -80,6 +81,14 @@ pub struct MomoModel {
     /// 境界モデルの intercept `[class 0, class 1]`
     pub(crate) boundary_intercept: [f32; 2],
 
+    // --- 人名辞書 (version 0x03 で追加) ---
+    /// 人名辞書の照合用インデックス。辞書なしモデルでは空。
+    /// 推論時に [`compute_name_flags`] で B/I フラグを計算し、
+    /// `NameFlag*` 特徴量の入力にする。
+    ///
+    /// [`compute_name_flags`]: crate::name_dict::compute_name_flags
+    pub(crate) name_dict: NameIndex,
+
     // --- サイズ情報 ---
     pub(crate) n_classes: u32,
     pub(crate) n_features: u32,
@@ -150,6 +159,7 @@ impl Default for MomoModel {
             boundary_scale: 1.0,
             boundary_data: Vec::new(),
             boundary_intercept: [0.0, 0.0],
+            name_dict: NameIndex::new(),
             n_classes: 0,
             n_features: 0,
         }

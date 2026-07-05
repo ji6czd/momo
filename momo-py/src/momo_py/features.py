@@ -55,6 +55,13 @@ F_KANJI_RUN = "kanji_run"
 F_KANJI_POS_FIRST = "kanji_pos_first"
 F_JNUM_RUN = "jnum_run"
 F_JNUM_RUN_P1 = "jnum_run_p1"
+# 人名辞書マッチフラグ（値は B/I。name_dict.compute_name_flags が生成する）
+F_NAME_S = "name_s"
+F_NAME_P1 = "name_p1"
+F_NAME_N1 = "name_n1"
+
+# 特徴量として発火させる人名フラグ値（O は発火させない）
+_NAME_ACTIVE_FLAGS = ("B", "I")
 
 
 def get_units(text: str) -> List[Tuple[str, int, str]]:
@@ -123,6 +130,7 @@ def get_units(text: str) -> List[Tuple[str, int, str]]:
 def compute_source_features(
     source_seq: List[SourceEntry],
     window: int = 7,
+    name_flags: List[str] | None = None,
 ) -> List[FeatureDict]:
     """
     ソース文字系列全体に対して、各文字の文脈特徴量を一括計算する。
@@ -132,9 +140,18 @@ def compute_source_features(
       7 (デフォルト): 前後3文字まで参照（bigram×6, trigram×5）
       5             : 前後2文字まで参照（bigram×4, trigram×3）
       4             : 前1・後2文字参照 [-1,0,+1,+2]（bigram×3, trigram×2）
+    name_flags: 人名辞書マッチフラグ（B/I/O）の系列。source_seq と同じ長さ。
+      None の場合は人名特徴量を出力しない（人名辞書なしの従来動作）。
+      学習・推論とも name_dict.compute_name_flags() で生成すること
+      （学習データの正解マークを直接渡してはならない）。
     """
     if window not in (4, 5, 7):
         raise ValueError(f"window は 4, 5, 7 のいずれかでなければなりません: {window}")
+    if name_flags is not None and len(name_flags) != len(source_seq):
+        raise ValueError(
+            f"name_flags の長さ（{len(name_flags)}）が "
+            f"source_seq（{len(source_seq)}）と一致しません"
+        )
     result: List[FeatureDict] = []
     n = len(source_seq)
 
@@ -267,6 +284,17 @@ def compute_source_features(
 
             run_key = str(run) if run <= 4 else "5+"
             features[f"{F_JNUM_RUN}={run_key}"] = 1.0
+
+        # 人名辞書マッチフラグ（自分・前1・後1）。
+        # 「name_s=I かつ name_n1 なし」= 人名の右端、のように B/I の
+        # 位置の組み合わせで人名の境界が線形モデルに見えるようにする。
+        if name_flags is not None:
+            if name_flags[i] in _NAME_ACTIVE_FLAGS:
+                features[f"{F_NAME_S}={name_flags[i]}"] = 1.0
+            if i > 0 and name_flags[i - 1] in _NAME_ACTIVE_FLAGS:
+                features[f"{F_NAME_P1}={name_flags[i - 1]}"] = 1.0
+            if i < n - 1 and name_flags[i + 1] in _NAME_ACTIVE_FLAGS:
+                features[f"{F_NAME_N1}={name_flags[i + 1]}"] = 1.0
 
         result.append(features)
 

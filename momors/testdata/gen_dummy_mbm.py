@@ -79,6 +79,13 @@ QUANT_SCALE_BOUNDARY = 0.005
 BOUNDARY_DATA = [10, -5, 20, 15, -3]  # int8 × n_features
 BOUNDARY_INTERCEPT = [0.2, -0.2]      # f32 × 2
 
+# 人名辞書 (version 0x03 で追加、0x04 でユニット別読みを追加)
+# (表層形, ユニット別読みリスト or None)
+NAME_DICT = [
+    ("佐藤", ["サ", "トー"]),
+    ("太郎", None),
+]
+
 
 # ----------------------------------------------------------------------
 # バイナリ構築
@@ -102,7 +109,7 @@ def is_uint8_payload(ft: int) -> bool:
 def build_header() -> bytes:
     return struct.pack(
         '<4sBBBBII',
-        b'MOMO', 0x02, 0x00, 0x00, 0x00,
+        b'MOMO', 0x04, 0x00, 0x00, 0x00,
         N_CLASSES, N_FEATURES,
     )
 
@@ -169,6 +176,29 @@ def build_boundary() -> bytes:
     return bytes(buf)
 
 
+def build_name_dict() -> bytes:
+    """人名辞書テーブル:
+    n_names(u32) + [len(u8) + utf8表層形 + n_readings(u8) + [len(u8) + utf8読み]*]*
+    """
+    buf = bytearray()
+    buf += struct.pack('<I', len(NAME_DICT))
+    for surface, readings in NAME_DICT:
+        encoded = surface.encode('utf-8')
+        assert len(encoded) <= 255
+        buf.append(len(encoded))
+        buf += encoded
+        if readings is None:
+            buf.append(0)
+        else:
+            buf.append(len(readings))
+            for reading in readings:
+                r_enc = reading.encode('utf-8')
+                assert len(r_enc) <= 255
+                buf.append(len(r_enc))
+                buf += r_enc
+    return bytes(buf)
+
+
 # ----------------------------------------------------------------------
 # 書き出し
 # ----------------------------------------------------------------------
@@ -180,6 +210,7 @@ def main() -> None:
         'read_weights'  : build_read_weights(),
         'intercept_r'   : build_intercept_read(),
         'boundary'      : build_boundary(),
+        'name_dict'     : build_name_dict(),
     }
 
     blob = b''.join(parts.values())

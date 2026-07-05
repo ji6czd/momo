@@ -36,6 +36,11 @@ const LABEL_SKIP: &str = "_";
 /// 々 (同の字点) の Unicode コードポイント。
 const CHAR_NOMA: u32 = 0x3005;
 
+/// 人名辞書読みフォールバックを発動させる自信度の上限。
+/// 人名スパン内の読みがこれ未満の自信度のとき、辞書の固定読みで置換する。
+/// Python 版 `_LR_LOW_THRESHOLD` と対応。
+const NAME_READING_CONF_THRESHOLD: f32 = 0.5;
+
 // ============================================================
 // PredictorConfig
 // ============================================================
@@ -433,7 +438,11 @@ impl Predictor {
             return Ok(result);
         }
 
-        let all_feat_keys = compute_source_features(&source_seq);
+        // 人名辞書マッチ (B/I フラグ + ユニット別固定読み)。辞書なしモデルでは
+        // 全て O で、NameFlag* 特徴量は発火しない。
+        let (name_flags, name_readings) =
+            crate::name_dict::compute_name_matches(&source_seq, &self.model.name_dict);
+        let all_feat_keys = compute_source_features(&source_seq, &name_flags);
         let all_feat_ids: Vec<Vec<u32>> = all_feat_keys
             .iter()
             .map(|keys| lookup_feature_ids(keys, &self.model))
@@ -710,6 +719,15 @@ impl Predictor {
                 } else {
                     direct
                 }
+            } else if let Some(reading) = name_readings[i]
+                .as_deref()
+                .filter(|r| conf < NAME_READING_CONF_THRESHOLD && *r != label)
+            {
+                // 人名辞書読みフォールバック:
+                // 人名スパン内 かつ モデルが低自信度のときだけ、辞書の固定読みで
+                // 置換する（Python 版 DICT_NAME と対応）。自信のある予測は尊重する
+                // ので、人名と同表層の別語（森林・関係など）を壊さない。
+                reading.to_string()
             } else {
                 label.to_string()
             };

@@ -153,9 +153,21 @@ fn is_kurai_char(c: char) -> bool {
 /// 本関数は **学習時 window=7** に相当する全特徴量を計算する。
 /// 短い window のモデルでは、ここで生成した余分な特徴量は語彙テーブルに
 /// 存在しないため、`vocab_find` で `None` になり自然に無視される。
-pub(crate) fn compute_source_features(seq: &[SourceEntry]) -> Vec<Vec<FeatureKey>> {
+///
+/// `name_flags` は人名辞書マッチフラグ（0=O, 1=B, 2=I）の系列。
+/// [`compute_name_flags`] で生成し `seq` と同じ長さで渡す。
+/// 空スライスを渡すと人名特徴量を一切発火させない（辞書なしモデル用）。
+///
+/// [`compute_name_flags`]: crate::name_dict::compute_name_flags
+pub(crate) fn compute_source_features(
+    seq: &[SourceEntry],
+    name_flags: &[u8],
+) -> Vec<Vec<FeatureKey>> {
     let n = seq.len();
     let mut result: Vec<Vec<FeatureKey>> = (0..n).map(|_| Vec::new()).collect();
+
+    // 空スライス = 全て O とみなす
+    let nf = |i: usize| -> u8 { name_flags.get(i).copied().unwrap_or(0) };
 
     for i in 0..n {
         // 文脈特徴量は先頭コードポイント (cp) を使用。
@@ -370,6 +382,25 @@ pub(crate) fn compute_source_features(seq: &[SourceEntry]) -> Vec<Vec<FeatureKey
                 clamp_run(run),
             ));
         }
+
+        // --- 人名辞書マッチフラグ（自分・前1・後1）---
+        // Python 版 features.py の name_s / name_p1 / name_n1 と対応。
+        // O (=0) は発火させない。
+        if nf(i) != 0 {
+            feats.push(FeatureKey::u8_payload(FeatureType::NameFlagSelf, nf(i)));
+        }
+        if i > 0 && nf(i - 1) != 0 {
+            feats.push(FeatureKey::u8_payload(
+                FeatureType::NameFlagPrev1,
+                nf(i - 1),
+            ));
+        }
+        if i + 1 < n && nf(i + 1) != 0 {
+            feats.push(FeatureKey::u8_payload(
+                FeatureType::NameFlagNext1,
+                nf(i + 1),
+            ));
+        }
     }
 
     result
@@ -561,20 +592,67 @@ mod tests {
     #[test]
     fn features_length_matches() {
         let seq = to_source_seq("あいう");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         assert_eq!(feats.len(), 3);
     }
 
     #[test]
     fn features_empty_input() {
-        let feats = compute_source_features(&[]);
+        let feats = compute_source_features(&[], &[]);
         assert!(feats.is_empty());
+    }
+
+    #[test]
+    fn features_name_flags_emit() {
+        // 佐藤さん: flags = [B, I, O, O]
+        let seq = to_source_seq("佐藤さん");
+        assert_eq!(seq.len(), 4);
+        let flags = vec![1u8, 2, 0, 0];
+        let feats = compute_source_features(&seq, &flags);
+
+        // 佐: name_s=B, name_n1=I（先頭なので name_p1 なし）
+        assert!(feats[0].contains(&FeatureKey::u8_payload(FeatureType::NameFlagSelf, 1)));
+        assert!(feats[0].contains(&FeatureKey::u8_payload(FeatureType::NameFlagNext1, 2)));
+        assert!(!feats[0]
+            .iter()
+            .any(|k| k.feature_type == FeatureType::NameFlagPrev1));
+
+        // 藤: name_s=I, name_p1=B, 次は O なので name_n1 なし（人名の右端）
+        assert!(feats[1].contains(&FeatureKey::u8_payload(FeatureType::NameFlagSelf, 2)));
+        assert!(feats[1].contains(&FeatureKey::u8_payload(FeatureType::NameFlagPrev1, 1)));
+        assert!(!feats[1]
+            .iter()
+            .any(|k| k.feature_type == FeatureType::NameFlagNext1));
+
+        // さ: 自分は O（name_s なし）、name_p1=I
+        assert!(!feats[2]
+            .iter()
+            .any(|k| k.feature_type == FeatureType::NameFlagSelf));
+        assert!(feats[2].contains(&FeatureKey::u8_payload(FeatureType::NameFlagPrev1, 2)));
+
+        // ん: 人名特徴量なし
+        assert!(!feats[3].iter().any(|k| matches!(
+            k.feature_type,
+            FeatureType::NameFlagSelf | FeatureType::NameFlagPrev1 | FeatureType::NameFlagNext1
+        )));
+    }
+
+    #[test]
+    fn features_empty_name_flags_emit_nothing() {
+        let seq = to_source_seq("佐藤さん");
+        let feats = compute_source_features(&seq, &[]);
+        for f in &feats {
+            assert!(!f.iter().any(|k| matches!(
+                k.feature_type,
+                FeatureType::NameFlagSelf | FeatureType::NameFlagPrev1 | FeatureType::NameFlagNext1
+            )));
+        }
     }
 
     #[test]
     fn features_bias_present() {
         let seq = to_source_seq("あ");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let bias = FeatureKey::no_payload(FeatureType::Bias);
         assert!(feats[0].contains(&bias));
     }
@@ -582,7 +660,7 @@ mod tests {
     #[test]
     fn features_char_self_present() {
         let seq = to_source_seq("あ");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key = FeatureKey::char_1(FeatureType::CharSelf, 'あ' as u32);
         assert!(feats[0].contains(&key));
     }
@@ -592,7 +670,7 @@ mod tests {
         // 拗音「きゃ」は CHAR_SELF_COMPOUND_2 になる
         let seq = to_source_seq("きゃ");
         assert_eq!(seq.len(), 1);
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key = FeatureKey::char_2(FeatureType::CharSelfCompound2, 'き' as u32, 'ゃ' as u32);
         assert!(feats[0].contains(&key));
         // 通常の CharSelf は含まれない
@@ -603,7 +681,7 @@ mod tests {
     #[test]
     fn features_type_self_present() {
         let seq = to_source_seq("あ");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key = FeatureKey::type_1(FeatureType::TypeSelf, CharType::Hiragana);
         assert!(feats[0].contains(&key));
     }
@@ -612,7 +690,7 @@ mod tests {
     fn features_bigram_in_middle() {
         // 「あいう」の真ん中の「い」には BigramPrev1Self=あい, BigramSelfNext1=いう を含む
         let seq = to_source_seq("あいう");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key1 = FeatureKey::char_2(FeatureType::BigramPrev1Self, 'あ' as u32, 'い' as u32);
         let key2 = FeatureKey::char_2(FeatureType::BigramSelfNext1, 'い' as u32, 'う' as u32);
         assert!(feats[1].contains(&key1));
@@ -624,7 +702,7 @@ mod tests {
         // 拗音複合ユニット「きゃ」の前の文字のバイグラムは先頭コードポイント「き」を使う
         let seq = to_source_seq("あきゃ");
         assert_eq!(seq.len(), 2); // あ・きゃ
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         // [1] = きゃ: BigramPrev1Self は (あ, き) になるはず
         let key = FeatureKey::char_2(FeatureType::BigramPrev1Self, 'あ' as u32, 'き' as u32);
         assert!(feats[1].contains(&key));
@@ -634,7 +712,7 @@ mod tests {
     fn features_kanji_run_len() {
         // 「漢字」: 両方とも kanji_run_len=2
         let seq = to_source_seq("漢字");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key = FeatureKey::u8_payload(FeatureType::KanjiRunLen, 2);
         assert!(feats[0].contains(&key));
         assert!(feats[1].contains(&key));
@@ -644,7 +722,7 @@ mod tests {
     fn features_kanji_run_clamp() {
         // 5 文字以上の漢字連続は run=5 にクランプ
         let seq = to_source_seq("漢字漢字漢字漢字");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key5 = FeatureKey::u8_payload(FeatureType::KanjiRunLen, 5);
         for f in &feats {
             assert!(f.contains(&key5));
@@ -655,7 +733,7 @@ mod tests {
     fn features_kanji_pos_first() {
         // 「漢字」の最初の漢字には kanji_pos_first がある、次にはない
         let seq = to_source_seq("漢字");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key = FeatureKey::no_payload(FeatureType::KanjiPosFirst);
         assert!(feats[0].contains(&key));
         assert!(!feats[1].contains(&key));
@@ -665,7 +743,7 @@ mod tests {
     fn features_type_transition() {
         // 「あ字」の「字」には TypeTransition: Hiragana -> Kanji
         let seq = to_source_seq("あ字");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key = FeatureKey::type_2(
             FeatureType::TypeTransition,
             CharType::Hiragana,
@@ -683,7 +761,7 @@ mod tests {
         // 「三万円」: 「円」(Kanji) の前に「三万」(JapaneseNumeric × 2) があるので
         // PrevJapaneseNumericRunLen=2 が付く
         let seq = to_source_seq("三万円");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key = FeatureKey::u8_payload(FeatureType::PrevJapaneseNumericRunLen, 2);
         assert!(feats[2].contains(&key));
     }
@@ -692,7 +770,7 @@ mod tests {
     fn features_japanese_numeric_run_len() {
         // 「三万」(両方 JapaneseNumeric)
         let seq = to_source_seq("三万");
-        let feats = compute_source_features(&seq);
+        let feats = compute_source_features(&seq, &[]);
         let key = FeatureKey::u8_payload(FeatureType::JapaneseNumericRunLen, 2);
         assert!(feats[0].contains(&key));
         assert!(feats[1].contains(&key));

@@ -2,11 +2,64 @@
 predictor.py の単体テスト
   - PredictionResult.to_json()
   - Predictor.__init__() のエラーハンドリング
+  - load_custom_dict()（学習データと同じ / / 記法）
 """
 import json
 from pathlib import Path
 import pytest
-from momo_py.predictor import PredictionResult, Predictor, PredictorConfig
+from momo_py.predictor import (
+    PredictionResult,
+    Predictor,
+    PredictorConfig,
+    load_custom_dict,
+)
+
+
+# ------------------------------------------------------------------ #
+# load_custom_dict
+# ------------------------------------------------------------------ #
+class TestLoadCustomDict:
+    def _load(self, tmp_path, content):
+        path = tmp_path / "custom.tsv"
+        path.write_text(content, encoding="utf-8")
+        return load_custom_dict(str(path))
+
+    def test_basic_no_split(self, tmp_path):
+        # 区切り指定なし = 1語（内部で区切らない）
+        d = self._load(tmp_path, "超音波\tチョー/オン/パ\n")
+        assert d["超音波"] == [("チョー", False), ("オン", False), ("パ", False)]
+
+    def test_internal_split(self, tmp_path):
+        # 空ブロック / / は「直前ユニットの後ろで区切る」
+        d = self._load(tmp_path, "佐藤太郎\tサ/トー/ /タ/ロー\n")
+        assert d["佐藤太郎"] == [
+            ("サ", False),
+            ("トー", True),
+            ("タ", False),
+            ("ロー", False),
+        ]
+
+    def test_leading_split_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="先頭に区切り指定"):
+            self._load(tmp_path, "佐藤\t /サ/トー\n")
+
+    def test_trailing_split_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="末尾に区切り指定"):
+            self._load(tmp_path, "佐藤\tサ/トー/ \n")
+
+    def test_consecutive_split_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="連続"):
+            self._load(tmp_path, "佐藤太郎\tサ/トー/ / /タ/ロー\n")
+
+    def test_unit_count_mismatch_raises(self, tmp_path):
+        # 区切り指定は読みブロック数に数えない（3ユニットに2読み）
+        with pytest.raises(ValueError, match="一致しません"):
+            self._load(tmp_path, "超音波\tチョー/ /オンパ\n")
+
+    def test_compound_unit(self, tmp_path):
+        # 拗音を含む表層形はユニット単位（きゃ = 1ユニット）
+        d = self._load(tmp_path, "きゃく\tキャ/ク\n")
+        assert d["きゃく"] == [("キャ", False), ("ク", False)]
 
 
 # ------------------------------------------------------------------ #

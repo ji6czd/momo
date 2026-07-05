@@ -91,6 +91,13 @@ pub enum FeatureType {
     KanjiRunLen = 0xC0,
     JapaneseNumericRunLen = 0xC1,
     PrevJapaneseNumericRunLen = 0xC2,
+    /// 人名辞書マッチフラグ（自分）。ペイロード: 1=B (スパン先頭), 2=I (継続)。
+    /// Python 版 `name_s=B/I`、exporter の `FT.NAME_FLAG_SELF` と対応。
+    NameFlagSelf = 0xC3,
+    /// 人名辞書マッチフラグ（前1文字）。Python 版 `name_p1=B/I`。
+    NameFlagPrev1 = 0xC4,
+    /// 人名辞書マッチフラグ（後1文字）。Python 版 `name_n1=B/I`。
+    NameFlagNext1 = 0xC5,
 }
 
 impl FeatureType {
@@ -182,6 +189,9 @@ impl FeatureType {
             0xC0 => KanjiRunLen,
             0xC1 => JapaneseNumericRunLen,
             0xC2 => PrevJapaneseNumericRunLen,
+            0xC3 => NameFlagSelf,
+            0xC4 => NameFlagPrev1,
+            0xC5 => NameFlagNext1,
 
             _ => return None,
         })
@@ -342,8 +352,18 @@ mod tests {
         assert_eq!(FeatureType::from_u8(0x02), None);
         assert_eq!(FeatureType::from_u8(0x57), None);
         assert_eq!(FeatureType::from_u8(0xFF), None);
-        assert_eq!(FeatureType::from_u8(0xC3), None);
+        assert_eq!(FeatureType::from_u8(0xC6), None);
         assert_eq!(FeatureType::from_u8(0xB6), None);
+    }
+
+    #[test]
+    fn from_u8_name_flag_values() {
+        assert_eq!(FeatureType::from_u8(0xC3), Some(FeatureType::NameFlagSelf));
+        assert_eq!(FeatureType::from_u8(0xC4), Some(FeatureType::NameFlagPrev1));
+        assert_eq!(FeatureType::from_u8(0xC5), Some(FeatureType::NameFlagNext1));
+        assert!(FeatureType::NameFlagSelf.is_uint8_payload());
+        assert!(FeatureType::NameFlagPrev1.is_uint8_payload());
+        assert!(FeatureType::NameFlagNext1.is_uint8_payload());
     }
 
     #[test]

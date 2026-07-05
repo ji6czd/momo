@@ -4,6 +4,7 @@ import os
 import unicodedata
 import zipfile
 from datetime import datetime, timezone
+from importlib import resources as il_resources
 from typing import List
 from collections import defaultdict
 
@@ -36,7 +37,7 @@ from .name_dict import (
     name_flag_for_unit,
     parse_name_marks,
 )
-from .predictor import LRModelBundle
+from .predictor import LRModelBundle, SINGLE_KANJI_DICT_FILENAME
 from .exporter import export
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
@@ -678,11 +679,28 @@ def train(
         if name_dict_path and name_dict_entries:
             with open(name_dict_path, encoding="utf-8") as f:
                 zf.writestr(NAME_DICT_FILENAME, f.read())
+        # 単一漢字辞書も同梱する。読みモデルの候補制約として必須のデータであり、
+        # モデルとペアで配布することで配置ミスによるサイレント劣化を防ぐ。
+        # TSVと同じディレクトリの辞書を優先し、なければパッケージ内蔵を使う。
+        single_dict_candidate = os.path.join(
+            os.path.dirname(tsvdata) or ".", SINGLE_KANJI_DICT_FILENAME
+        )
+        if os.path.isfile(single_dict_candidate):
+            with open(single_dict_candidate, encoding="utf-8") as f:
+                single_dict_text = f.read()
+            print(f"📖 単一漢字辞書を同梱: {single_dict_candidate}")
+        else:
+            single_dict_text = (
+                il_resources.files("momo_py") / f"resources/{SINGLE_KANJI_DICT_FILENAME}"
+            ).read_text(encoding="utf-8")
+            print("📖 単一漢字辞書を同梱: パッケージ内蔵リソース")
+        zf.writestr(SINGLE_KANJI_DICT_FILENAME, single_dict_text)
 
     print(f"\n📦 ZIPパッケージ作成完了: {zip_path}")
     print(f"   ├ {bundle_name}")
     if name_dict_path and name_dict_entries:
         print(f"   ├ {NAME_DICT_FILENAME}")
+    print(f"   ├ {SINGLE_KANJI_DICT_FILENAME}")
     print(f"   └ version_info.json")
     export(zip_path, mbm_path)
     print(f"量子化モデル (MBM) エクスポート完了: {mbm_path}")

@@ -36,6 +36,9 @@ from .name_dict import (
 )
 from .pybraille import to_braille, to_jp_braille
 
+# 単一漢字辞書のファイル名（モデルZIPへの同梱名・パッケージリソース名と共通）
+SINGLE_KANJI_DICT_FILENAME = "single_character_dic.tsv"
+
 # 小書き仮名（拗音・促音など）。直前の文字に吸収されるべき文字。
 _SMALL_KANA = frozenset("ぁぃぅぇぉゃゅょっゎァィゥェォャュョッヮ")
 
@@ -607,6 +610,13 @@ class Predictor:
             if NAME_DICT_FILENAME in namelist:
                 embedded_name_dict_text = zf.read(NAME_DICT_FILENAME).decode("utf-8")
 
+            # 学習時に同梱された単一漢字辞書（同上）
+            embedded_single_kanji_text: Optional[str] = None
+            if SINGLE_KANJI_DICT_FILENAME in namelist:
+                embedded_single_kanji_text = zf.read(
+                    SINGLE_KANJI_DICT_FILENAME
+                ).decode("utf-8")
+
             bundle: LRModelBundle = joblib.load(io.BytesIO(zf.read(bundle_name)))
             self._vectorizer_read = bundle.vectorizer_read
             self._vectorizer_boundary = bundle.vectorizer_boundary
@@ -629,13 +639,16 @@ class Predictor:
         self._vocab_inv: Optional[Dict[int, str]] = None
 
         # 単一漢字辞書のロード（常にロードし、推論時の候補制約に使う）
+        # 優先順位: 明示指定 > モデルZIP同梱（学習時と同一） > パッケージ内蔵
         if config.single_kanji_dict_path:
             self._single_kanji_dict: Dict[str, List[str]] = _load_single_kanji_dict(
                 config.single_kanji_dict_path
             )
+        elif embedded_single_kanji_text is not None:
+            self._single_kanji_dict = _parse_kanji_dict_tsv(embedded_single_kanji_text)
         else:
             tsv_text = (
-                resources.files("momo_py") / "resources/single_character_dic.tsv"
+                resources.files("momo_py") / f"resources/{SINGLE_KANJI_DICT_FILENAME}"
             ).read_text(encoding="utf-8")
             self._single_kanji_dict = _parse_kanji_dict_tsv(tsv_text)
 

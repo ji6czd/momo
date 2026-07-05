@@ -49,10 +49,22 @@
 //!     以下 n_readings 個:
 //!       len      : u8
 //!       utf8     : u8[len] ユニット読み (カタカナ、UTF-8)
+//!
+//! [単一漢字辞書テーブル]    version 0x04 の途中（アルファ期間）で追加
+//!   n_entries    : u32 LE  エントリ数
+//!   以下 n_entries エントリ:
+//!     len        : u8
+//!     utf8       : u8[len] 漢字 (1文字、UTF-8)
+//!     n_readings : u8      既知の読みの個数
+//!     以下 n_readings 個:
+//!       len      : u8
+//!       utf8     : u8[len] 読み (カタカナ、UTF-8)
 //! ```
 //!
 //! version 0x03 以前は読めない。フォーマット互換性を装って誤動作するより
 //! 明示的にエラーにする方針（人名特徴量・読みの有無が精度に直結するため）。
+//! 単一漢字辞書テーブル追加前の旧 0x04 ファイルは、テーブル読み込み時に
+//! EOF となり分かりやすいエラーメッセージを出す（再エクスポートが必要）。
 //!
 //! ## CSR → CSC 変換
 //!
@@ -184,6 +196,9 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     // ---- 人名辞書テーブル (version 0x04: 表層形 + ユニット別読み) ----
     let names = read_name_dict(reader, path)?;
     model.name_dict = crate::name_dict::build_name_index(&names);
+
+    // ---- 単一漢字辞書テーブル (version 0x04 途中で追加) ----
+    model.kanji_dict = read_kanji_dict(reader, path)?;
 
     // ---- 後処理: vocab を Rust の Ord で再ソート ----
     // C++ 版とソート順が異なるため、binary_search できるように改めて整列する。
@@ -364,6 +379,60 @@ fn read_name_dict<R: Read>(
         names.push((surface, readings));
     }
     Ok(names)
+}
+
+/// 単一漢字辞書テーブルを読む。
+///
+/// 読みモデルの候補制約に使う必須データ。旧 0x04 ファイル（テーブル追加前）は
+/// ここで EOF になるため、再エクスポートを促すエラーメッセージに変換する。
+fn read_kanji_dict<R: Read>(reader: &mut R, path: &Path) -> Result<Vec<(char, Vec<String>)>> {
+    let n_entries = reader.read_u32::<LittleEndian>().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            Error::CorruptModel {
+                reason: "単一漢字辞書テーブルがありません（同テーブル追加前の旧 0x04 ファイル\
+                         の可能性があります。モデルを再エクスポートしてください）"
+                    .to_string(),
+            }
+        } else {
+            Error::ModelIo {
+                path: path.to_path_buf(),
+                source: e,
+            }
+        }
+    })?;
+    if n_entries > MAX_REASONABLE_COUNT {
+        return Err(Error::CorruptModel {
+            reason: format!(
+                "単一漢字辞書の n_entries={n_entries} が大きすぎます（上限 {MAX_REASONABLE_COUNT}）"
+            ),
+        });
+    }
+
+    let mut dict: Vec<(char, Vec<String>)> = Vec::with_capacity(n_entries as usize);
+    let mut buf = Vec::new();
+    let mut read_str = |reader: &mut R, buf: &mut Vec<u8>| -> Result<String> {
+        let len = reader.read_u8().map_err(io_err(path))? as usize;
+        buf.clear();
+        buf.resize(len, 0u8);
+        reader.read_exact(buf).map_err(io_err(path))?;
+        String::from_utf8(buf.clone()).map_err(|e| Error::InvalidLabelUtf8 { source: e })
+    };
+    for _ in 0..n_entries {
+        let surface = read_str(reader, &mut buf)?;
+        let n_readings = reader.read_u8().map_err(io_err(path))? as usize;
+        let mut readings = Vec::with_capacity(n_readings);
+        for _ in 0..n_readings {
+            readings.push(read_str(reader, &mut buf)?);
+        }
+        // キーは1文字の漢字。複数文字や空のキーは安全側に倒してスキップする。
+        let mut chars = surface.chars();
+        match (chars.next(), chars.next()) {
+            (Some(kanji), None) if !readings.is_empty() => dict.push((kanji, readings)),
+            _ => {}
+        }
+    }
+    dict.sort_unstable_by_key(|(k, _)| *k);
+    Ok(dict)
 }
 
 /// f32 ベクタを読む。
@@ -635,6 +704,34 @@ mod tests {
             .expect("太郎 が載っていること");
         assert_eq!(ta[0].readings, None);
         assert!(!model.name_dict.contains_key(&('鈴' as u32)));
+    }
+
+    #[test]
+    fn load_dummy_kanji_dict() {
+        let model = load(dummy_path()).unwrap();
+        // gen_dummy_mbm.py の KANJI_DICT = [("漢", ["カン"]), ("字", ["ジ", "アザ"])]
+        // char でソート済み（字 U+5B57 < 漢 U+6F22）
+        assert_eq!(model.kanji_dict.len(), 2);
+        assert_eq!(model.kanji_dict[0].0, '字');
+        assert_eq!(model.kanji_dict[0].1, vec!["ジ", "アザ"]);
+        assert_eq!(model.kanji_dict[1].0, '漢');
+        assert_eq!(model.kanji_dict[1].1, vec!["カン"]);
+    }
+
+    #[test]
+    fn missing_kanji_dict_section_returns_corrupt_model() {
+        // 単一漢字辞書テーブル追加前の旧 0x04 ファイルを模擬:
+        // dummy.mbm から同テーブル（gen_dummy_mbm.py の build_kanji_dict = 32 bytes）
+        // を末尾から削る。
+        let bytes = std::fs::read(dummy_path()).unwrap();
+        let truncated = &bytes[..bytes.len() - 32];
+        let result = load_from_bytes(truncated);
+        match result {
+            Err(Error::CorruptModel { reason }) => {
+                assert!(reason.contains("再エクスポート"), "reason: {reason}");
+            }
+            other => panic!("CorruptModel になるべきところ: {other:?}"),
+        }
     }
 
     /// ヘッダのみ (16 bytes) を組み立てるヘルパー。

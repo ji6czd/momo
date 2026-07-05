@@ -86,6 +86,13 @@ NAME_DICT = [
     ("太郎", None),
 ]
 
+# 単一漢字辞書 (version 0x04 の途中で追加)
+# (漢字, 読みリスト)
+KANJI_DICT = [
+    ("漢", ["カン"]),
+    ("字", ["ジ", "アザ"]),
+]
+
 
 # ----------------------------------------------------------------------
 # バイナリ構築
@@ -199,6 +206,24 @@ def build_name_dict() -> bytes:
     return bytes(buf)
 
 
+def build_kanji_dict() -> bytes:
+    """単一漢字辞書テーブル:
+    n_entries(u32) + [len(u8) + utf8漢字 + n_readings(u8) + [len(u8) + utf8読み]*]*
+    """
+    buf = bytearray()
+    buf += struct.pack('<I', len(KANJI_DICT))
+    for kanji, readings in KANJI_DICT:
+        encoded = kanji.encode('utf-8')
+        buf.append(len(encoded))
+        buf += encoded
+        buf.append(len(readings))
+        for reading in readings:
+            r_enc = reading.encode('utf-8')
+            buf.append(len(r_enc))
+            buf += r_enc
+    return bytes(buf)
+
+
 # ----------------------------------------------------------------------
 # 書き出し
 # ----------------------------------------------------------------------
@@ -211,6 +236,7 @@ def main() -> None:
         'intercept_r'   : build_intercept_read(),
         'boundary'      : build_boundary(),
         'name_dict'     : build_name_dict(),
+        'kanji_dict'    : build_kanji_dict(),
     }
 
     blob = b''.join(parts.values())

@@ -355,12 +355,15 @@ pub struct Predictor {
 
 impl Predictor {
     /// 設定からモデルを読み込んで予測器を構築する。
+    ///
+    /// 単一漢字辞書は `kanji_dict_path` の明示指定があればそれを使い、
+    /// なければ `.mbm` に同梱された辞書（学習時と同一）を使う。
     pub fn load(config: PredictorConfig) -> Result<Self> {
-        let model = crate::loader::load(config.model_path())?;
+        let mut model = crate::loader::load(config.model_path())?;
         let kanji_dict = if let Some(ref path) = config.kanji_dict_path {
             load_kanji_dict(path)?
         } else {
-            Vec::new()
+            std::mem::take(&mut model.kanji_dict)
         };
         Ok(Self {
             config,
@@ -371,18 +374,20 @@ impl Predictor {
 
     /// バイト列からモデルを読み込んで予測器を構築する (WASM / インメモリ用)。
     ///
-    /// デフォルト設定 (numeric_confidence_threshold=0.5、漢字辞書なし) を使用する。
+    /// デフォルト設定 (numeric_confidence_threshold=0.5) を使用する。
+    /// 単一漢字辞書は `.mbm` に同梱されたものを使う。
     pub fn from_model_bytes(bytes: &[u8]) -> Result<Self> {
-        let model = crate::loader::load_from_bytes(bytes)?;
+        let mut model = crate::loader::load_from_bytes(bytes)?;
         let config = PredictorConfig {
             model_path: PathBuf::from("<memory>"),
             numeric_confidence_threshold: 0.5,
             kanji_dict_path: None,
         };
+        let kanji_dict = std::mem::take(&mut model.kanji_dict);
         Ok(Self {
             config,
             model,
-            kanji_dict: Vec::new(),
+            kanji_dict,
         })
     }
 

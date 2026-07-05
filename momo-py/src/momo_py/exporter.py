@@ -53,11 +53,25 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
   読みが登録されているスパンでは、読みモデルが低自信度のとき辞書読みで
   置換するフォールバックに使う（人名の読みは文脈で変化しないため固定辞書）。
 
+[単一漢字辞書テーブル]    version 0x04 の途中（アルファ期間）で追加
+  n_entries    : uint32     エントリ数
+  以下 n_entries エントリ:
+    len        : uint8      UTF-8バイト長
+    utf8       : uint8[len] 漢字（1文字、UTF-8）
+    n_readings : uint8      既知の読みの個数
+    以下 n_readings 個:
+      len      : uint8      UTF-8バイト長
+      utf8     : uint8[len] 読み（カタカナ、UTF-8）
+  読みモデルの候補制約（辞書に載っている漢字は既知の読み+CONTINUE+SKIPのみを
+  argmax 候補とする）に使う。モデル動作に必須のデータなので .mbm に同梱する。
+
 バージョン履歴
   0x01: 初版
   0x02: 読みモデルの量子化scaleをクラスごと(n_classes個)に変更
   0x03: 人名辞書テーブルと NAME_FLAG_* 特徴量（0xC3-0xC5）を追加
-  0x04: 人名辞書テーブルにユニット別読みを追加（低自信度フォールバック用）
+  0x04: 人名辞書テーブルにユニット別読みを追加（低自信度フォールバック用）。
+        アルファ期間中に単一漢字辞書テーブルも追加（バージョン番号は据え置き。
+        追加前の 0x04 ファイルは読み込み時にエラーになるため再エクスポートすること）
 """
 
 import re
@@ -72,6 +86,7 @@ import joblib
 import numpy as np
 
 from .name_dict import NAME_DICT_FILENAME, parse_name_dict_text
+from .predictor import SINGLE_KANJI_DICT_FILENAME, _parse_kanji_dict_tsv
 
 
 # =====================================================================
@@ -436,6 +451,16 @@ def export(zip_path: str, out_path: str) -> None:
                 name_entries = parse_name_dict_text(
                     zf.read(NAME_DICT_FILENAME).decode("utf-8")
                 )
+            # 学習時に同梱された単一漢字辞書（旧ZIPで無い場合はパッケージ内蔵で代替）
+            if SINGLE_KANJI_DICT_FILENAME in zf.namelist():
+                single_kanji_text = zf.read(SINGLE_KANJI_DICT_FILENAME).decode("utf-8")
+            else:
+                from importlib import resources
+                single_kanji_text = (
+                    resources.files("momo_py")
+                    / f"resources/{SINGLE_KANJI_DICT_FILENAME}"
+                ).read_text(encoding="utf-8")
+                print("⚠️  ZIPに単一漢字辞書が同梱されていないため、パッケージ内蔵の辞書を使用します。")
         bundle = joblib.load(os.path.join(tmp_dir, bundle_name))
     finally:
         import shutil
@@ -544,8 +569,28 @@ def export(zip_path: str, out_path: str) -> None:
                 name_dict_bytes.append(len(r_enc))
                 name_dict_bytes += r_enc
 
+    # --- 単一漢字辞書テーブル ---
+    single_kanji_dict = _parse_kanji_dict_tsv(single_kanji_text)
+    print(f"🔨 単一漢字辞書テーブル変換中... ({len(single_kanji_dict)} エントリ)")
+    kanji_dict_bytes = bytearray()
+    kanji_dict_bytes += struct.pack('<I', len(single_kanji_dict))
+    for kanji in sorted(single_kanji_dict):
+        readings = single_kanji_dict[kanji]
+        encoded = kanji.encode("utf-8")
+        assert len(encoded) <= 255, f"漢字キーが長すぎます: {kanji!r}"
+        kanji_dict_bytes.append(len(encoded))
+        kanji_dict_bytes += encoded
+        assert len(readings) <= 255, f"読みが多すぎます: {kanji!r}"
+        kanji_dict_bytes.append(len(readings))
+        for reading in readings:
+            r_enc = reading.encode("utf-8")
+            assert len(r_enc) <= 255, f"読みが長すぎます: {reading!r}"
+            kanji_dict_bytes.append(len(r_enc))
+            kanji_dict_bytes += r_enc
+
     # --- ファイルヘッダ ---
     # version 0x04: 人名辞書テーブルにユニット別読みを追加
+    #               （アルファ期間中に単一漢字辞書テーブルも追加、番号据え置き）
     header = struct.pack(
         '<4sBBBBII',
         b'MOMO',          # magic
@@ -565,6 +610,7 @@ def export(zip_path: str, out_path: str) -> None:
         f.write(intercept_r_bytes)
         f.write(boundary_bytes)
         f.write(name_dict_bytes)
+        f.write(kanji_dict_bytes)
 
     size_mb = os.path.getsize(out_path) / 1024 / 1024
     print(f"✅ 完了: {size_mb:.1f} MB")
@@ -574,6 +620,7 @@ def export(zip_path: str, out_path: str) -> None:
     print(f"   読み intercept: {len(intercept_r_bytes):>10,} bytes")
     print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (scale={scale_b:.6f})")
     print(f"   人名辞書      : {len(name_dict_bytes):>10,} bytes  ({len(name_entries)} エントリ)")
+    print(f"   単一漢字辞書  : {len(kanji_dict_bytes):>10,} bytes  ({len(single_kanji_dict)} エントリ)")
 
 
 # =====================================================================

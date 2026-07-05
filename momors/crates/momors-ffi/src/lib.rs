@@ -268,8 +268,7 @@ unsafe fn lpwstr_to_string(ptr: *const u16) -> Option<String> {
 
 /// モデルパスから予測器とかな→点字変換器を構築する。失敗時は NULL。
 ///
-/// モデルと同じディレクトリにある `single_character_dic.tsv`（漢字辞書）があれば利用し、
-/// 無ければ辞書なしにフォールバックする。
+/// 単一漢字辞書は `.mbm` に同梱されたもの（学習時と同一）を使う。
 ///
 /// テーブル選択の優先順位:
 /// 1. `table_name` が `Some` → 組み込みテーブルを名前で選択（失敗すれば NULL）
@@ -281,15 +280,8 @@ fn build_predictor(
     toml_path: Option<&str>,
 ) -> *mut PredictorHandle {
     let path = std::path::Path::new(model_path);
-    let dir = path.parent();
 
-    let mut config = PredictorConfig::new(path);
-    if let Some(dir) = dir {
-        let dict = dir.join("single_character_dic.tsv");
-        if dict.exists() {
-            config = config.with_kanji_dict_path(&dict);
-        }
-    }
+    let config = PredictorConfig::new(path);
 
     let predictor = match Predictor::load(config) {
         Ok(p) => p,

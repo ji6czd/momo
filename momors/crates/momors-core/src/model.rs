@@ -83,11 +83,17 @@ pub struct MomoModel {
 
     // --- 人名辞書 (version 0x03 で追加) ---
     /// 人名辞書の照合用インデックス。辞書なしモデルでは空。
-    /// 推論時に [`compute_name_flags`] で B/I フラグを計算し、
-    /// `NameFlag*` 特徴量の入力にする。
+    /// 推論時に [`compute_name_matches`] で B/I フラグと固定読みを計算し、
+    /// `NameFlag*` 特徴量と読みフォールバックの入力にする。
     ///
-    /// [`compute_name_flags`]: crate::name_dict::compute_name_flags
+    /// [`compute_name_matches`]: crate::name_dict::compute_name_matches
     pub(crate) name_dict: NameIndex,
+
+    // --- 単一漢字辞書 (version 0x04 途中で追加) ---
+    /// 読みモデルの候補制約に使う単一漢字辞書（漢字→既知の読みリスト）。
+    /// char でソート済み（binary_search 用）。
+    /// `PredictorConfig::kanji_dict_path` の明示指定があればそちらが優先される。
+    pub(crate) kanji_dict: Vec<(char, Vec<String>)>,
 
     // --- サイズ情報 ---
     pub(crate) n_classes: u32,
@@ -160,6 +166,7 @@ impl Default for MomoModel {
             boundary_data: Vec::new(),
             boundary_intercept: [0.0, 0.0],
             name_dict: NameIndex::new(),
+            kanji_dict: Vec::new(),
             n_classes: 0,
             n_features: 0,
         }

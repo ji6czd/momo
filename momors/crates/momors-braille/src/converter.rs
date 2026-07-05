@@ -322,11 +322,11 @@ impl BrailleConverter {
         }
     }
 
-    /// 文字 `c` の句読点としての class を返す（未分類・非句読点なら `"none"`）。
+    /// 文字 `c` の句読点としての class を返す（未分類・非句読点なら予約名 `"none"`）。
     /// ASCII なら `punct_latin`、それ以外は `punct_jp` を参照する。
     fn class_of(&self, c: Option<char>) -> String {
         let Some(c) = c else {
-            return "none".to_string();
+            return crate::table::CLASS_NONE.to_string();
         };
         let key = c.to_string();
         let cell = if (c as u32) < 0x80 {
@@ -335,7 +335,7 @@ impl BrailleConverter {
             self.table.punct_jp.get(&key)
         };
         cell.and_then(|cell| cell.class.clone())
-            .unwrap_or_else(|| "none".to_string())
+            .unwrap_or_else(|| crate::table::CLASS_NONE.to_string())
     }
 
     /// テーブル未定義文字を `unknown_char` ポリシーに従って出力する。

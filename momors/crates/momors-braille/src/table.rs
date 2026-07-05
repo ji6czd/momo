@@ -1,7 +1,11 @@
-use crate::Result;
+use crate::{Error, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
+
+/// 予約クラス名。分類を持たない文字（class 未指定・非句読点）を表すため
+/// converter が暗黙に使う。テーブル側で宣言・使用はできない。
+pub(crate) const CLASS_NONE: &str = "none";
 
 // ============================================================
 // TOML デシリアライズ用の中間型
@@ -114,6 +118,10 @@ struct RawTable {
 
 #[derive(Debug, Deserialize)]
 struct RawPunct {
+    /// このテーブルで使えるクラス名の宣言。`class` と `suppress_before` に
+    /// 現れる名前はここに宣言されていなければロードエラーになる（typo 検出）。
+    #[serde(default)]
+    classes: Vec<String>,
     /// 日本語（全角）記号。foreign_word フラグが OFF のとき参照する。
     jp: HashMap<String, PunctEntry>,
     /// ASCII 記号。foreign_word フラグが ON のとき参照する。
@@ -235,7 +243,7 @@ impl BrailleTable {
     /// TOML 文字列からテーブルを構築する。
     pub fn from_toml(toml_str: &str) -> Result<Self> {
         let raw: RawBrailleFile = toml::from_str(toml_str)?;
-        Ok(Self::from_raw(raw))
+        Self::from_raw(raw)
     }
 
     /// デフォルトの組み込みテーブル（日本語１級）を返す。
@@ -249,25 +257,72 @@ impl BrailleTable {
         Self::from_toml(&toml_str)
     }
 
-    fn from_raw(raw: RawBrailleFile) -> Self {
+    fn from_raw(raw: RawBrailleFile) -> Result<Self> {
         let to_punct = |map: HashMap<String, PunctEntry>| -> HashMap<String, PunctCell> {
             map.into_iter().map(|(k, v)| (k, v.into_cell())).collect()
         };
 
-        Self {
+        let declared = raw.table.punct.classes;
+        let punct_jp = to_punct(raw.table.punct.jp);
+        let punct_latin = to_punct(raw.table.punct.latin);
+        validate_punct_classes(&declared, "jp", &punct_jp)?;
+        validate_punct_classes(&declared, "latin", &punct_latin)?;
+
+        Ok(Self {
             name: raw.metadata.name,
             displayname: raw.metadata.displayname,
             kana_compound: raw.table.kana.compound,
             kana_single: raw.table.kana.single,
-            punct_jp: to_punct(raw.table.punct.jp),
-            punct_latin: to_punct(raw.table.punct.latin),
+            punct_jp,
+            punct_latin,
             digit: raw.table.digit,
             latin: raw.table.latin,
             flag_digit: raw.flags.digit,
             flag_foreign_word: raw.flags.foreign_word,
             flag_capital: raw.flags.capital,
+        })
+    }
+}
+
+/// `class` / `suppress_before` に現れるクラス名がすべて `classes` に
+/// 宣言されているかを検証する。予約名 `"none"` は宣言不可・`class` に指定不可だが、
+/// `suppress_before` の条件には使える（「次が無分類の文字」を意味する）。
+fn validate_punct_classes(
+    declared: &[String],
+    section: &str,
+    cells: &HashMap<String, PunctCell>,
+) -> Result<()> {
+    if declared.iter().any(|c| c == CLASS_NONE) {
+        return Err(Error::Validation(format!(
+            "[table.punct] classes: \"{CLASS_NONE}\" は予約名のため宣言できません"
+        )));
+    }
+    let is_declared = |name: &str| declared.iter().any(|c| c == name);
+    for (key, cell) in cells {
+        if let Some(class) = &cell.class {
+            if !is_declared(class) {
+                return Err(Error::Validation(format!(
+                    "[table.punct.{section}] \"{key}\": class \"{class}\" は \
+                     [table.punct] classes に宣言されていません"
+                )));
+            }
+        }
+        if let Some(matcher) = &cell.suppress_before {
+            let names = match matcher {
+                ClassMatcher::Include(list) => list,
+                ClassMatcher::Exclude { exclude } => exclude,
+            };
+            for name in names {
+                if name != CLASS_NONE && !is_declared(name) {
+                    return Err(Error::Validation(format!(
+                        "[table.punct.{section}] \"{key}\": suppress_before の \"{name}\" は \
+                         [table.punct] classes に宣言されていません"
+                    )));
+                }
+            }
         }
     }
+    Ok(())
 }
 
 // ============================================================
@@ -369,6 +424,117 @@ mod tests {
             let cell = table.punct_jp.get(key).unwrap();
             assert_eq!(cell.class.as_deref(), Some("pause"), "class of {key}");
         }
+    }
+
+    /// 検証テスト用の最小 TOML。`punct` に `[table.punct]` 以下のセクションを渡す。
+    fn minimal_toml(punct: &str) -> String {
+        format!(
+            r#"
+[flags.digit]
+[flags.foreign_word]
+[flags.capital]
+
+[table.kana.compound]
+[table.kana.single]
+
+{punct}
+
+[table.digit]
+[table.latin]
+"#
+        )
+    }
+
+    #[test]
+    fn class_validation_accepts_declared_names() {
+        let toml = minimal_toml(
+            r#"
+[table.punct]
+classes = ["stop", "pause"]
+[table.punct.jp]
+"。" = { braille = "⠲", trailing = 2, class = "stop", suppress_before = ["stop", "none"] }
+"、" = { braille = "⠰", trailing = 1, class = "pause", suppress_before = { exclude = ["stop"] } }
+[table.punct.latin]
+"#,
+        );
+        BrailleTable::from_toml(&toml).expect("宣言済みクラスと予約名 none は通る");
+    }
+
+    #[test]
+    fn class_validation_catches_typo_in_class() {
+        let toml = minimal_toml(
+            r#"
+[table.punct]
+classes = ["stop"]
+[table.punct.jp]
+"。" = { braille = "⠲", trailing = 2, class = "stpo" }
+[table.punct.latin]
+"#,
+        );
+        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        assert!(matches!(err, Error::Validation(_)), "{err}");
+        assert!(err.to_string().contains("stpo"), "{err}");
+    }
+
+    #[test]
+    fn class_validation_catches_typo_in_suppress_before() {
+        let toml = minimal_toml(
+            r#"
+[table.punct]
+classes = ["stop"]
+[table.punct.jp]
+"。" = { braille = "⠲", trailing = 2, class = "stop", suppress_before = ["stpo"] }
+[table.punct.latin]
+"#,
+        );
+        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        assert!(matches!(err, Error::Validation(_)), "{err}");
+        assert!(err.to_string().contains("stpo"), "{err}");
+    }
+
+    #[test]
+    fn class_validation_catches_typo_in_exclude() {
+        let toml = minimal_toml(
+            r#"
+[table.punct]
+classes = ["stop"]
+[table.punct.latin]
+"." = { braille = "⠲", trailing = 1, suppress_before = { exclude = ["opne"] } }
+[table.punct.jp]
+"#,
+        );
+        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        assert!(matches!(err, Error::Validation(_)), "{err}");
+        assert!(err.to_string().contains("opne"), "{err}");
+    }
+
+    #[test]
+    fn class_validation_requires_declaration() {
+        // classes 宣言なしで class を使うとエラー（暗黙の語彙は認めない）
+        let toml = minimal_toml(
+            r#"
+[table.punct.jp]
+"。" = { braille = "⠲", trailing = 2, class = "stop" }
+[table.punct.latin]
+"#,
+        );
+        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        assert!(matches!(err, Error::Validation(_)), "{err}");
+    }
+
+    #[test]
+    fn class_validation_rejects_reserved_none() {
+        let toml = minimal_toml(
+            r#"
+[table.punct]
+classes = ["stop", "none"]
+[table.punct.jp]
+[table.punct.latin]
+"#,
+        );
+        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        assert!(matches!(err, Error::Validation(_)), "{err}");
+        assert!(err.to_string().contains("予約名"), "{err}");
     }
 
     #[test]

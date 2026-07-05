@@ -10,6 +10,9 @@ pub enum Error {
 
     #[error("unknown embedded table: {0}")]
     UnknownTable(String),
+
+    #[error("braille table validation error: {0}")]
+    Validation(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

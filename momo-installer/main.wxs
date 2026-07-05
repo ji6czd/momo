@@ -149,6 +149,11 @@
                                   Source='$(var.StageDir)\data\basic_data_7.mbm'/>
                             <File Id='single_dict' Name='single_character_dic.tsv' DiskId='1'
                                   Source='$(var.StageDir)\data\single_character_dic.tsv'/>
+                            <!-- 人名辞書。読み・フラグは .mbm に同梱済みのものが使われるため
+                                 実行時には読まれないが、内容の確認・将来の辞書編集UIの
+                                 ために学習時の辞書をデータとして配布する。 -->
+                            <File Id='person_name_dict' Name='person_name_dic.tsv' DiskId='1'
+                                  Source='$(var.StageDir)\data\person_name_dic.tsv'/>
                         </Component>
                         <!-- MOMO_DATASET_DIR 環境変数 -->
                         <Component Id='DatasetEnv'

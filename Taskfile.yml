@@ -249,6 +249,7 @@ tasks:
       - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/single_character_dic.tsv"        "{{.STAGE}}/data/"
+      - cp "{{.DATA}}/person_name_dic.tsv"             "{{.STAGE}}/data/"
 
   dist:msi:
     desc: Build Windows installer (.msi) — requires WiX Toolset v3

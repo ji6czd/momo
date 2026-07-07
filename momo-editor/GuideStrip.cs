@@ -36,7 +36,8 @@ sealed class GuideStrip : Control
         BackColor = SystemColors.Window;
         ForeColor = SystemColors.WindowText;
         AccessibleRole = AccessibleRole.StaticText;
-        AccessibleName = "読みガイド";
+        // JAWS スクリプト等が UIA ツリーから名前で特定しやすいよう英語名にする。
+        AccessibleName = "ReadingGuide";
     }
 
     /// <summary>表示する点字行・読みセグメント・カーソルセル位置を設定して再描画する。</summary>

@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text;
+using System.Windows.Forms.Automation;
 
 namespace MomoEditor;
 
@@ -95,11 +96,14 @@ public partial class Form1 : Form
         statusLabel.Text = $"行: {line + 1}  セル: {col}{mode}";
     }
 
-    // ---- 読みガイド ----
+    // ---- 読みガイド・読み上げガイド ----
 
     // 直近に逆点訳した点字行とその結果（行内でカーソルだけ動いたときの再計算を避ける）。
     private string? _guideLineCache;
     private IReadOnlyList<MomoFfi.GuideSegment> _guideSegments = [];
+
+    // 直近に読み上げた表示行。同じ行で繰り返し発話しないための追跡。
+    private int _announcedLine = -1;
 
     private void GuideMenuItem_Click(object? sender, EventArgs e)
     {
@@ -108,13 +112,20 @@ public partial class Form1 : Form
         richTextBox.Focus();
     }
 
+    private void SpeechGuideMenuItem_Click(object? sender, EventArgs e)
+    {
+        richTextBox.Focus();
+        Announce(speechGuideMenuItem.Checked ? "読み上げガイド オン" : "読み上げガイド オフ",
+            AutomationNotificationProcessing.ImportantMostRecent);
+    }
+
     /// <summary>
-    /// カーソル行の点字を逆点訳し、ガイド帯にセルと読みを表示する。
-    /// 範囲選択中・ヘッダ行・フォールバック表示中は何も表示しない。
+    /// カーソル位置の変化に合わせて、読みガイド帯（視覚）と読み上げガイド（UIA 通知）を
+    /// 更新する。逆点訳キャッシュは両者で共有するため、ガイド帯の表示状態とは無関係に
+    /// 更新する。範囲選択中・フォールバック表示中は何もしない。
     /// </summary>
     private void UpdateGuide()
     {
-        if (!guideMenuItem.Checked) return;
         // 範囲選択中はキャレット位置が定まらないので更新しない（現状維持）。
         if (richTextBox.SelectionLength != 0) return;
 
@@ -126,28 +137,69 @@ public partial class Form1 : Form
 
         int pos = richTextBox.SelectionStart;
         int flatLine = richTextBox.GetLineFromCharIndex(pos);
-        if (flatLine < 0 || flatLine >= _view.PhysicalLineCount || _view.IsHeaderAt(flatLine))
+        if (flatLine < 0 || flatLine >= _view.PhysicalLineCount)
         {
             ClearGuide();
             return;
         }
 
+        bool isHeader = _view.IsHeaderAt(flatLine);
         string content = _view.ContentAt(flatLine);
         int col = pos - richTextBox.GetFirstCharIndexFromLine(flatLine);
 
-        if (content != _guideLineCache)
+        // 逆点訳（行内容単位のキャッシュ）。ヘッダ行は点字ではないので対象外。
+        if (!isHeader && content != _guideLineCache)
         {
             var result = MomoFfi.BackTranslateLine(content);
             _guideSegments = result?.Segments ?? [];
             _guideLineCache = content;
         }
-        guideStrip.SetData(content, _guideSegments, col);
+
+        // ガイド帯のデータは表示 OFF でも更新する。GuideStrip の AccessibleDescription に
+        // 行全体の読みが入るため、スクリーンリーダー（JAWS スクリプト等）が
+        // いつでも UIA 経由で現在行の読みを取得できる。
+        if (isHeader) guideStrip.SetData("", [], -1);
+        else guideStrip.SetData(content, _guideSegments, col);
+
+        AnnounceCursorMove(flatLine, isHeader, content);
+    }
+
+    /// <summary>
+    /// カーソル移動に応じた読み上げ。行が変わったときだけ行全体の読みを UIA 通知で
+    /// 発話する。行内の左右移動はスクリーンリーダー自身のセル読み（ドット構成）に任せる。
+    /// 再整形中（_suppressModified）や読み上げオフのときは位置の追跡だけ行い発話しない。
+    /// </summary>
+    private void AnnounceCursorMove(int flatLine, bool isHeader, string content)
+    {
+        bool lineChanged = flatLine != _announcedLine;
+        _announcedLine = flatLine;
+
+        if (!lineChanged || _suppressModified || !speechGuideMenuItem.Checked) return;
+
+        string reading;
+        if (isHeader) reading = content.Trim();
+        else if (content.Length == 0) reading = "空行";
+        else reading = string.Concat(_guideSegments.Select(s => s.Text));
+        Announce(reading);
+    }
+
+    /// <summary>
+    /// スクリーンリーダーへ UIA 通知で発話を依頼する。既定の MostRecent は、
+    /// 矢印キー連打などで未発話の通知が溜まったとき最新のものだけを発話させる。
+    /// </summary>
+    private void Announce(string text,
+        AutomationNotificationProcessing processing = AutomationNotificationProcessing.MostRecent)
+    {
+        if (text.Length == 0) return;
+        richTextBox.AccessibilityObject.RaiseAutomationNotification(
+            AutomationNotificationKind.Other, processing, text);
     }
 
     private void ClearGuide()
     {
         _guideLineCache = "";
         _guideSegments = [];
+        _announcedLine = -1;
         guideStrip.SetData("", [], -1);
     }
 
@@ -508,12 +560,8 @@ public partial class Form1 : Form
         richTextBox.Focus();
         UpdateStatus();
 
-        var message = _brailleInputMode ? "点字入力モード オン" : "点字入力モード オフ";
-        richTextBox.AccessibilityObject.RaiseAutomationNotification(
-            System.Windows.Forms.Automation.AutomationNotificationKind.ActionCompleted,
-            System.Windows.Forms.Automation.AutomationNotificationProcessing.ImportantMostRecent,
-            message
-        );
+        Announce(_brailleInputMode ? "点字入力モード オン" : "点字入力モード オフ",
+            AutomationNotificationProcessing.ImportantMostRecent);
     }
 
     // ---- 編集操作（セグメントモデルを通じて行う） ----

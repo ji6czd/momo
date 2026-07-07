@@ -34,6 +34,7 @@ partial class Form1
         pageSetupMenuItem = new ToolStripMenuItem();
         viewMenu = new ToolStripMenuItem();
         guideMenuItem = new ToolStripMenuItem();
+        speechGuideMenuItem = new ToolStripMenuItem();
         helpMenu = new ToolStripMenuItem();
         aboutMenuItem = new ToolStripMenuItem();
         richTextBox = new RichTextBox();
@@ -147,13 +148,21 @@ partial class Form1
 
         // viewMenu
         viewMenu.Text = "表示(&V)";
-        viewMenu.DropDownItems.AddRange(new ToolStripItem[] { guideMenuItem });
+        viewMenu.DropDownItems.AddRange(new ToolStripItem[] { guideMenuItem, speechGuideMenuItem });
 
         guideMenuItem.Text = "読みガイド(&G)";
         guideMenuItem.ShortcutKeys = Keys.Control | Keys.G;
         guideMenuItem.CheckOnClick = true;
         guideMenuItem.Checked = true;
         guideMenuItem.Click += GuideMenuItem_Click;
+
+        // 読み上げガイド: カーソル移動に合わせて逆点訳の読みを UIA 通知で
+        // スクリーンリーダーに発話させる（視覚の読みガイドとは独立に動く）。
+        speechGuideMenuItem.Text = "読み上げガイド(&S)";
+        speechGuideMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.G;
+        speechGuideMenuItem.CheckOnClick = true;
+        speechGuideMenuItem.Checked = true;
+        speechGuideMenuItem.Click += SpeechGuideMenuItem_Click;
 
         // helpMenu
         helpMenu.Text = "ヘルプ(&H)";
@@ -175,7 +184,7 @@ partial class Form1
         // guideStrip（編集面の下に読みガイドを表示する帯）
         guideStrip.Dock = DockStyle.Bottom;
         guideStrip.Font = new Font("MS Gothic", 16F, FontStyle.Regular, GraphicsUnit.Point);
-        guideStrip.AccessibleName = "読みガイド";
+        guideStrip.AccessibleName = "ReadingGuide"; // GuideStrip コンストラクタと同名（UIA 特定用の英語名）
 
         // statusStrip
         statusLabel.Text = "行: 1  セル: 0";
@@ -224,6 +233,7 @@ partial class Form1
     private ToolStripMenuItem pageSetupMenuItem;
     private ToolStripMenuItem viewMenu;
     private ToolStripMenuItem guideMenuItem;
+    private ToolStripMenuItem speechGuideMenuItem;
     private RichTextBox richTextBox;
     private GuideStrip guideStrip;
     private StatusStrip statusStrip;

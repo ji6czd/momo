@@ -11,6 +11,7 @@ from momo_py.predictor import (
     PredictionResult,
     Predictor,
     PredictorConfig,
+    _remap_result_to_source,
     load_custom_dict,
 )
 
@@ -60,6 +61,42 @@ class TestLoadCustomDict:
         # 拗音を含む表層形はユニット単位（きゃ = 1ユニット）
         d = self._load(tmp_path, "きゃく\tキャ/ク\n")
         assert d["きゃく"] == [("キャ", False), ("ク", False)]
+
+
+# ------------------------------------------------------------------ #
+# _remap_result_to_source()
+# ------------------------------------------------------------------ #
+class TestRemapResultToSource:
+    def test_ligature_expansion_remap(self):
+        # 原文 "oﬃce"（4文字）→ 正規化 "office"（6文字）のケース。
+        # パイプラインは正規化テキスト基準の結果を作る。
+        result = PredictionResult(
+            source_text="office",
+            kana_text="office",
+            confidences=[1.0] * 6,
+            kana_to_src_index=[0, 1, 2, 3, 4, 5],
+            src_to_kana_index=[[0], [1], [2], [3], [4], [5]],
+        )
+        _remap_result_to_source(result, "oﬃce", [0, 1, 1, 1, 2, 3])
+        assert result.source_text == "oﬃce"
+        assert result.kana_text == "office"  # 仮名は変わらない
+        # ﬃ 由来の f/f/i はすべて原文位置1を指す
+        assert result.kana_to_src_index == [0, 1, 1, 1, 2, 3]
+        # 原文の1文字（ﬃ）に仮名3文字分が集約される
+        assert result.src_to_kana_index == [[0], [1, 2, 3], [4], [5]]
+
+    def test_identity_is_noop(self):
+        result = PredictionResult(
+            source_text="東京",
+            kana_text="トーキョー",
+            confidences=[1.0] * 5,
+            kana_to_src_index=[0, 0, 1, 1, 1],
+            src_to_kana_index=[[0, 1], [2, 3, 4]],
+        )
+        _remap_result_to_source(result, "東京", [0, 1])
+        assert result.source_text == "東京"
+        assert result.kana_to_src_index == [0, 0, 1, 1, 1]
+        assert result.src_to_kana_index == [[0, 1], [2, 3, 4]]
 
 
 # ------------------------------------------------------------------ #

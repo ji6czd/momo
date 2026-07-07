@@ -6,3 +6,6 @@ testdata/sample.BET
 # cbindgen 生成物
 crates/momors-ffi/include/momo.h
 
+# 自動生成テーブル
+crates/momors-core/src/char_type/
+crates/momors-core/src/normalize/

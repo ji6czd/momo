@@ -1,6 +1,6 @@
 import unicodedata
 from enum import Enum
-from typing import List
+from typing import Dict, List, Tuple
 
 
 class CharType(str, Enum):
@@ -134,18 +134,76 @@ def convert_to_katakana(c: str) -> str:
     return c
 
 
+# ---------------------------------------------------------------
+# 入力正規化
+# ---------------------------------------------------------------
+# 選択的NFKC正規化の対象コードポイント範囲。
+# ブランケットNFKCは全角英数字の半角化など学習データ方針と衝突する変換を
+# 含むため、対象カテゴリを明示的に列挙する。カテゴリを追加するときは
+# ここに範囲を足し、Rust側テーブルを再生成する
+# (momors/tools/gen_normalize_table.py)。
+
+# 1→1変換のみのカテゴリ（原文の文字数・位置が変わらない）。
+# 通常のCJK統合漢字と見た目が同じ・酷似する別符号点を畳み込む。
+_COMPAT_IDEOGRAPH_RANGES: List[Tuple[int, int]] = [
+    (0x2E80, 0x2EFF),  # CJK部首補助
+    (0x2F00, 0x2FD5),  # 康煕部首
+    (0xF900, 0xFAFF),  # CJK互換漢字
+    (0x2F800, 0x2FA1F),  # CJK互換漢字補助
+]
+
+# 1→N展開を含むカテゴリ（原文位置は normalize_input() のマップで追跡する）
+_EXPANSION_RANGES: Dict[str, List[Tuple[int, int]]] = {
+    # 欧文リガチャ: ﬃ→ffi 等。PDF抽出テキストやDTP由来のテキストに混入する
+    "latin_ligatures": [(0xFB00, 0xFB06)],
+}
+
+_ALL_NORMALIZE_RANGES: List[Tuple[int, int]] = sorted(
+    _COMPAT_IDEOGRAPH_RANGES
+    + [r for ranges in _EXPANSION_RANGES.values() for r in ranges]
+)
+
+
+def _in_ranges(cp: int, ranges: List[Tuple[int, int]]) -> bool:
+    return any(lo <= cp <= hi for lo, hi in ranges)
+
+
 def normalize_compat_ideographs(text: str) -> str:
+    """互換漢字系コードポイントをCJK統合漢字へ畳み込む（1→1変換のみ）。
+
+    文字数・原文位置が変わらないことが保証されるため、辞書表層形など
+    インデックスマップを持てない箇所の正規化に使う。推論入力の正規化は
+    normalize_input() を使うこと。
+    """
     return "".join(
         unicodedata.normalize("NFKC", c)
-        if (
-            "\u2e80" <= c <= "\u2eff"  # CJK部首補助
-            or "\u2f00" <= c <= "\u2fd5"  # 康煕部首
-            or "\uf900" <= c <= "\ufaff"  # CJK互換漢字
-            or "\U0002f800" <= c <= "\U0002fa1f"  # CJK互換漢字補助
-        )
+        if _in_ranges(ord(c), _COMPAT_IDEOGRAPH_RANGES)
         else c
         for c in text
     )
+
+
+def normalize_input(text: str) -> Tuple[str, List[int]]:
+    """推論入力テキストを選択的にNFKC正規化する。
+
+    互換漢字系（1→1）に加え、_EXPANSION_RANGES のカテゴリ（欧文リガチャ等の
+    1→N展開）も正規化する。
+
+    Returns:
+        (正規化後テキスト, 正規化後の各文字に対応する原文の文字インデックス)
+        1→N展開された文字は、展開後の全文字が同じ原文インデックスを指す。
+    """
+    out_chars: List[str] = []
+    out_map: List[int] = []
+    for i, c in enumerate(text):
+        if _in_ranges(ord(c), _ALL_NORMALIZE_RANGES):
+            for nc in unicodedata.normalize("NFKC", c):
+                out_chars.append(nc)
+                out_map.append(i)
+        else:
+            out_chars.append(c)
+            out_map.append(i)
+    return "".join(out_chars), out_map
 
 
 def has_vowel(char: str, vowel: str) -> bool:

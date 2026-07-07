@@ -23,7 +23,7 @@ from .features import (
 from .utils import (
     split_on_unescaped_slash,
     CharType,
-    normalize_compat_ideographs,
+    normalize_input,
     convert_to_katakana,
 )
 from .name_dict import (
@@ -549,6 +549,27 @@ def _confidence_bar(conf: float, width: int = 12) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+def _remap_result_to_source(
+    result: PredictionResult, source_text: str, norm_to_src: List[int]
+) -> None:
+    """正規化テキスト基準のインデックスを原文（正規化前）基準へ戻す。
+
+    normalize_input() は欧文リガチャ等で1→N展開を行うため、パイプラインが
+    参照する文字位置は原文とずれ得る。source_text を原文へ差し替え、
+    kana_to_src_index / src_to_kana_index を原文の文字位置に変換する。
+    展開で同じ原文文字に複数の正規化後文字が対応する場合、その仮名位置は
+    すべて原文の1文字に集約される。
+    """
+    if result.source_text == source_text:
+        return
+    result.kana_to_src_index = [norm_to_src[i] for i in result.kana_to_src_index]
+    src_to_kana: List[List[int]] = [[] for _ in source_text]
+    for norm_idx, kana_positions in enumerate(result.src_to_kana_index):
+        src_to_kana[norm_to_src[norm_idx]].extend(kana_positions)
+    result.src_to_kana_index = src_to_kana
+    result.source_text = source_text
+
+
 # ==========================================
 # 🌟 LRモデルのバンドル（読み＋境界）
 # ==========================================
@@ -744,13 +765,16 @@ class Predictor:
     def predict(self, text: str) -> PredictionResult:
         if not text:
             return PredictionResult("", "", [], [], [])
-        text = normalize_compat_ideographs(text)
+        # 正規化（欧文リガチャ等の1→N展開を含む）。パイプラインは正規化後
+        # テキスト基準で動き、最後に _remap_result_to_source() で原文基準に戻す。
+        source_text = text
+        text, norm_to_src = normalize_input(text)
 
         source_seq, bypass_indices, ascii_overrides, dict_overrides, dict_boundaries = (
             self._preprocess_text(text)
         )
         if not source_seq:
-            return PredictionResult(text, "", [], [], [[] for _ in text])
+            return PredictionResult(source_text, "", [], [], [[] for _ in source_text])
 
         (
             raw_labels,
@@ -797,6 +821,7 @@ class Predictor:
             decision_sources,
         )
         result.feature_contributions = feature_contributions
+        _remap_result_to_source(result, source_text, norm_to_src)
         return result
 
     # ==========================================

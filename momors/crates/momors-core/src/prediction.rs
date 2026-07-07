@@ -418,11 +418,21 @@ impl Predictor {
     /// - 境界モデルによるスペース挿入
     pub fn predict(&self, text: &str) -> Result<PredictionResult> {
         // --- 正規化 ---
-        // 康煕部首・CJK互換漢字等を正規のCJK統合漢字へ畳み込む。
-        // Python 版 predict() の normalize_compat_ideographs() 呼び出しと対応。
-        let normalized = crate::normalize::normalize_compat_ideographs(text);
-        let text = normalized.as_str();
+        // 康煕部首・CJK互換漢字等の畳み込みに加え、欧文リガチャ等の1→N展開を
+        // 行う。Python 版 predict() の normalize_input() 呼び出しと対応。
+        // パイプラインは正規化後テキスト基準で動かし、最後に原文基準へ戻す。
+        let normalized = crate::normalize::normalize_input(text);
+        let mut result = self.predict_normalized(&normalized.text)?;
+        if let Some(byte_map) = &normalized.byte_map {
+            remap_result_to_source(&mut result, text, byte_map);
+        }
+        Ok(result)
+    }
 
+    /// 正規化済みテキストに対する推論本体。
+    ///
+    /// 結果の source_text とインデックスは正規化後テキスト基準。
+    fn predict_normalized(&self, text: &str) -> Result<PredictionResult> {
         // --- 初期化 ---
         let mut result = PredictionResult {
             source_text: text.to_string(),
@@ -910,6 +920,33 @@ impl Predictor {
 // 自由関数
 // ============================================================
 
+/// 正規化テキスト基準の予測結果を原文（正規化前）基準へ戻す。
+///
+/// `normalize_input()` は欧文リガチャ等で 1→N 展開を行うため、パイプラインが
+/// 参照するバイト位置は原文とずれ得る。source_text を原文へ差し替え、
+/// kana_to_src_index / src_to_kana_index を原文のバイト位置へ変換する。
+/// 展開で同じ原文文字に複数の正規化後文字が対応する場合、その仮名位置は
+/// すべて原文の1文字（の先頭バイト位置）に集約される。
+///
+/// `byte_map` は正規化後テキストの各バイト位置 → 原文バイト位置の対応
+/// （[`crate::normalize::NormalizedText::byte_map`]）。
+fn remap_result_to_source(result: &mut PredictionResult, source_text: &str, byte_map: &[usize]) {
+    for v in &mut result.kana_to_src_index {
+        *v = byte_map[*v];
+    }
+    let mut src_to_kana: Vec<Vec<usize>> = vec![Vec::new(); source_text.len()];
+    for (norm_byte, kana_positions) in std::mem::take(&mut result.src_to_kana_index)
+        .into_iter()
+        .enumerate()
+    {
+        if !kana_positions.is_empty() {
+            src_to_kana[byte_map[norm_byte]].extend(kana_positions);
+        }
+    }
+    result.src_to_kana_index = src_to_kana;
+    result.source_text = source_text.to_string();
+}
+
 /// スコア配列の argmax を返す。
 ///
 /// `n_classes >= 1` は loader (`MomoModel` 読み込み時) が保証する不変条件。
@@ -1322,13 +1359,46 @@ mod tests {
     }
 
     #[test]
-    fn predict_normalizes_compat_ideographs_in_source_text() {
+    fn predict_keeps_original_source_text_for_compat_ideographs() {
         let config = PredictorConfig::new(dummy_model_path());
         let predictor = Predictor::load(config).unwrap();
 
-        // ⺟ (U+2E9F, CJK部首補助) は正規のKANJI「母」(U+6BCD) に畳み込まれる。
+        // ⺟ (U+2E9F, CJK部首補助) は内部で「母」(U+6BCD) に畳み込んで推論するが、
+        // 結果の source_text とインデックスは原文（入力そのまま）基準で返す。
         let result = predictor.predict("⺟").unwrap();
-        assert_eq!(result.source_text(), "母");
+        assert_eq!(result.source_text(), "⺟");
+        assert_eq!(result.source_to_kana().len(), "⺟".len());
+    }
+
+    #[test]
+    fn predict_expands_latin_ligature() {
+        let config = PredictorConfig::new(dummy_model_path());
+        let predictor = Predictor::load(config).unwrap();
+
+        // ﬃ (U+FB03) は "ffi" に展開され ALPHA としてバイパスされる。
+        // source_text とインデックスは原文基準。
+        let src = "o\u{FB03}ce";
+        let result = predictor.predict(src).unwrap();
+        assert_eq!(result.source_text(), src);
+        assert_eq!(
+            result.kana_text().replace(' ', ""),
+            "office",
+            "リガチャが展開されて仮名（バイパス）に現れること"
+        );
+        assert_eq!(result.source_to_kana().len(), src.len());
+
+        // ﬃ（原文バイト1〜3）に展開後の f/f/i すべてが対応する
+        let ligature_kana: Vec<char> = result.source_to_kana()[1]
+            .iter()
+            .map(|&kb| result.kana_text()[kb..].chars().next().unwrap())
+            .filter(|&c| c != ' ')
+            .collect();
+        assert_eq!(ligature_kana, vec!['f', 'f', 'i']);
+
+        // kana_to_src_index はすべて原文の有効な文字境界を指す
+        for &src_byte in result.kana_to_source() {
+            assert!(src.is_char_boundary(src_byte));
+        }
     }
 
     #[test]

@@ -11,6 +11,8 @@ tasks:
     desc: Build Rust workspace (release)
     dir: momors
     cmds:
+      - uv run -p 3.13 tools/gen_char_type_rs.py
+      - uv run -p 3.13 tools/gen_normalize_table.py
       - cargo build --release
 
   python:

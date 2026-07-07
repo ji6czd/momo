@@ -356,7 +356,7 @@ fn read_name_dict<R: Read>(
 
     let mut names = Vec::with_capacity(n_names as usize);
     let mut buf = Vec::new();
-    let mut read_str = |reader: &mut R, buf: &mut Vec<u8>| -> Result<String> {
+    let read_str = |reader: &mut R, buf: &mut Vec<u8>| -> Result<String> {
         let len = reader.read_u8().map_err(io_err(path))? as usize;
         buf.clear();
         buf.resize(len, 0u8);
@@ -410,7 +410,7 @@ fn read_kanji_dict<R: Read>(reader: &mut R, path: &Path) -> Result<Vec<(char, Ve
 
     let mut dict: Vec<(char, Vec<String>)> = Vec::with_capacity(n_entries as usize);
     let mut buf = Vec::new();
-    let mut read_str = |reader: &mut R, buf: &mut Vec<u8>| -> Result<String> {
+    let read_str = |reader: &mut R, buf: &mut Vec<u8>| -> Result<String> {
         let len = reader.read_u8().map_err(io_err(path))? as usize;
         buf.clear();
         buf.resize(len, 0u8);

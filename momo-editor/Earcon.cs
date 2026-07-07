@@ -13,7 +13,7 @@ internal static class Earcon
     private const int SampleRate = 44100;
 
     // 点字入力が成立したときのクリック音（2000Hz / 0.01秒のサイン波）。
-    private static readonly SoundPlayer ClickPlayer = CreateSinePlayer(2000.0, 0.01, 0.4);
+    private static readonly SoundPlayer ClickPlayer = CreateSinePlayer(2000.0, 4, 0.4);
 
     /// <summary>点字セルが1つ入力されたときのクリック音を鳴らす。</summary>
     public static void PlayClick() => ClickPlayer.Play();
@@ -22,11 +22,11 @@ internal static class Earcon
     /// 指定した周波数・長さ・音量のサイン波を再生する <see cref="SoundPlayer"/> を生成する。
     /// </summary>
     /// <param name="frequencyHz">周波数（Hz）。</param>
-    /// <param name="durationSec">長さ（秒）。</param>
+    /// <param name="durationmSec">長さ（秒）。</param>
     /// <param name="volume">振幅（0.0～1.0）。</param>
-    private static SoundPlayer CreateSinePlayer(double frequencyHz, double durationSec, double volume)
+    private static SoundPlayer CreateSinePlayer(double frequencyHz, UInt32 durationmSec, double volume)
     {
-        var wav = BuildSineWav(frequencyHz, durationSec, volume);
+        var wav = BuildSineWav(frequencyHz, durationmSec, volume);
         // SoundPlayer.Play は非同期再生のため、ストリームは再生中も生かしておく必要がある。
         // SoundPlayer ごと static で保持するので問題ない。
         var player = new SoundPlayer(new MemoryStream(wav));
@@ -35,14 +35,14 @@ internal static class Earcon
     }
 
     /// <summary>サイン波の 16bit モノラル PCM WAV をバイト列として生成する。</summary>
-    private static byte[] BuildSineWav(double frequencyHz, double durationSec, double volume)
+    private static byte[] BuildSineWav(double frequencyHz, UInt32 durationmSec, double volume)
     {
         const short channels = 1;
         const short bitsPerSample = 16;
         const short blockAlign = channels * bitsPerSample / 8;
         const int byteRate = SampleRate * blockAlign;
 
-        int sampleCount = (int)(SampleRate * durationSec);
+        int sampleCount = (int)(SampleRate * ((double)durationmSec / 1000.0));
         int dataSize = sampleCount * blockAlign;
 
         using var ms = new MemoryStream(44 + dataSize);

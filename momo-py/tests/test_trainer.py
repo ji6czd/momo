@@ -7,6 +7,8 @@ trainer.py の単体テスト
 import pytest
 from momo_py.trainer import (
     KUTOUTEN,
+    _check_japanese_reading,
+    _check_non_ascii_identity,
     _load_sentences,
     create_data,
     is_suspicious,
@@ -140,6 +142,144 @@ class TestProcessLineToTsv:
     def test_unmatched_name_mark_raises(self):
         with pytest.raises(ValueError, match="対応の取れていない"):
             process_line_to_tsv("{佐藤さんだ。\tサ/トー/ /サ/ン/ダ/。", 1)
+
+
+# ------------------------------------------------------------------ #
+# _check_non_ascii_identity
+# ------------------------------------------------------------------ #
+class TestCheckNonAsciiIdentity:
+    WARN = "🚨 警告"
+
+    # 警告されるケース：全角→半角の置換は点字変換側で行う
+    def test_fullwidth_digit_to_halfwidth_warns(self, capsys):
+        _check_non_ascii_identity("３", "NUM", "3", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    def test_fullwidth_symbol_to_halfwidth_warns(self, capsys):
+        _check_non_ascii_identity("％", "SYMBOL", "%", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    def test_fullwidth_alpha_to_halfwidth_warns(self, capsys):
+        _check_non_ascii_identity("Ａ", "ALPHA", "A", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    def test_other_char_with_kana_reading_warns(self, capsys):
+        # OTHER（丸数字など）はバイパスして点字変換側で処理するため恒等であるべき
+        _check_non_ascii_identity("②", "OTHER", "ニ", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    # 警告されないケース
+    def test_identity_is_ok(self, capsys):
+        _check_non_ascii_identity("％", "SYMBOL", "％", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_identity_with_split_marker_is_ok(self, capsys):
+        _check_non_ascii_identity("％", "SYMBOL", "％+S", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_skip_label_is_ok(self, capsys):
+        _check_non_ascii_identity("％", "SYMBOL", "_", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_ascii_char_is_not_checked(self, capsys):
+        # ASCII範囲の文字は対象外（既存の注釈スタイルを許容）
+        _check_non_ascii_identity("%", "SYMBOL", "パーセント", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_japanese_char_is_not_checked(self, capsys):
+        # かな・漢字・漢数字は読みを学習する文字種なので対象外
+        _check_non_ascii_identity("東", "KANJI", "トウ", 1)
+        _check_non_ascii_identity("三", "JAPANESE_NUMERIC", "ミッ", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_fullwidth_digit_kana_reading_is_ok(self, capsys):
+        # 単一数字のかな読み（"６"→"ムイ"＝六日）は半角数字と同様に許容
+        _check_non_ascii_identity("６", "NUM", "ムイ", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_process_line_integration(self, capsys):
+        # process_line_to_tsv 経由でも警告が出る
+        process_line_to_tsv("３個\t3/コ", 1)
+        assert self.WARN in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ #
+# _check_japanese_reading
+# ------------------------------------------------------------------ #
+class TestCheckJapaneseReading:
+    WARN = "🚨 警告"
+
+    # 警告されるケース：日本語ユニットの読みに半角文字
+    def test_japanese_numeric_halfwidth_digit_warns(self, capsys):
+        _check_japanese_reading("三", "JAPANESE_NUMERIC", "3", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    def test_kanji_halfwidth_digit_warns(self, capsys):
+        # 位取り文字単独（昇格せず KANJI 扱い）の半角数字読み
+        _check_japanese_reading("十", "KANJI", "10", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    def test_partially_halfwidth_warns(self, capsys):
+        # 1文字でも半角が混ざれば警告
+        _check_japanese_reading("十", "JAPANESE_NUMERIC", "1０", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    def test_halfwidth_with_split_marker_warns(self, capsys):
+        # +S を除去した上で判定する
+        _check_japanese_reading("三", "JAPANESE_NUMERIC", "3+S", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    def test_stray_space_in_label_warns(self, capsys):
+        # '/' 抜けでラベルに残った半角スペースも検出する
+        _check_japanese_reading("尋", "KANJI", " ジン", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    def test_hiragana_stray_space_warns(self, capsys):
+        _check_japanese_reading("か", "HIRAGANA", "カ ", 1)
+        assert self.WARN in capsys.readouterr().out
+
+    # 警告されないケース
+    def test_katakana_reading_is_ok(self, capsys):
+        _check_japanese_reading("三", "JAPANESE_NUMERIC", "ミッ", 1)
+        _check_japanese_reading("東", "KANJI", "トウ", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_fullwidth_digit_reading_is_ok(self, capsys):
+        _check_japanese_reading("三", "JAPANESE_NUMERIC", "３", 1)
+        _check_japanese_reading("十", "KANJI", "１０", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_fullwidth_with_split_marker_is_ok(self, capsys):
+        _check_japanese_reading("三", "JAPANESE_NUMERIC", "３+S", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_skip_label_is_ok(self, capsys):
+        _check_japanese_reading("〇", "JAPANESE_NUMERIC", "_", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_continue_label_is_ok(self, capsys):
+        # 手動入力の '---'（読み継続）は正当なラベル
+        _check_japanese_reading("日", "KANJI", "---", 1)
+        process_line_to_tsv("今日\tキョー/---", 1)
+        assert "🚨 警告" not in capsys.readouterr().out
+
+    def test_kanji_numeral_skip_label_is_ok(self, capsys):
+        # 位取り文字のスキップ（"二十五"→"２/_/５" の '十'）は警告しない
+        rows = process_line_to_tsv("二十五\t２/_/５", 1)
+        assert "🚨 警告" not in capsys.readouterr().out
+        labels = {r.split("\t")[0]: r.split("\t")[1] for r in rows}
+        assert labels == {"二": "２", "十": "_", "五": "５"}
+
+    def test_non_japanese_ctype_is_not_checked(self, capsys):
+        # 日本語以外の文字種は対象外（NUMERIC の恒等注釈 "3"→"3" など）
+        _check_japanese_reading("3", "NUM", "3", 1)
+        _check_japanese_reading("A", "ALPHA", "A", 1)
+        assert capsys.readouterr().out == ""
+
+    def test_process_line_integration(self, capsys):
+        # process_line_to_tsv 経由でも警告が出る
+        process_line_to_tsv("三個\t3/コ", 1)
+        assert self.WARN in capsys.readouterr().out
 
 
 # ------------------------------------------------------------------ #

@@ -25,7 +25,7 @@ from .features import (
     LABEL_CONTINUE,
     LABEL_SKIP,
 )
-from .utils import split_on_unescaped_slash, CharType
+from .utils import split_on_unescaped_slash, CharType, get_basic_char_category
 from .name_dict import (
     NAME_DICT_FILENAME,
     NAME_FLAG_BEGIN,
@@ -131,6 +131,68 @@ def _validate_label_chars(r_label: str, line_num: int) -> None:
             )
 
 
+# 読みが原文と異なってよい（=読みを学習する）日本語の文字種。
+# これ以外の非ASCII文字（全角記号・全角英数字・丸数字など）は
+# 点字変換側でパターン置換する方針のため、読みは原文と同一でなければならない。
+_READING_CTYPES = frozenset(
+    {
+        CharType.HIRAGANA,
+        CharType.KATAKANA,
+        CharType.KANJI,
+        CharType.JAPANESE_NUMERIC,
+    }
+)
+
+
+def _check_non_ascii_identity(
+    target_chars: str, ctype: str, r_label: str, line_num: int
+) -> None:
+    """非ASCIIかつ日本語（かな・漢字・漢数字）でない文字の読みが原文と一致するか検査する。
+
+    全角記号などを半角に置き換えた読みはデータ作成時の誤り
+    （半角化・パターン置換は点字変換側で行う方針のため）。
+    """
+    if ctype in _READING_CTYPES or ctype in (CharType.SPACE, CharType.SKIP):
+        return
+    if all(ord(c) <= 0x7F for c in target_chars):
+        return
+    clean_label = r_label.replace("+S", "")
+    if clean_label in (LABEL_SKIP, LABEL_CONTINUE, target_chars):
+        return
+    # 単一数字のかな読み（"３"→"ミッ" 等）は半角数字（"3"→"ミッ"）と同様に許容する
+    if ctype == CharType.NUMERIC and clean_label and all(
+        get_basic_char_category(c) == CharType.KATAKANA for c in clean_label
+    ):
+        return
+    print(
+        f"🚨 警告 (Line {line_num}): 非ASCII文字 '{target_chars}' の読みが "
+        f"'{clean_label}' になっています。\n"
+        f" -> 半角化などの置換は点字変換側で行うため、読みには原文と同じ文字を書いてください。"
+    )
+
+
+def _check_japanese_reading(
+    target_chars: str, ctype: str, r_label: str, line_num: int
+) -> None:
+    """日本語（かな・漢字・漢数字）ユニットの読みに半角文字が混入していないか検査する。
+
+    これらの読みはカタカナ（"三"→"ミッ"）または全角数字（"三"→"３"）で書く。
+    半角数字（"三"→"3"）は全角→半角変換を学習してしまうためデータ作成時の誤り。
+    ラベル内の半角スペース（"ワ/ ジン" のような '/' 抜け）もここで検出される。
+    """
+    if ctype not in _READING_CTYPES:
+        return
+    clean_label = r_label.replace("+S", "")
+    if clean_label in (LABEL_SKIP, LABEL_CONTINUE):
+        return
+    if any(ord(c) <= 0x7F for c in clean_label):
+        print(
+            f"🚨 警告 (Line {line_num}): '{target_chars}' の読み "
+            f"'{clean_label}' に半角文字が含まれています。\n"
+            f" -> 日本語の読みはカタカナまたは全角数字で書いてください。"
+        )
+
+
 def _check_alignment_anomalies(
     target_chars: str,
     ctype: str,
@@ -159,6 +221,9 @@ def _check_alignment_anomalies(
         print(
             f"⚠️  Suspicious (Line {line_num}): 読みインデックス [{label_idx}] '{target_chars}' -> '{r_label}' (原文インデックス: {orig_idx})"
         )
+
+    _check_non_ascii_identity(target_chars, ctype, r_label, line_num)
+    _check_japanese_reading(target_chars, ctype, r_label, line_num)
 
 
 # ==========================================

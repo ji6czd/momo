@@ -175,12 +175,16 @@ impl BrailleBackTranslator {
             }
         }
 
+        // 記号の直後に吸収するスペース数は、その記号のクラスを起点とする
+        // [transitions] の最大値（順変換が挿入しうる上限）から導出する。
         let to_rev = |m: &HashMap<String, crate::table::PunctCell>| -> HashMap<char, (String, u8)> {
             let mut r = HashMap::new();
             for (ch, cell) in m {
                 let cells: Vec<char> = cell.braille.chars().collect();
                 if cells.len() == 1 {
-                    r.insert(cells[0], (ch.clone(), cell.trailing as u8));
+                    let class = cell.class.as_deref().unwrap_or(crate::table::CLASS_NONE);
+                    let trailing = table.max_transition_spaces_from(class);
+                    r.insert(cells[0], (ch.clone(), trailing as u8));
                 }
             }
             r

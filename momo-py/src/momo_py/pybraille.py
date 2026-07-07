@@ -24,13 +24,13 @@ class BrailleTable:
         self.digit: dict[str, str] = raw["table"]["digit"]
         self.latin: dict[str, str] = raw["table"]["latin"]
 
-        def _parse_punct(src: dict[str, Any]) -> dict[str, tuple[str, int]]:
-            out: dict[str, tuple[str, int]] = {}
+        def _parse_punct(src: dict[str, Any]) -> dict[str, tuple[str, str]]:
+            out: dict[str, tuple[str, str]] = {}
             for k, v in src.items():
                 if isinstance(v, str):
-                    out[k] = (v, 0)
+                    out[k] = (v, "none")
                 else:
-                    out[k] = (v["braille"], int(v.get("trailing", 0)))
+                    out[k] = (v["braille"], v.get("class", "none"))
             return out
 
         self.punct_jp = _parse_punct(raw["table"]["punct"]["jp"])
@@ -40,6 +40,12 @@ class BrailleTable:
         self.flag_digit: dict[str, Any] = flags["digit"]
         self.flag_foreign_word: dict[str, Any] = flags["foreign_word"]
         self.flag_capital: dict[str, Any] = flags["capital"]
+
+        # クラス遷移 (from, to) → 挿入する点字スペース数（[transitions]）
+        self.transitions: dict[tuple[str, str], int] = {}
+        for key, spaces in raw.get("transitions", {}).items():
+            frm, _, to = key.partition("->")
+            self.transitions[(frm.strip(), to.strip())] = int(spaces)
 
     @classmethod
     def load(cls) -> BrailleTable:
@@ -94,6 +100,9 @@ class BrailleConverter:
         in_capital_word = False
         in_double_capital = False
 
+        # 直前に出力した文字のクラス（[transitions] の判定に使う）。テキスト先頭は None。
+        prev_class: str | None = None
+
         i = 0
         while i < n:
             c = chars[i]
@@ -102,6 +111,7 @@ class BrailleConverter:
                 # ==================== ASCII ====================
                 if c.isalpha():
                     in_digit = False
+                    self._push_transition(out, prev_class, "latin")
                     if not in_foreign_word:
                         out.append(t.flag_foreign_word["entry_prefix"])
                         in_foreign_word = True
@@ -116,15 +126,18 @@ class BrailleConverter:
                         in_capital_word = False
                         in_double_capital = False
                     out.append(t.latin.get(c.lower(), BRAILLE_SPACE))
+                    prev_class = "latin"
 
                 elif c.isdigit():
                     in_foreign_word = False
                     in_capital_word = False
                     in_double_capital = False
+                    self._push_transition(out, prev_class, "digit")
                     if not in_digit:
                         out.append(t.flag_digit["entry_prefix"])
                         in_digit = True
                     out.append(t.digit.get(c, BRAILLE_SPACE))
+                    prev_class = "digit"
 
                 elif c in (".", ","):
                     # 数字の小数点・桁区切りの可能性: 数字モードを終了させない
@@ -133,7 +146,10 @@ class BrailleConverter:
                         if in_foreign_word
                         else (t.punct_jp.get(c) or t.punct_latin.get(c))
                     )
+                    cur = entry[1] if entry else "none"
+                    self._push_transition(out, prev_class, cur)
                     self._emit_punct(out, entry)
+                    prev_class = cur
 
                 else:
                     # その他 ASCII: 全フラグをリセット
@@ -141,7 +157,11 @@ class BrailleConverter:
                     in_digit = False
                     in_capital_word = False
                     in_double_capital = False
-                    self._emit_punct(out, t.punct_latin.get(c))
+                    entry = t.punct_latin.get(c)
+                    cur = entry[1] if entry else "none"
+                    self._push_transition(out, prev_class, cur)
+                    self._emit_punct(out, entry)
+                    prev_class = cur
 
                 i += 1
 
@@ -167,32 +187,67 @@ class BrailleConverter:
                 if i + 1 < n:
                     key2 = c + chars[i + 1]
                     if key2 in t.kana_compound:
+                        self._push_transition(out, prev_class, "kana")
                         out.append(t.kana_compound[key2])
+                        prev_class = "kana"
                         i += 2
                         continue
 
                 # 単音・日本語記号
                 if c in t.kana_single:
+                    self._push_transition(out, prev_class, "kana")
                     out.append(t.kana_single[c])
+                    prev_class = "kana"
                 elif c in t.punct_jp:
-                    brl, trailing = t.punct_jp[c]
+                    brl, cls = t.punct_jp[c]
+                    self._push_transition(out, prev_class, cls)
                     out.append(brl)
-                    out.append(BRAILLE_SPACE * trailing)
+                    prev_class = cls
                 else:
                     out.append(BRAILLE_SPACE)
+                    prev_class = "none"
 
                 i += 1
 
         return "".join(out)
 
-    def _emit_punct(self, out: list[str], entry: tuple[str, int] | None) -> None:
+    def _emit_punct(self, out: list[str], entry: tuple[str, str] | None) -> None:
         if entry:
-            brl, trailing = entry
-            out.append(brl)
-            if trailing:
-                out.append(BRAILLE_SPACE * trailing)
+            out.append(entry[0])
         else:
             out.append(BRAILLE_SPACE)
+
+    def _transition_spaces(self, frm: str, to: str) -> int:
+        """クラス遷移 frm → to で挿入する点字スペース数。
+
+        完全一致（明示 0 の抑制を含む）が最優先。なければワイルドカード
+        "frm -> *" と "* -> to" の最大値。どちらもなければ 0。
+        """
+        t = self._t.transitions
+        exact = t.get((frm, to))
+        if exact is not None:
+            return exact
+        return max(t.get((frm, "*"), 0), t.get(("*", to), 0))
+
+    def _push_transition(self, out: list[str], prev: str | None, cur: str) -> None:
+        """クラス遷移 prev → cur に [transitions] で宣言されたスペースを挿入する。
+
+        テキスト先頭（prev が None）では発火しない。直前の出力がすでに
+        点字スペースで終わっていれば挿入しない（二重スペース防止）。
+        """
+        if prev is None:
+            return
+        spaces = self._transition_spaces(prev, cur)
+        if spaces and not self._ends_with_space(out):
+            out.append(BRAILLE_SPACE * spaces)
+
+    @staticmethod
+    def _ends_with_space(out: list[str]) -> bool:
+        # exit_suffix が空文字列のときなど、空要素は読み飛ばして判定する
+        for s in reversed(out):
+            if s:
+                return s.endswith(BRAILLE_SPACE)
+        return False
 
     def _peek_first_kana_cell(self, c: str, next_c: str | None) -> str:
         """数字モード終了時の explicit_exit 判定用: 次の点字先頭セルを返す。"""

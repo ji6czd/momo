@@ -1,3 +1,4 @@
+use crate::table::{PunctCell, CLASS_DIGIT, CLASS_KANA, CLASS_LATIN, CLASS_NONE};
 use crate::{BrailleTable, Result};
 use std::collections::HashSet;
 
@@ -142,6 +143,9 @@ impl BrailleConverter {
         let mut in_foreign_word = false; // ⠰ が有効な外来語モード
         let mut in_capital_word = false; // 大文字モード（先頭 ⠠ か ⠠⠠ 済み）
 
+        // 直前に出力した文字のクラス（[transitions] の判定に使う）。テキスト先頭は None。
+        let mut prev_class: Option<String> = None;
+
         let mut i = 0;
         while i < n {
             let c = chars[i];
@@ -156,6 +160,9 @@ impl BrailleConverter {
                 if c.is_ascii_alphabetic() {
                     // 数字モード終了
                     in_digit = false;
+
+                    // クラス遷移スペース（⠰ より前に挿入する）
+                    self.push_transition_spaces(&mut braille, prev_class.as_deref(), CLASS_LATIN);
 
                     // 外来語モード開始（初回のみ ⠰ を挿入）
                     if !in_foreign_word {
@@ -194,10 +201,14 @@ impl BrailleConverter {
                     } else {
                         self.emit_unknown(&mut braille, c);
                     }
+                    prev_class = Some(CLASS_LATIN.to_string());
                 } else if c.is_ascii_digit() {
                     // 外来語モード終了（exit_suffix なし: ⠼ がモード変更を示す）
                     in_foreign_word = false;
                     in_capital_word = false;
+
+                    // クラス遷移スペース（⠼ より前に挿入する）
+                    self.push_transition_spaces(&mut braille, prev_class.as_deref(), CLASS_DIGIT);
 
                     // 数字モード開始（初回のみ ⠼ を挿入）
                     if !in_digit {
@@ -211,6 +222,7 @@ impl BrailleConverter {
                     } else {
                         self.emit_unknown(&mut braille, c);
                     }
+                    prev_class = Some(CLASS_DIGIT.to_string());
                 } else if self.digit_exempt_chars.contains(&c) {
                     // 数字モード中の小数点・桁区切り（flags.digit.exempt_chars）: 数字モードをリセットしない。
                     // 外来語モード中なら punct_latin を、そうでなければ punct_jp を参照。
@@ -223,7 +235,10 @@ impl BrailleConverter {
                             .get(&key)
                             .or_else(|| self.table.punct_latin.get(&key))
                     };
-                    self.emit_punct(&mut braille, entry, c, chars.get(i + 1).copied());
+                    let cur = Self::cell_class(entry);
+                    self.push_transition_spaces(&mut braille, prev_class.as_deref(), &cur);
+                    self.emit_punct(&mut braille, entry, c);
+                    prev_class = Some(cur);
                 } else {
                     // その他 ASCII（スペース含む）: 全フラグをリセット
                     in_foreign_word = false;
@@ -232,7 +247,10 @@ impl BrailleConverter {
 
                     let key = c.to_string();
                     let entry = self.table.punct_latin.get(&key);
-                    self.emit_punct(&mut braille, entry, c, chars.get(i + 1).copied());
+                    let cur = Self::cell_class(entry);
+                    self.push_transition_spaces(&mut braille, prev_class.as_deref(), &cur);
+                    self.emit_punct(&mut braille, entry, c);
+                    prev_class = Some(cur);
                 }
 
                 kana_to_braille.push(brl_pos);
@@ -242,7 +260,8 @@ impl BrailleConverter {
                 // 非 ASCII（日本語文字・記号）
                 // ==================================================
 
-                // 外来語モード終了: 日本語文字への切り替えを示す exit_suffix（⠀）を挿入
+                // 外来語モード終了: 終了マーカー exit_suffix を挿入
+                // （grade1 では空。latin→kana の境界スペースは [transitions] が担う）
                 if in_foreign_word {
                     braille.push_str(&self.table.flag_foreign_word.exit_suffix);
                 }
@@ -265,9 +284,15 @@ impl BrailleConverter {
                     key2.push(c);
                     key2.push(chars[i + 1]);
                     if let Some(brl) = self.table.kana_compound.get(&key2) {
+                        self.push_transition_spaces(
+                            &mut braille,
+                            prev_class.as_deref(),
+                            CLASS_KANA,
+                        );
                         braille.push_str(brl);
                         kana_to_braille.push(brl_pos); // 複合音 1 文字目
                         kana_to_braille.push(brl_pos); // 複合音 2 文字目（同じ点字位置）
+                        prev_class = Some(CLASS_KANA.to_string());
                         i += 2;
                         continue;
                     }
@@ -276,15 +301,17 @@ impl BrailleConverter {
                 // 単音・日本語記号
                 let key = c.to_string();
                 if let Some(brl) = self.table.kana_single.get(&key) {
+                    self.push_transition_spaces(&mut braille, prev_class.as_deref(), CLASS_KANA);
                     braille.push_str(brl);
+                    prev_class = Some(CLASS_KANA.to_string());
                 } else if let Some(cell) = self.table.punct_jp.get(&key) {
+                    let cur = Self::cell_class(Some(cell));
+                    self.push_transition_spaces(&mut braille, prev_class.as_deref(), &cur);
                     braille.push_str(&cell.braille);
-                    let next_class = self.class_of(chars.get(i + 1).copied());
-                    for _ in 0..cell.effective_trailing(&next_class) {
-                        braille.push(BRAILLE_SPACE);
-                    }
+                    prev_class = Some(cur);
                 } else {
                     self.emit_unknown(&mut braille, c);
+                    prev_class = Some(CLASS_NONE.to_string());
                 }
 
                 kana_to_braille.push(brl_pos);
@@ -302,40 +329,34 @@ impl BrailleConverter {
     // private helpers
     // ============================================================
 
-    /// 句読点エントリを braille に追記する。エントリがなければ `fallback` 文字で `emit_unknown` する。
-    /// `next` は後続文字（trailing 抑制の判定に使う）。
-    fn emit_punct(
-        &self,
-        braille: &mut String,
-        entry: Option<&crate::table::PunctCell>,
-        fallback: char,
-        next: Option<char>,
-    ) {
-        if let Some(cell) = entry {
-            braille.push_str(&cell.braille);
-            let next_class = self.class_of(next);
-            for _ in 0..cell.effective_trailing(&next_class) {
+    /// クラス遷移 `prev` → `cur` に `[transitions]` で宣言されたスペースを挿入する。
+    /// テキスト先頭（`prev` が `None`）では発火しない。直前の出力がすでに
+    /// 点字スペースで終わっていれば挿入しない（二重スペース防止）。
+    fn push_transition_spaces(&self, braille: &mut String, prev: Option<&str>, cur: &str) {
+        let Some(prev) = prev else { return };
+        let spaces = self.table.transition_spaces(prev, cur);
+        if spaces > 0 && !braille.ends_with(BRAILLE_SPACE) {
+            for _ in 0..spaces {
                 braille.push(BRAILLE_SPACE);
             }
-        } else {
-            self.emit_unknown(braille, fallback);
         }
     }
 
-    /// 文字 `c` の句読点としての class を返す（未分類・非句読点なら予約名 `"none"`）。
-    /// ASCII なら `punct_latin`、それ以外は `punct_jp` を参照する。
-    fn class_of(&self, c: Option<char>) -> String {
-        let Some(c) = c else {
-            return crate::table::CLASS_NONE.to_string();
-        };
-        let key = c.to_string();
-        let cell = if (c as u32) < 0x80 {
-            self.table.punct_latin.get(&key)
+    /// 句読点エントリの class を返す（エントリなし・class 未指定は予約名 `"none"`）。
+    fn cell_class(entry: Option<&PunctCell>) -> String {
+        entry
+            .and_then(|cell| cell.class.clone())
+            .unwrap_or_else(|| CLASS_NONE.to_string())
+    }
+
+    /// 句読点エントリを braille に追記する。エントリがなければ `fallback` 文字で `emit_unknown` する。
+    /// 前後のスペースはここでは扱わない（呼び出し側の `push_transition_spaces` が担う）。
+    fn emit_punct(&self, braille: &mut String, entry: Option<&PunctCell>, fallback: char) {
+        if let Some(cell) = entry {
+            braille.push_str(&cell.braille);
         } else {
-            self.table.punct_jp.get(&key)
-        };
-        cell.and_then(|cell| cell.class.clone())
-            .unwrap_or_else(|| crate::table::CLASS_NONE.to_string())
+            self.emit_unknown(braille, fallback);
+        }
     }
 
     /// テーブル未定義文字を `unknown_char` ポリシーに従って出力する。
@@ -409,32 +430,90 @@ mod tests {
     #[test]
     fn kana_with_punct() {
         // コンニチワ、セカイ！
-        // 、= ⠰ + 後続スペース1、！→ ！ は ASCII 分岐で punct_latin から引く
+        // 、（pause）→ セ（kana）の境界に "pause -> *" = 1 のスペース。
+        // 末尾の！は次の文字がないので遷移スペースなし。
         let r = conv().convert("コンニチワ、セカイ！").unwrap();
-        // ⠪⠴⠇⠗⠄⠰⠀⠻⠡⠃⠖⠀⠀
-        assert_eq!(r.braille_text(), "⠪⠴⠇⠗⠄⠰⠀⠻⠡⠃⠖⠀⠀");
+        assert_eq!(r.braille_text(), "⠪⠴⠇⠗⠄⠰⠀⠻⠡⠃⠖");
     }
 
     #[test]
-    fn stop_marks_collapse_trailing() {
-        // ！？ はどちらも class = "stop"。直前の！は次が stop なので trailing を出さず、
-        // 最後の？の trailing（2）だけが残る。
+    fn stop_to_stop_suppressed() {
+        // ！？ はどちらも stop。"stop -> stop" = 0 の明示宣言でスペースが入らない。
         let r = conv().convert("！？").unwrap();
-        assert_eq!(r.braille_text(), "⠖⠢⠀⠀");
+        assert_eq!(r.braille_text(), "⠖⠢");
     }
 
     #[test]
-    fn stop_mark_alone_keeps_trailing() {
-        // 単独の！は次が stop でないので通常通り trailing = 2。
+    fn stop_to_kana_inserts_two_spaces() {
+        // ！→ ア は "stop -> *" = 2 で二マスあけ。
         let r = conv().convert("！ア").unwrap();
         assert_eq!(r.braille_text(), "⠖⠀⠀⠁");
     }
 
     #[test]
-    fn three_stop_marks_collapse_to_last() {
-        // ！？！ の 3 連続でも、trailing を出すのは最後の記号だけ。
+    fn three_stop_marks_no_spaces() {
+        // ！？！ の連続はすべて "stop -> stop" = 0。
         let r = conv().convert("！？！").unwrap();
-        assert_eq!(r.braille_text(), "⠖⠢⠖⠀⠀");
+        assert_eq!(r.braille_text(), "⠖⠢⠖");
+    }
+
+    #[test]
+    fn no_trailing_spaces_at_text_end() {
+        // 遷移は「次の文字」がないと発火しない。文末の。にスペースは付かない。
+        let r = conv().convert("ア。").unwrap();
+        assert_eq!(r.braille_text(), "⠁⠲");
+    }
+
+    // --- ワイルドカード遷移: '→' のような前後必須スペース記号を想定した最小テーブル ---
+
+    fn conv_with_inline_arrow() -> BrailleConverter {
+        let toml = r#"
+[flags.digit]
+[flags.foreign_word]
+[flags.capital]
+
+[table.kana.compound]
+[table.kana.single]
+"ア" = "⠁"
+
+[table.punct]
+classes = ["stop", "inline"]
+[table.punct.jp]
+"。" = { braille = "⠲", class = "stop" }
+"→" = { braille = "⠿⠿", class = "inline" }
+[table.punct.latin]
+
+[table.digit]
+[table.latin]
+
+[transitions]
+"stop -> *" = 2
+"stop -> stop" = 0
+"* -> inline" = 1
+"inline -> *" = 1
+"#;
+        BrailleConverter::new(BrailleTable::from_toml(toml).expect("テストテーブルは有効"))
+    }
+
+    #[test]
+    fn inline_no_space_at_text_start() {
+        // 行頭には prev がないので "* -> inline" は発火しない
+        let r = conv_with_inline_arrow().convert("→").unwrap();
+        assert_eq!(r.braille_text(), "⠿⠿");
+    }
+
+    #[test]
+    fn inline_spaces_between_kana() {
+        // ア→ア: "* -> inline" と "inline -> *" で前後一マスずつ
+        let r = conv_with_inline_arrow().convert("ア→ア").unwrap();
+        assert_eq!(r.braille_text(), "⠁⠀⠿⠿⠀⠁");
+    }
+
+    #[test]
+    fn wildcard_conflict_takes_max() {
+        // 。→ は "stop -> *" = 2 と "* -> inline" = 1 が両方当たる → max の 2
+        let r = conv_with_inline_arrow().convert("。→").unwrap();
+        assert_eq!(r.braille_text(), "⠲⠀⠀⠿⠿");
     }
 
     // --- 数字モード ---
@@ -514,11 +593,60 @@ mod tests {
     }
 
     #[test]
-    fn latin_to_kana_no_space_adds_exit_suffix() {
-        // NHKラジオ（スペースなし）→ 外来語終了で exit_suffix(⠀) が挿入される
+    fn latin_to_kana_no_space_adds_transition_space() {
+        // NHKラジオ（スペースなし）→ [transitions] "latin -> kana" でスペースが挿入される
         // スペースあり版と同じ結果になる
         let r = conv().convert("NHKラジオ").unwrap();
         assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅⠀⠑⠐⠳⠊");
+    }
+
+    // --- クラス遷移スペース（[transitions]） ---
+
+    #[test]
+    fn kana_to_latin_inserts_transition_space() {
+        // かな→latin 境界: "kana -> latin" = 1 により外字符（⠰）の前を一マスあける
+        let r = conv().convert("アイウエオabc").unwrap();
+        assert_eq!(r.braille_text(), "⠁⠃⠉⠋⠊⠀⠰⠁⠃⠉");
+    }
+
+    #[test]
+    fn transition_space_idempotent_with_source_space() {
+        // ソース側にスペースがあってもなくても同じ出力になる
+        let with_space = conv().convert("アイウエオ abc").unwrap();
+        let without = conv().convert("アイウエオabc").unwrap();
+        assert_eq!(with_space.braille_text(), without.braille_text());
+    }
+
+    #[test]
+    fn kana_to_digit_no_transition_space() {
+        // かな→数字は宣言がないのでスペースなし（語中数字: ダイ3カイ など）
+        let r = conv().convert("ア1").unwrap();
+        assert_eq!(r.braille_text(), "⠁⠼⠁");
+    }
+
+    #[test]
+    fn latin_to_punct_no_transition_space() {
+        // latin→句読点（stop）は宣言がないのでスペースなし。
+        // 旧 exit_suffix 方式では latin→非ASCII に一律スペースが入っていた。
+        // 文末の。にも遷移スペースは付かない。
+        let r = conv().convert("abc。").unwrap();
+        assert_eq!(r.braille_text(), "⠰⠁⠃⠉⠲");
+    }
+
+    #[test]
+    fn no_transition_space_at_text_start() {
+        // テキスト先頭では prev がないため発火しない
+        let r = conv().convert("abc").unwrap();
+        assert_eq!(r.braille_text(), "⠰⠁⠃⠉");
+    }
+
+    #[test]
+    fn index_with_transition_space() {
+        // アa → ⠁ + （遷移スペース⠀ + ⠰ + ⠁）
+        // 遷移スペースは後続文字の点字位置に含まれる
+        let r = conv().convert("アa").unwrap();
+        assert_eq!(r.braille_text(), "⠁⠀⠰⠁");
+        assert_eq!(r.kana_to_braille(), &[0, 1]);
     }
 
     // --- インデックス ---

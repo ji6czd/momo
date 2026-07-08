@@ -33,6 +33,11 @@ public partial class Form1 : Form
     public Form1()
     {
         InitializeComponent();
+        // Cascadia Mono が無い環境（Windows 10 等）では、同じく点字グリフを
+        // ネイティブに持つ Segoe UI Symbol（全 Windows 標準）へフォールバックする。
+        // フォントリンク任せにすると環境ごとに描画フォントが変わってしまう。
+        if (richTextBox.Font.Name != "Cascadia Mono")
+            richTextBox.Font = new Font("Segoe UI Symbol", 28F, FontStyle.Regular, GraphicsUnit.Point);
         _keyMap = new()
         {
             [Keys.Control | Keys.H] = SimulateBackspace,
@@ -52,24 +57,75 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// 起動時のウィンドウ幅を、点字 1 行（LineWidth セル）が
-    /// 折り返さずに収まるサイズ以上へ広げる。等幅フォントを実測するため
+    /// 起動時のウィンドウサイズを調整する。
+    /// 幅: 点字 1 行（LineWidth セル）が折り返さずに収まるサイズ以上へ広げる。
+    /// 高さ: 点字 1 ページ（ヘッダ + LinesPerPage 行）が収まるサイズへ広げる。
+    /// ただし画面の作業領域は超えない。等幅フォントを実測するため
     /// 高 DPI 環境でも正しくスケールする。
     /// </summary>
     private void AdjustStartupSize()
     {
-        int cells = _document.Config.LineWidth;
-        // U+2800（点字の空セル）を LineWidth 個並べた幅を実測。
-        // NoPadding で両端余白を除き、純粋な文字列幅を得る。
-        int textWidth = TextRenderer.MeasureText(
-            new string('⠀', cells), richTextBox.Font,
-            new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Width;
-        // 縦スクロールバーと内部余白の分を加える。
-        int needed = textWidth + SystemInformation.VerticalScrollBarWidth + 12;
-        if (ClientSize.Width < needed)
-            ClientSize = new Size(needed, ClientSize.Height);
+        var (textWidth, lineHeight) = MeasureBrailleMetrics(_document.Config.LineWidth);
+
+        // 幅: 縦スクロールバーと内部余白の分を加える。
+        int neededW = textWidth + SystemInformation.VerticalScrollBarWidth + 12;
+        if (ClientSize.Width < neededW)
+            ClientSize = new Size(neededW, ClientSize.Height);
         // 1 行分を割り込めないよう最小幅も設定。
-        MinimumSize = new Size(needed + (Width - ClientSize.Width), MinimumSize.Height);
+        MinimumSize = new Size(neededW + (Width - ClientSize.Width), MinimumSize.Height);
+
+        // 高さ: 1 ページ分の行数 + 内部余白。LinesPerPage はヘッダ行を含む値
+        // （フォーマッタはヘッダ有効時に本文を LinesPerPage - 1 行にする）。
+        // ウィンドウ枠・メニュー・ガイド帯・ステータスバーの高さは
+        // 「現在のウィンドウ高 − 編集面の高さ」で実測する。
+        int chromeH = Height - richTextBox.ClientSize.Height;
+        int neededH = _document.Config.LinesPerPage * lineHeight + 8 + chromeH;
+        int maxH = Screen.FromControl(this).WorkingArea.Height;
+        Height = Math.Max(Height, Math.Min(neededH, maxH));
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        // ウィンドウ位置は表示直前に OS が決める（カスケード配置）ため、
+        // 起動時に縦いっぱいへ広げたウィンドウが作業領域からはみ出すことがある。
+        // ここで下端・右端が収まるように位置を補正する。
+        var wa = Screen.FromControl(this).WorkingArea;
+        if (Bottom > wa.Bottom) Top = Math.Max(wa.Top, wa.Bottom - Height);
+        if (Right > wa.Right) Left = Math.Max(wa.Left, wa.Right - Width);
+    }
+
+    /// <summary>
+    /// 点字 cells セル分の実描画幅と、行間（_lineSpacing 倍）適用後の
+    /// 1 行の高さ（ピクセル）を返す。
+    /// GDI の TextRenderer で測ると、フォントに無いグリフのフォールバックが
+    /// RichEdit の実レイアウトと食い違うことがあるため（Courier New 時代に
+    /// 18px/セル vs 24px/セルの実害があった）、同じフォントを持つプローブ用
+    /// RichTextBox に実際に文字を置き、文字位置 API でレイアウトを測る。
+    /// </summary>
+    private (int width, int lineHeight) MeasureBrailleMetrics(int cells)
+    {
+        using var probe = new RichTextBox
+        {
+            Font = richTextBox.Font,
+            WordWrap = false,
+            ScrollBars = RichTextBoxScrollBars.None,
+            Size = new Size(100, 100), // 測定はレイアウト座標なので表示サイズは無関係
+        };
+        _ = probe.Handle; // レイアウト計算にはハンドルが必要
+        // 1 行目: cells+1 文字目の開始位置が cells セル分の右端になる。
+        // 2 行目: 行頭の Y 差分が行間適用後の 1 行の高さになる。
+        probe.Text = new string('⠀', cells + 1) + "\n⠀";
+        ApplyLineSpacing(probe);
+        var origin = probe.GetPositionFromCharIndex(0);
+        int width = probe.GetPositionFromCharIndex(cells).X - origin.X;
+        int lineHeight = probe.GetPositionFromCharIndex(probe.GetFirstCharIndexFromLine(1)).Y - origin.Y;
+        if (width > 0 && lineHeight > 0) return (width, lineHeight);
+        // 万一レイアウトを取れなかったときは従来の GDI 測定にフォールバック。
+        var size = TextRenderer.MeasureText(
+            new string('⠀', cells), richTextBox.Font,
+            new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+        return (size.Width, (int)Math.Round(size.Height * _lineSpacing));
     }
 
     // ---- タイトル・ステータス ----
@@ -842,16 +898,66 @@ public partial class Form1 : Form
 
     // ---- キー処理 ----
 
+    private const int WM_SYSCOMMAND = 0x0112;
+    private const int SC_KEYMENU = 0xF100;
+
+    // メニューバーの Alt/F10 活性化はフレームワーク任せにせず自前で行う。
+    // 実測(tmp/AltMenuTest)により、MenuStrip 既定のメニューモードは
+    // Win32 フォーカスを移さず、スクリーンリーダーへの通知が不安定なことが
+    // 分かったため、実フォーカスを移す ActivateMenuBar() 方式を採る。
+    // その代償として、既定の活性化(SC_KEYMENU)の抑止と、Windows 標準の
+    // キー挙動(解放時活性化・他キー割込みで取消・再 Alt で解除)の再現を
+    // ここで自前実装している。
+
+    /// <summary>Alt 単独押下中(他のキーが挟まっていない)なら true。解放時のメニュー活性化に使う。</summary>
+    private bool _altMenuPending;
+
+    protected override void WndProc(ref Message m)
+    {
+        // Alt / F10 キーアップ由来の既定のメニュー活性化 (SC_KEYMENU) を無効化する。
+        // 活性化は OnKeyDown/OnKeyUp で自前で行っているため不要であり、
+        // Alt+Tab でこのウィンドウに切り替えた直後の Alt 解放(KeyDown を
+        // 受け取っていない KeyUp)でもメニューが活性化されてしまうのを防ぐ。
+        // lParam != 0(Alt+Space のシステムメニュー等)は既定処理に任せる。
+        if (m.Msg == WM_SYSCOMMAND && ((int)m.WParam & 0xFFF0) == SC_KEYMENU
+            && m.LParam == IntPtr.Zero)
+        {
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
+    private void ActivateMenuBar()
+    {
+        menuStrip.Select();
+        menuStrip.Items[0].Select();
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        // Alt 単独 / F10 でメニューバーへフォーカス。
-        // 編集面の RichTextBox が Alt を内部で消費し、既定のメニュー活性化が
-        // 効かないため、Form の KeyPreview 経由でここから明示的に活性化する。
-        if ((e.KeyData == (Keys.Menu | Keys.Alt) || e.KeyData == Keys.F10)
-            && menuStrip.Items.Count > 0)
+        // メニューバーがアクティブな状態での Alt はフォーカス解除(Windows 標準では
+        // 押下時に解除される)。手動の Select() による活性化はフレームワークの
+        // メニューモードに入らず既定の Alt 解除が働かないため、ここで自前で行う。
+        if (e.KeyData == (Keys.Menu | Keys.Alt) && menuStrip.ContainsFocus)
         {
-            menuStrip.Select();
-            menuStrip.Items[0].Select();
+            _altMenuPending = false;
+            richTextBox.Focus();
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+            return;
+        }
+
+        // Alt 単独は Windows 標準に合わせて「解放時」にメニューバーを活性化する
+        // (OnKeyUp 参照)。押下時はフラグを立てるだけにし、解放までに他のキーが
+        // 挟まったら取り消す(Alt+Tab や Alt+ショートカットでは活性化しない)。
+        _altMenuPending = e.KeyData == (Keys.Menu | Keys.Alt) && menuStrip.Items.Count > 0;
+
+        // F10 でメニューバーへフォーカス(Windows 標準では押下時に活性化)。
+        // 既定の F10 活性化も SC_KEYMENU 経由のため上の WndProc で抑止されて
+        // おり、ここで明示的に活性化する必要がある。
+        if (e.KeyData == Keys.F10 && menuStrip.Items.Count > 0)
+        {
+            ActivateMenuBar();
             e.SuppressKeyPress = true;
             e.Handled = true;
             return;
@@ -904,6 +1010,17 @@ public partial class Form1 : Form
 
     protected override void OnKeyUp(KeyEventArgs e)
     {
+        // Alt 単独の押下→解放でメニューバーへフォーカス(Windows 標準の挙動)。
+        // フラグは OnKeyDown で管理しており、間に他のキーが挟まった場合や
+        // Alt+Tab 直後(押下をこのウィンドウが受けていない)では立っていない。
+        if (e.KeyCode == Keys.Menu && _altMenuPending)
+        {
+            _altMenuPending = false;
+            ActivateMenuBar();
+            e.Handled = true;
+            return;
+        }
+
         if (_brailleInputMode && (e.Modifiers & (Keys.Control | Keys.Alt)) == Keys.None)
         {
             if (BrailleKeyBit.ContainsKey(e.KeyCode))
@@ -925,6 +1042,14 @@ public partial class Form1 : Form
             }
         }
         base.OnKeyUp(e);
+    }
+
+    protected override void OnDeactivate(EventArgs e)
+    {
+        // Alt を押したままフォーカスが他ウィンドウへ移った場合、
+        // 戻ってきた後の Alt 解放でメニューが活性化しないように取り消す。
+        _altMenuPending = false;
+        base.OnDeactivate(e);
     }
 
     // ---- RichTextBox イベント ----

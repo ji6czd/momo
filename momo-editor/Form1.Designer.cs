@@ -173,7 +173,9 @@ partial class Form1
 
         // richTextBox
         richTextBox.Dock = DockStyle.Fill;
-        richTextBox.Font = new Font("Courier New", 28F, FontStyle.Regular, GraphicsUnit.Point);
+        // 点字グリフ（U+2800〜）をネイティブに持つ等幅フォント（Windows 11 標準搭載）。
+        // 無い環境（Windows 10 等）へのフォールバックは Form1 コンストラクタで行う。
+        richTextBox.Font = new Font("Cascadia Mono", 28F, FontStyle.Regular, GraphicsUnit.Point);
         richTextBox.ScrollBars = RichTextBoxScrollBars.Both;
         richTextBox.WordWrap = false;
         richTextBox.AcceptsTab = true;

@@ -47,13 +47,16 @@ public partial class Form1
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, ref PARAFORMAT2 lp);
 
-    /// <summary>RichTextBox 全体に行間（_lineSpacing 倍）を適用する。</summary>
-    private void ApplyLineSpacing()
-    {
-        int savedStart = richTextBox.SelectionStart;
-        int savedLength = richTextBox.SelectionLength;
+    /// <summary>編集面の RichTextBox 全体に行間（_lineSpacing 倍）を適用する。</summary>
+    private void ApplyLineSpacing() => ApplyLineSpacing(richTextBox);
 
-        richTextBox.SelectAll();
+    /// <summary>指定した RichTextBox 全体に行間（_lineSpacing 倍）を適用する。</summary>
+    private void ApplyLineSpacing(RichTextBox target)
+    {
+        int savedStart = target.SelectionStart;
+        int savedLength = target.SelectionLength;
+
+        target.SelectAll();
         var fmt = new PARAFORMAT2
         {
             cbSize = Marshal.SizeOf<PARAFORMAT2>(),
@@ -61,8 +64,8 @@ public partial class Form1
             bLineSpacingRule = LINE_SPACING_MULTIPLE,
             dyLineSpacing = (int)Math.Round(20 * _lineSpacing),
         };
-        SendMessage(richTextBox.Handle, EM_SETPARAFORMAT, IntPtr.Zero, ref fmt);
+        SendMessage(target.Handle, EM_SETPARAFORMAT, IntPtr.Zero, ref fmt);
 
-        richTextBox.Select(savedStart, savedLength);
+        target.Select(savedStart, savedLength);
     }
 }

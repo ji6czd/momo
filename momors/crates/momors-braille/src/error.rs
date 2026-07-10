@@ -13,6 +13,10 @@ pub enum Error {
 
     #[error("braille table validation error: {0}")]
     Validation(String),
+
+    /// 日本語行の点訳で `momors_core::Predictor` が失敗した（[`crate::line::LineTranslator`]）。
+    #[error("prediction error: {0}")]
+    Prediction(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

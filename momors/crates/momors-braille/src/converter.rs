@@ -35,7 +35,8 @@ impl BrailleResult {
     /// かな文字インデックス → 点字先頭セルのインデックス。
     ///
     /// - 複合音（キャ など）の 2 文字はどちらも同じ点字位置を指す。
-    /// - フラグ記号（⠼ ⠰ ⠠ ⠤ など）はそのフラグを発動させた文字の点字位置に含まれる。
+    /// - 開始フラグ（⠼ ⠰ ⠠）はそのフラグを発動させた文字の点字位置に含まれる。
+    /// - 終了フラグ（⠤ など）とクラス遷移スペースは直前の文字の範囲に含まれる。
     pub fn kana_to_braille(&self) -> &[usize] {
         &self.kana_to_braille
     }
@@ -150,8 +151,10 @@ impl BrailleConverter {
         while i < n {
             let c = chars[i];
 
-            // この文字の点字列が始まる位置（フラグ記号も含む）を記録
-            let brl_pos = braille.chars().count();
+            // この文字の点字列が始まる位置。遷移スペースの直後・開始フラグの前で
+            // 記録するため、終了フラグ（⠤ など）と遷移スペースは直前の文字の範囲に、
+            // 開始フラグ（⠼ ⠰ ⠠）はこの文字の範囲に入る。
+            let brl_pos;
 
             if (c as u32) < 0x80 {
                 // ==================================================
@@ -163,6 +166,7 @@ impl BrailleConverter {
 
                     // クラス遷移スペース（⠰ より前に挿入する）
                     self.push_transition_spaces(&mut braille, prev_class.as_deref(), CLASS_LATIN);
+                    brl_pos = braille.chars().count();
 
                     // 外来語モード開始（初回のみ ⠰ を挿入）
                     if !in_foreign_word {
@@ -209,6 +213,7 @@ impl BrailleConverter {
 
                     // クラス遷移スペース（⠼ より前に挿入する）
                     self.push_transition_spaces(&mut braille, prev_class.as_deref(), CLASS_DIGIT);
+                    brl_pos = braille.chars().count();
 
                     // 数字モード開始（初回のみ ⠼ を挿入）
                     if !in_digit {
@@ -237,6 +242,7 @@ impl BrailleConverter {
                     };
                     let cur = Self::cell_class(entry);
                     self.push_transition_spaces(&mut braille, prev_class.as_deref(), &cur);
+                    brl_pos = braille.chars().count();
                     self.emit_punct(&mut braille, entry, c);
                     prev_class = Some(cur);
                 } else {
@@ -249,6 +255,7 @@ impl BrailleConverter {
                     let entry = self.table.punct_latin.get(&key);
                     let cur = Self::cell_class(entry);
                     self.push_transition_spaces(&mut braille, prev_class.as_deref(), &cur);
+                    brl_pos = braille.chars().count();
                     self.emit_punct(&mut braille, entry, c);
                     prev_class = Some(cur);
                 }
@@ -289,6 +296,7 @@ impl BrailleConverter {
                             prev_class.as_deref(),
                             CLASS_KANA,
                         );
+                        let brl_pos = braille.chars().count();
                         braille.push_str(brl);
                         kana_to_braille.push(brl_pos); // 複合音 1 文字目
                         kana_to_braille.push(brl_pos); // 複合音 2 文字目（同じ点字位置）
@@ -302,14 +310,17 @@ impl BrailleConverter {
                 let key = c.to_string();
                 if let Some(brl) = self.table.kana_single.get(&key) {
                     self.push_transition_spaces(&mut braille, prev_class.as_deref(), CLASS_KANA);
+                    brl_pos = braille.chars().count();
                     braille.push_str(brl);
                     prev_class = Some(CLASS_KANA.to_string());
                 } else if let Some(cell) = self.table.punct_jp.get(&key) {
                     let cur = Self::cell_class(Some(cell));
                     self.push_transition_spaces(&mut braille, prev_class.as_deref(), &cur);
+                    brl_pos = braille.chars().count();
                     braille.push_str(&cell.braille);
                     prev_class = Some(cur);
                 } else {
+                    brl_pos = braille.chars().count();
                     self.emit_unknown(&mut braille, c);
                     prev_class = Some(CLASS_NONE.to_string());
                 }
@@ -342,10 +353,10 @@ impl BrailleConverter {
         }
     }
 
-    /// 句読点エントリの class を返す（エントリなし・class 未指定は予約名 `"none"`）。
+    /// 句読点エントリのフルクラスパスを返す（エントリなしは予約パス `"none"`）。
     fn cell_class(entry: Option<&PunctCell>) -> String {
         entry
-            .and_then(|cell| cell.class.clone())
+            .map(|cell| cell.path.clone())
             .unwrap_or_else(|| CLASS_NONE.to_string())
     }
 
@@ -487,10 +498,10 @@ classes = ["stop", "inline"]
 [table.latin]
 
 [transitions]
-"stop -> *" = 2
-"stop -> stop" = 0
-"* -> inline" = 1
-"inline -> *" = 1
+"punct.jp.stop -> *" = 2
+"punct.jp.stop -> punct.jp.stop" = 0
+"* -> punct.jp.inline" = 1
+"punct.jp.inline -> *" = 1
 "#;
         BrailleConverter::new(BrailleTable::from_toml(toml).expect("テストテーブルは有効"))
     }
@@ -600,6 +611,22 @@ classes = ["stop", "inline"]
         assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅⠀⠑⠐⠳⠊");
     }
 
+    #[test]
+    fn latin_punct_to_kana_splits() {
+        // 「a.ア」: 英文ピリオド（punct.latin）→ かな境界で "punct.latin -> kana" = 1
+        // が発火し一マスあく。⠰⠁(a) ⠲(.) ⠀(遷移スペース) ⠁(ア)
+        let r = conv().convert("a.ア").unwrap();
+        assert_eq!(r.braille_text(), "⠰⠁⠲⠀⠁");
+    }
+
+    #[test]
+    fn decimal_point_not_split_by_latin_punct_rule() {
+        // 「3.14」の '.' は punct.latin だが後続は数字（kana ではない）ので
+        // "punct.latin -> kana" は発火しない。3.14 は分割されないまま。
+        let r = conv().convert("3.14").unwrap();
+        assert_eq!(r.braille_text(), "⠼⠉⠲⠁⠙");
+    }
+
     // --- クラス遷移スペース（[transitions]） ---
 
     #[test]
@@ -642,11 +669,29 @@ classes = ["stop", "inline"]
 
     #[test]
     fn index_with_transition_space() {
-        // アa → ⠁ + （遷移スペース⠀ + ⠰ + ⠁）
-        // 遷移スペースは後続文字の点字位置に含まれる
+        // アa → （⠁ + 遷移スペース⠀）+ （⠰ + ⠁）
+        // 遷移スペースは遷移前の文字（ア）の範囲に含まれる
         let r = conv().convert("アa").unwrap();
         assert_eq!(r.braille_text(), "⠁⠀⠰⠁");
-        assert_eq!(r.kana_to_braille(), &[0, 1]);
+        assert_eq!(r.kana_to_braille(), &[0, 2]);
+    }
+
+    #[test]
+    fn index_pause_space_belongs_to_pause() {
+        // ア、カ → ⠁ + （⠰ + スペース⠀）+ ⠡
+        // "pause -> *" のスペースは 、の範囲に含まれる
+        let r = conv().convert("ア、カ").unwrap();
+        assert_eq!(r.braille_text(), "⠁⠰⠀⠡");
+        assert_eq!(r.kana_to_braille(), &[0, 1, 3]);
+    }
+
+    #[test]
+    fn index_stop_spaces_belong_to_stop() {
+        // ！ア → （⠖ + 二マスあけ⠀⠀）+ ⠁
+        // "stop -> *" の 2 スペースはどちらも ！の範囲に含まれる
+        let r = conv().convert("！ア").unwrap();
+        assert_eq!(r.braille_text(), "⠖⠀⠀⠁");
+        assert_eq!(r.kana_to_braille(), &[0, 3]);
     }
 
     // --- インデックス ---
@@ -660,9 +705,9 @@ classes = ["stop", "inline"]
     #[test]
     fn index_with_digit_prefix() {
         // "1ア" → ⠼⠁⠤⠁
-        // '1' → pos 0（⠼ 込み）, 'ア' → pos 2（⠤ 込み）
+        // '1' → pos 0（⠼ 込み）。終了フラグ ⠤ は数字側に帰属し、'ア' → pos 3
         let r = conv().convert("1ア").unwrap();
-        assert_eq!(r.kana_to_braille(), &[0, 2]);
+        assert_eq!(r.kana_to_braille(), &[0, 3]);
     }
 
     #[test]

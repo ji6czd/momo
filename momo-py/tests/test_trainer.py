@@ -143,6 +143,24 @@ class TestProcessLineToTsv:
         with pytest.raises(ValueError, match="対応の取れていない"):
             process_line_to_tsv("{佐藤さんだ。\tサ/トー/ /サ/ン/ダ/。", 1)
 
+    def test_fullwidth_alnum_is_normalized_in_output(self, capsys):
+        # 注釈は全角のまま書き、学習データ出力時に半角へ正規化される
+        # （検証は注釈原文に対して行われるため警告は出ない）
+        rows = process_line_to_tsv("３冊のＱ\t３/サツ/ノ/Ｑ", 1)
+        assert "🚨 警告" not in capsys.readouterr().out
+        cells = [r.split("\t") for r in rows]
+        assert [c[0] for c in cells] == ["3", "冊", "の", "Q"]
+        assert cells[0][1] == "3"  # 恒等ラベルも半角化
+        assert cells[0][2] == "NUM"
+        assert cells[3][1] == "_"  # ALPHA は素通し（ラベルは LABEL_SKIP）
+
+    def test_fullwidth_halfwidth_produce_same_rows(self, capsys):
+        # 正規化により "３冊" と "3冊" は同一の学習データになる
+        rows_fw = process_line_to_tsv("３冊\t３/サツ", 1)
+        rows_hw = process_line_to_tsv("3冊\t3/サツ", 1)
+        capsys.readouterr()
+        assert rows_fw == rows_hw
+
 
 # ------------------------------------------------------------------ #
 # _check_non_ascii_identity
@@ -268,7 +286,8 @@ class TestCheckJapaneseReading:
         rows = process_line_to_tsv("二十五\t２/_/５", 1)
         assert "🚨 警告" not in capsys.readouterr().out
         labels = {r.split("\t")[0]: r.split("\t")[1] for r in rows}
-        assert labels == {"二": "２", "十": "_", "五": "５"}
+        # 全角数字の読みは学習データ出力時に半角へ正規化される
+        assert labels == {"二": "2", "十": "_", "五": "5"}
 
     def test_non_japanese_ctype_is_not_checked(self, capsys):
         # 日本語以外の文字種は対象外（NUMERIC の恒等注釈 "3"→"3" など）

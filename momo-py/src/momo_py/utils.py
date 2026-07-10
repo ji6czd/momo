@@ -152,6 +152,22 @@ _COMPAT_IDEOGRAPH_RANGES: List[Tuple[int, int]] = [
     (0x2F800, 0x2FA1F),  # CJK互換漢字補助
 ]
 
+# 1→1変換のみのカテゴリ: 全角英数字→半角。
+# 幅は読み・境界・点字のいずれにも情報を持たず、区別すると学習例が分断される
+# だけのため半角へ畳む。全角記号（（！？ 等）は点字変換側で半角と扱いが
+# 異なり得るため対象外（区別を保持する）。
+_FULLWIDTH_ALNUM_RANGES: List[Tuple[int, int]] = [
+    (0xFF10, 0xFF19),  # ０-９
+    (0xFF21, 0xFF3A),  # Ａ-Ｚ
+    (0xFF41, 0xFF5A),  # ａ-ｚ
+]
+
+# 1→1変換の全カテゴリ。Rust側テーブル（momors/tools/gen_normalize_table.py）は
+# この変数を読んで生成される。
+_ONE_TO_ONE_RANGES: List[Tuple[int, int]] = sorted(
+    _COMPAT_IDEOGRAPH_RANGES + _FULLWIDTH_ALNUM_RANGES
+)
+
 # 1→N展開を含むカテゴリ（原文位置は normalize_input() のマップで追跡する）
 _EXPANSION_RANGES: Dict[str, List[Tuple[int, int]]] = {
     # 欧文リガチャ: ﬃ→ffi 等。PDF抽出テキストやDTP由来のテキストに混入する
@@ -159,7 +175,7 @@ _EXPANSION_RANGES: Dict[str, List[Tuple[int, int]]] = {
 }
 
 _ALL_NORMALIZE_RANGES: List[Tuple[int, int]] = sorted(
-    _COMPAT_IDEOGRAPH_RANGES
+    _ONE_TO_ONE_RANGES
     + [r for ranges in _EXPANSION_RANGES.values() for r in ranges]
 )
 
@@ -168,19 +184,23 @@ def _in_ranges(cp: int, ranges: List[Tuple[int, int]]) -> bool:
     return any(lo <= cp <= hi for lo, hi in ranges)
 
 
-def normalize_compat_ideographs(text: str) -> str:
-    """互換漢字系コードポイントをCJK統合漢字へ畳み込む（1→1変換のみ）。
+def normalize_one_to_one(text: str) -> str:
+    """1→1変換のみの選択的NFKC正規化（互換漢字の畳み込み + 全角英数字の半角化）。
 
-    文字数・原文位置が変わらないことが保証されるため、辞書表層形など
-    インデックスマップを持てない箇所の正規化に使う。推論入力の正規化は
-    normalize_input() を使うこと。
+    文字数・原文位置が変わらないことが保証されるため、辞書表層形や学習データ
+    生成など、インデックスマップを持てない箇所の正規化に使う。推論入力の
+    正規化は normalize_input() を使うこと（1→N展開を含む）。
     """
     return "".join(
         unicodedata.normalize("NFKC", c)
-        if _in_ranges(ord(c), _COMPAT_IDEOGRAPH_RANGES)
+        if _in_ranges(ord(c), _ONE_TO_ONE_RANGES)
         else c
         for c in text
     )
+
+
+# 後方互換のためエイリアスを残す（旧名: 互換漢字のみだった頃の名称）
+normalize_compat_ideographs = normalize_one_to_one
 
 
 def normalize_input(text: str) -> Tuple[str, List[int]]:

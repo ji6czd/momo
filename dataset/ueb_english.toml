@@ -1,0 +1,328 @@
+# ueb_english.toml
+# UEB (Unified English Braille) grade 2 — Phase 1「文脈非依存コア」の変換データ。
+# 仕様: momors/crates/momors-braille/docs/ueb-grade2-spec.md
+#
+# インベントリ（データ）だけをここに置き、適用ロジック（最長一致・語境界・ing 語頭例外）は
+# english.rs のコードが持つ。以後の拡張（lower signs / 頭字符・尾字符 / shortforms）は
+# 原則このデータへ追加していく（機構を増やさない方針）。
+
+[metadata]
+name = "ueb_english_grade2"
+displayname = "UEB English (Grade 2)"
+author = "MOMO Project"
+
+# 指示符
+[indicators]
+capital = "⠠"        # 大文字符（1文字）
+capital_word = "⠠⠠"  # 大文字語符（語全体が大文字）
+number = "⠼"         # 数符
+
+# 基本文字（grade 1）
+[letters]
+a = "⠁"
+b = "⠃"
+c = "⠉"
+d = "⠙"
+e = "⠑"
+f = "⠋"
+g = "⠛"
+h = "⠓"
+i = "⠊"
+j = "⠚"
+k = "⠅"
+l = "⠇"
+m = "⠍"
+n = "⠝"
+o = "⠕"
+p = "⠏"
+q = "⠟"
+r = "⠗"
+s = "⠎"
+t = "⠞"
+u = "⠥"
+v = "⠧"
+w = "⠺"
+x = "⠭"
+y = "⠽"
+z = "⠵"
+
+# 数字（数符のあと。1-9,0 = a-i,j）
+[digits]
+"1" = "⠁"
+"2" = "⠃"
+"3" = "⠉"
+"4" = "⠙"
+"5" = "⠑"
+"6" = "⠋"
+"7" = "⠛"
+"8" = "⠓"
+"9" = "⠊"
+"0" = "⠚"
+
+# 基本約物（Phase 1 の最小セット。括弧・引用符などは後で追加）
+[punctuation]
+"." = "⠲"
+"," = "⠂"
+";" = "⠆"
+":" = "⠒"
+"?" = "⠦"
+"!" = "⠖"
+"'" = "⠄"
+"-" = "⠤"
+
+# 縮約。positions = 適用できる語中の位置（複数可・いずれか一致で適用）:
+#   always     語中どこでも
+#   noninitial 語頭でない（ing 専用）
+#   initial    語頭＋後続が文字（be/con/dis）
+#   medial     両側が文字＝語中（ea/bb/cc/ff/gg）
+#   wordsign   単独で1語
+# lower = true は下方記号（dot 1/4 を含まない）。lower wordsign が下方約物に接触する
+# ときは縮約しない（Phase 2a 近似）。
+[contractions]
+# --- strong contraction（always / wordsign 兼）---
+"and"  = { cell = "⠯", positions = ["always"] }
+"for"  = { cell = "⠿", positions = ["always"] }
+"of"   = { cell = "⠷", positions = ["always"] }
+"the"  = { cell = "⠮", positions = ["always"] }
+"with" = { cell = "⠾", positions = ["always"] }
+
+# --- strong groupsign（always。ing だけ語頭不可）---
+"ch"  = { cell = "⠡", positions = ["always"] }
+"gh"  = { cell = "⠣", positions = ["always"] }
+"sh"  = { cell = "⠩", positions = ["always"] }
+"th"  = { cell = "⠹", positions = ["always"] }
+"wh"  = { cell = "⠱", positions = ["always"] }
+"ed"  = { cell = "⠫", positions = ["always"] }
+"er"  = { cell = "⠻", positions = ["always"] }
+"ou"  = { cell = "⠳", positions = ["always"] }
+"ow"  = { cell = "⠪", positions = ["always"] }
+"ar"  = { cell = "⠜", positions = ["always"] }
+"st"  = { cell = "⠌", positions = ["always"] }
+"ing" = { cell = "⠬", positions = ["noninitial"] }
+
+# --- alphabetic wordsign（wordsign）---
+"but"       = { cell = "⠃", positions = ["wordsign"] }
+"can"       = { cell = "⠉", positions = ["wordsign"] }
+"do"        = { cell = "⠙", positions = ["wordsign"] }
+"every"     = { cell = "⠑", positions = ["wordsign"] }
+"from"      = { cell = "⠋", positions = ["wordsign"] }
+"go"        = { cell = "⠛", positions = ["wordsign"] }
+"have"      = { cell = "⠓", positions = ["wordsign"] }
+"just"      = { cell = "⠚", positions = ["wordsign"] }
+"knowledge" = { cell = "⠅", positions = ["wordsign"] }
+"like"      = { cell = "⠇", positions = ["wordsign"] }
+"more"      = { cell = "⠍", positions = ["wordsign"] }
+"not"       = { cell = "⠝", positions = ["wordsign"] }
+"people"    = { cell = "⠏", positions = ["wordsign"] }
+"quite"     = { cell = "⠟", positions = ["wordsign"] }
+"rather"    = { cell = "⠗", positions = ["wordsign"] }
+"so"        = { cell = "⠎", positions = ["wordsign"] }
+"that"      = { cell = "⠞", positions = ["wordsign"] }
+"us"        = { cell = "⠥", positions = ["wordsign"] }
+"very"      = { cell = "⠧", positions = ["wordsign"] }
+"will"      = { cell = "⠺", positions = ["wordsign"] }
+"it"        = { cell = "⠭", positions = ["wordsign"] }
+"you"       = { cell = "⠽", positions = ["wordsign"] }
+"as"        = { cell = "⠵", positions = ["wordsign"] }
+
+# --- strong wordsign（wordsign。セルは strong groupsign と共有）---
+"child" = { cell = "⠡", positions = ["wordsign"] }
+"shall" = { cell = "⠩", positions = ["wordsign"] }
+"this"  = { cell = "⠹", positions = ["wordsign"] }
+"which" = { cell = "⠱", positions = ["wordsign"] }
+"out"   = { cell = "⠳", positions = ["wordsign"] }
+"still" = { cell = "⠌", positions = ["wordsign"] }
+
+# ============================================================
+# Phase 2a: lower signs（下方の縮約。dot 1/4 を含まない）
+# 仕様: docs/ueb-grade2-lower-signs.md
+# ============================================================
+
+# --- lower groupsign（be/con/dis は語頭のみ、ea/bb/cc/ff/gg は語中のみ、en/in は無制限）---
+#
+# be / con / dis は UEB では「語の第一音節であるとき」しか groupsign にできない。
+# 音節は綴りから決まらない（become は可・benzene は不可）ので、既定は不許可とし、
+# initial_stems に挙げた語幹で始まる語だけ解禁する。誤らない側に倒し、知識をデータで足していく方針。
+# リストは随時追加してよい（追加するほど縮約率が上がるだけで、正しさは壊れない）。
+"be" = { cell = "⠆", positions = [
+    "wordsign",
+    "initial",
+], lower = true, initial_stems = [
+    "becom", "became", "begin", "began", "begun",
+    "behav", "behold", "believ", "belief", "belong", "beloved",
+    "bequeath", "bereav", "beseech", "bestow", "betray", "beware", "bewild",
+    "because", "before", "behind", "below", "beneath", "beside", "between", "beyond",
+] }
+"con" = { cell = "⠒", positions = ["initial"], lower = true, initial_stems = [
+    "conceiv", "concern", "conclud", "condition", "conduct",
+    "confer", "confirm", "conflict", "confus", "congenial", "congress",
+    "connect", "conquer", "consent", "conserv", "consider", "consist",
+    "constant", "construct", "consult", "consum",
+    "contact", "contain", "content", "contest", "context", "continu",
+    "contract", "contrast", "contribut", "control",
+    "convention", "convers", "convert", "convey", "convinc",
+] }
+"dis" = { cell = "⠲", positions = ["initial"], lower = true, initial_stems = [
+    "disagree", "disappear", "disappoint", "disbelief", "disconnect",
+    "discover", "discuss", "disease", "dislike", "dismal", "dismay", "dismiss",
+    "display", "dispos", "disput", "disrupt",
+    "distanc", "distant", "distinct", "district", "distribut", "distrust", "disturb",
+] }
+"en"  = { cell = "⠢", positions = ["always"], lower = true }
+"in"  = { cell = "⠔", positions = ["wordsign", "always"], lower = true }
+"ea"  = { cell = "⠂", positions = ["medial"], lower = true }
+"bb"  = { cell = "⠆", positions = ["medial"], lower = true }
+"cc"  = { cell = "⠒", positions = ["medial"], lower = true }
+"ff"  = { cell = "⠖", positions = ["medial"], lower = true }
+"gg"  = { cell = "⠶", positions = ["medial"], lower = true }
+
+# --- lower wordsign（単独で1語。下方約物接触時は縮約しない）---
+"his"    = { cell = "⠦", positions = ["wordsign"], lower = true }
+"was"    = { cell = "⠴", positions = ["wordsign"], lower = true }
+"were"   = { cell = "⠶", positions = ["wordsign"], lower = true }
+"enough" = { cell = "⠢", positions = ["wordsign"], lower = true }
+
+# ============================================================
+# Phase 3: 頭字符・尾字符（2セルの縮約）
+# 仕様: docs/ueb-grade2-initial-final.md
+# 機構は増えない（頭字符=always / 尾字符=noninitial、2セルは cell 文字列がそのまま対応）。
+# ============================================================
+
+# --- 頭字符 initial-letter contraction: dot 5（⠐）。2セル目は語の先頭文字/先頭縮約 ---
+"day"       = { cell = "⠐⠙", positions = ["always"] }
+"ever"      = { cell = "⠐⠑", positions = ["always"] }
+"father"    = { cell = "⠐⠋", positions = ["always"] }
+"here"      = { cell = "⠐⠓", positions = ["always"] }
+"know"      = { cell = "⠐⠅", positions = ["always"] }
+"lord"      = { cell = "⠐⠇", positions = ["always"] }
+"mother"    = { cell = "⠐⠍", positions = ["always"] }
+"name"      = { cell = "⠐⠝", positions = ["always"] }
+"one"       = { cell = "⠐⠕", positions = ["always"] }
+"part"      = { cell = "⠐⠏", positions = ["always"] }
+"question"  = { cell = "⠐⠟", positions = ["always"] }
+"right"     = { cell = "⠐⠗", positions = ["always"] }
+"some"      = { cell = "⠐⠎", positions = ["always"] }
+"time"      = { cell = "⠐⠞", positions = ["always"] }
+"under"     = { cell = "⠐⠥", positions = ["always"] }
+"work"      = { cell = "⠐⠺", positions = ["always"] }
+"young"     = { cell = "⠐⠽", positions = ["always"] }
+# 先頭が縮約セルのもの
+"there"     = { cell = "⠐⠮", positions = ["always"] }
+"character" = { cell = "⠐⠡", positions = ["always"] }
+"through"   = { cell = "⠐⠹", positions = ["always"] }
+"where"     = { cell = "⠐⠱", positions = ["always"] }
+"ought"     = { cell = "⠐⠳", positions = ["always"] }
+
+# --- 頭字符: dots 45（⠘）---
+"upon"  = { cell = "⠘⠥", positions = ["always"] }
+"word"  = { cell = "⠘⠺", positions = ["always"] }
+"these" = { cell = "⠘⠮", positions = ["always"] }
+"those" = { cell = "⠘⠹", positions = ["always"] }
+"whose" = { cell = "⠘⠱", positions = ["always"] }
+
+# --- 頭字符: dots 456（⠸）---
+"cannot" = { cell = "⠸⠉", positions = ["always"] }
+"had"    = { cell = "⠸⠓", positions = ["always"] }
+"many"   = { cell = "⠸⠍", positions = ["always"] }
+"spirit" = { cell = "⠸⠎", positions = ["always"] }
+"world"  = { cell = "⠸⠺", positions = ["always"] }
+"their"  = { cell = "⠸⠮", positions = ["always"] }
+
+# --- 尾字符 final-letter groupsign: dots 46（⠨）。語頭不可・単独不可 ---
+"ound" = { cell = "⠨⠙", positions = ["noninitial"] }
+"ance" = { cell = "⠨⠑", positions = ["noninitial"] }
+"sion" = { cell = "⠨⠝", positions = ["noninitial"] }
+"less" = { cell = "⠨⠎", positions = ["noninitial"] }
+"ount" = { cell = "⠨⠞", positions = ["noninitial"] }
+
+# --- 尾字符: dots 56（⠰）---
+"ence" = { cell = "⠰⠑", positions = ["noninitial"] }
+"ong"  = { cell = "⠰⠛", positions = ["noninitial"] }
+"ful"  = { cell = "⠰⠇", positions = ["noninitial"] }
+"tion" = { cell = "⠰⠝", positions = ["noninitial"] }
+"ness" = { cell = "⠰⠎", positions = ["noninitial"] }
+"ment" = { cell = "⠰⠞", positions = ["noninitial"] }
+"ity"  = { cell = "⠰⠽", positions = ["noninitial"] }
+
+# ============================================================
+# Phase 4a: shortforms（略字。75件）
+# 仕様: docs/ueb-grade2-shortforms.md
+# 単独で1語のときだけ適用（長い語の一部としての適用＝Appendix 1 は Phase 4b）。
+# セルは略記を grade 2 で書いたもの（例: shd → sh + d = ⠩⠙）。
+# ============================================================
+
+"about"      = { cell = "⠁⠃", positions = ["wordsign"], shortform = true }       # ab
+"above"      = { cell = "⠁⠃⠧", positions = ["wordsign"], shortform = true }      # abv
+"according"  = { cell = "⠁⠉", positions = ["wordsign"], shortform = true }       # ac
+"across"     = { cell = "⠁⠉⠗", positions = ["wordsign"], shortform = true }      # acr
+"after"      = { cell = "⠁⠋", positions = ["wordsign"], shortform = true }       # af
+"afternoon"  = { cell = "⠁⠋⠝", positions = ["wordsign"], shortform = true }      # afn
+"afterward"  = { cell = "⠁⠋⠺", positions = ["wordsign"], shortform = true }      # afw
+"again"      = { cell = "⠁⠛", positions = ["wordsign"], shortform = true }       # ag
+"against"    = { cell = "⠁⠛⠌", positions = ["wordsign"], shortform = true }      # agst（st）
+"almost"     = { cell = "⠁⠇⠍", positions = ["wordsign"], shortform = true }      # alm
+"already"    = { cell = "⠁⠇⠗", positions = ["wordsign"], shortform = true }      # alr
+"also"       = { cell = "⠁⠇", positions = ["wordsign"], shortform = true }       # al
+"although"   = { cell = "⠁⠇⠹", positions = ["wordsign"], shortform = true }      # alth（th）
+"altogether" = { cell = "⠁⠇⠞", positions = ["wordsign"], shortform = true }      # alt
+"always"     = { cell = "⠁⠇⠺", positions = ["wordsign"], shortform = true }      # alw
+"because"    = { cell = "⠆⠉", positions = ["wordsign"], shortform = true }       # bec（be）
+"before"     = { cell = "⠆⠋", positions = ["wordsign"], shortform = true }       # bef（be）
+"behind"     = { cell = "⠆⠓", positions = ["wordsign"], shortform = true }       # beh（be）
+"below"      = { cell = "⠆⠇", positions = ["wordsign"], shortform = true }       # bel（be）
+"beneath"    = { cell = "⠆⠝", positions = ["wordsign"], shortform = true }       # ben（be）
+"beside"     = { cell = "⠆⠎", positions = ["wordsign"], shortform = true }       # bes（be）
+"between"    = { cell = "⠆⠞", positions = ["wordsign"], shortform = true }       # bet（be）
+"beyond"     = { cell = "⠆⠽", positions = ["wordsign"], shortform = true }       # bey（be）
+"blind"      = { cell = "⠃⠇", positions = ["wordsign"], shortform = true }       # bl
+"braille"    = { cell = "⠃⠗⠇", positions = ["wordsign"], shortform = true }      # brl
+"children"   = { cell = "⠡⠝", positions = ["wordsign"], shortform = true }       # chn（ch）
+"conceive"   = { cell = "⠒⠉⠧", positions = ["wordsign"], shortform = true }      # concv（con）
+"conceiving" = { cell = "⠒⠉⠧⠛", positions = ["wordsign"], shortform = true }     # concvg（con）
+"could"      = { cell = "⠉⠙", positions = ["wordsign"], shortform = true }       # cd
+"deceive"    = { cell = "⠙⠉⠧", positions = ["wordsign"], shortform = true }      # dcv
+"deceiving"  = { cell = "⠙⠉⠧⠛", positions = ["wordsign"], shortform = true }     # dcvg
+"declare"    = { cell = "⠙⠉⠇", positions = ["wordsign"], shortform = true }      # dcl
+"declaring"  = { cell = "⠙⠉⠇⠛", positions = ["wordsign"], shortform = true }     # dclg
+"either"     = { cell = "⠑⠊", positions = ["wordsign"], shortform = true }       # ei
+"first"      = { cell = "⠋⠌", positions = ["wordsign"], shortform = true }       # fst（st）
+"friend"     = { cell = "⠋⠗", positions = ["wordsign"], shortform = true }       # fr
+"good"       = { cell = "⠛⠙", positions = ["wordsign"], shortform = true }       # gd
+"great"      = { cell = "⠛⠗⠞", positions = ["wordsign"], shortform = true }      # grt
+"herself"    = { cell = "⠓⠻⠋", positions = ["wordsign"], shortform = true }      # herf（er）
+"him"        = { cell = "⠓⠍", positions = ["wordsign"], shortform = true }       # hm
+"himself"    = { cell = "⠓⠍⠋", positions = ["wordsign"], shortform = true }      # hmf
+"immediate"  = { cell = "⠊⠍⠍", positions = ["wordsign"], shortform = true }      # imm
+"its"        = { cell = "⠭⠎", positions = ["wordsign"], shortform = true }       # xs
+"itself"     = { cell = "⠭⠋", positions = ["wordsign"], shortform = true }       # xf
+"letter"     = { cell = "⠇⠗", positions = ["wordsign"], shortform = true }       # lr
+"little"     = { cell = "⠇⠇", positions = ["wordsign"], shortform = true }       # ll
+"much"       = { cell = "⠍⠡", positions = ["wordsign"], shortform = true }       # mch（ch）
+"must"       = { cell = "⠍⠌", positions = ["wordsign"], shortform = true }       # mst（st）
+"myself"     = { cell = "⠍⠽⠋", positions = ["wordsign"], shortform = true }      # myf
+"necessary"  = { cell = "⠝⠑⠉", positions = ["wordsign"], shortform = true }      # nec
+"neither"    = { cell = "⠝⠑⠊", positions = ["wordsign"], shortform = true }      # nei
+"oneself"    = { cell = "⠐⠕⠋", positions = ["wordsign"], shortform = true }      # onef（one 頭字符）
+"ourselves"  = { cell = "⠳⠗⠧⠎", positions = ["wordsign"], shortform = true }     # ourvs（ou）
+"paid"       = { cell = "⠏⠙", positions = ["wordsign"], shortform = true }       # pd
+"perceive"   = { cell = "⠏⠻⠉⠧", positions = ["wordsign"], shortform = true }     # percv（er）
+"perceiving" = { cell = "⠏⠻⠉⠧⠛", positions = ["wordsign"], shortform = true }    # percvg（er）
+"perhaps"    = { cell = "⠏⠻⠓", positions = ["wordsign"], shortform = true }      # perh（er）
+"quick"      = { cell = "⠟⠅", positions = ["wordsign"], shortform = true }       # qk
+"receive"    = { cell = "⠗⠉⠧", positions = ["wordsign"], shortform = true }      # rcv
+"receiving"  = { cell = "⠗⠉⠧⠛", positions = ["wordsign"], shortform = true }     # rcvg
+"rejoice"    = { cell = "⠗⠚⠉", positions = ["wordsign"], shortform = true }      # rjc
+"rejoicing"  = { cell = "⠗⠚⠉⠛", positions = ["wordsign"], shortform = true }     # rjcg
+"said"       = { cell = "⠎⠙", positions = ["wordsign"], shortform = true }       # sd
+"should"     = { cell = "⠩⠙", positions = ["wordsign"], shortform = true }       # shd（sh）
+"such"       = { cell = "⠎⠡", positions = ["wordsign"], shortform = true }       # sch（ch）
+"themselves" = { cell = "⠮⠍⠧⠎", positions = ["wordsign"], shortform = true }     # themvs（the）
+"thyself"    = { cell = "⠹⠽⠋", positions = ["wordsign"], shortform = true }      # thyf（th）
+"today"      = { cell = "⠞⠙", positions = ["wordsign"], shortform = true }       # td
+"together"   = { cell = "⠞⠛⠗", positions = ["wordsign"], shortform = true }      # tgr
+"tomorrow"   = { cell = "⠞⠍", positions = ["wordsign"], shortform = true }       # tm
+"tonight"    = { cell = "⠞⠝", positions = ["wordsign"], shortform = true }       # tn
+"would"      = { cell = "⠺⠙", positions = ["wordsign"], shortform = true }       # wd
+"your"       = { cell = "⠽⠗", positions = ["wordsign"], shortform = true }       # yr
+"yourself"   = { cell = "⠽⠗⠋", positions = ["wordsign"], shortform = true }      # yrf
+"yourselves" = { cell = "⠽⠗⠧⠎", positions = ["wordsign"], shortform = true }     # yrvs

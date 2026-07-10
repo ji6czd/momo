@@ -25,7 +25,12 @@ from .features import (
     LABEL_CONTINUE,
     LABEL_SKIP,
 )
-from .utils import split_on_unescaped_slash, CharType, get_basic_char_category
+from .utils import (
+    split_on_unescaped_slash,
+    CharType,
+    get_basic_char_category,
+    normalize_one_to_one,
+)
 from .name_dict import (
     NAME_DICT_FILENAME,
     NAME_FLAG_BEGIN,
@@ -334,7 +339,15 @@ def process_line_to_tsv(line: str, line_num: int, stats: dict = None) -> List[st
             name_flag = name_flag_for_unit(orig_idx, len(target_chars), name_spans)
         except ValueError as e:
             raise ValueError(f"(Line {line_num}): {e}") from None
-        rows = _create_tsv_rows(target_chars, ctype, r_label, orig_idx, name_flag)
+        # 学習データは推論入力の正規化と揃える: 全角英数字は半角へ畳んで出力する
+        # （検証は上で注釈の原文に対して実施済み。注釈の書き方は変えない）。
+        rows = _create_tsv_rows(
+            normalize_one_to_one(target_chars),
+            ctype,
+            normalize_one_to_one(r_label),
+            orig_idx,
+            name_flag,
+        )
         tsv_rows.extend(rows)
         raw_ptr += 1
 

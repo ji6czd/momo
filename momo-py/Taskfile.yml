@@ -9,7 +9,10 @@ tasks:
     desc: Build momo-py package
     cmds:
       - mkdir -p src/momo_py/resources
-      - cp {{.DATASET_DIR}}/japanese_grade1_braille.toml src/momo_py/resources/
+      # 点字 TOML は dataset/ から同期しない。momo-py（pybraille）は凍結して
+      # フェードアウトする方針のため、src/momo_py/resources/ の点字 TOML は
+      # 旧フォーマットのまま固定する。dataset/ 側は momors-braille（Rust）専用に
+      # 進化させる（クラス名の階層化など）。正典は Rust。
       - cp {{.DATASET_DIR}}/basic_data*.zip src/momo_py/resources/
       - cp {{.DATASET_DIR}}/single_character_dic.tsv src/momo_py/resources/
       - uv build

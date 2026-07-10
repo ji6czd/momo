@@ -12,7 +12,7 @@ import re
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 from .features import get_units, SourceEntry
-from .utils import normalize_compat_ideographs
+from .utils import normalize_one_to_one
 
 # 文字ごとの人名フラグ
 NAME_FLAG_BEGIN = "B"  # 人名スパンの先頭
@@ -94,7 +94,7 @@ def parse_name_dict_text(text: str) -> List[NameEntry]:
     フォーマット: 1行1エントリ「表層形[TAB]読み[TAB]出現回数」。
     読みはユニット別に '/' 区切り（例: ワタ/ナベ）。# 行は無視する。
     読み列が省略された行・数字のみの行（旧形式の出現回数）は読みなしとして扱う。
-    表層形は推論時の入力正規化と揃えるため normalize_compat_ideographs を適用する。
+    表層形は推論時の入力正規化と揃えるため normalize_one_to_one を適用する。
     """
     entries: List[NameEntry] = []
     seen = set()
@@ -102,7 +102,7 @@ def parse_name_dict_text(text: str) -> List[NameEntry]:
         if not line or line.startswith("#"):
             continue
         cols = line.split("\t")
-        surface = normalize_compat_ideographs(cols[0])
+        surface = normalize_one_to_one(cols[0])
         if not surface or surface in seen:
             continue
         seen.add(surface)

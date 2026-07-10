@@ -182,8 +182,7 @@ impl BrailleBackTranslator {
             for (ch, cell) in m {
                 let cells: Vec<char> = cell.braille.chars().collect();
                 if cells.len() == 1 {
-                    let class = cell.class.as_deref().unwrap_or(crate::table::CLASS_NONE);
-                    let trailing = table.max_transition_spaces_from(class);
+                    let trailing = table.max_transition_spaces_from(&cell.path);
                     r.insert(cells[0], (ch.clone(), trailing as u8));
                 }
             }

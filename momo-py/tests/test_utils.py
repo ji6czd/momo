@@ -1,35 +1,45 @@
 """
 utils.py の単体テスト
-  - normalize_compat_ideographs()
+  - normalize_one_to_one()
   - normalize_input()
 """
-from momo_py.utils import normalize_compat_ideographs, normalize_input
+from momo_py.utils import normalize_one_to_one, normalize_input
 
 
-class TestNormalizeCompatIdeographs:
+class TestNormalizeOneToOne:
     def test_cjk_radicals_supplement(self):
-        assert normalize_compat_ideographs("⺟") == "母"  # ⺟ -> 母
-        assert normalize_compat_ideographs("⻳") == "龟"  # ⻳ -> 龟
+        assert normalize_one_to_one("⺟") == "母"  # ⺟ -> 母
+        assert normalize_one_to_one("⻳") == "龟"  # ⻳ -> 龟
 
     def test_kangxi_radical(self):
-        assert normalize_compat_ideographs("⼀") == "一"  # ⼀ -> 一
+        assert normalize_one_to_one("⼀") == "一"  # ⼀ -> 一
 
     def test_cjk_compatibility_ideograph(self):
         # U+F900 と U+8C48 は見た目が同じ「豈」だが別コードポイント
-        assert normalize_compat_ideographs("豈") == "豈"
+        assert normalize_one_to_one("豈") == "豈"
 
     def test_cjk_compatibility_ideograph_supplement(self):
-        assert normalize_compat_ideographs("\U0002f800") == "丽"  # 丽
+        assert normalize_one_to_one("\U0002f800") == "丽"  # 丽
+
+    def test_fullwidth_digits(self):
+        assert normalize_one_to_one("０１２３４５６７８９") == "0123456789"
+
+    def test_fullwidth_alphabet(self):
+        assert normalize_one_to_one("ＡＺａｚ") == "AZaz"
+
+    def test_fullwidth_symbols_are_kept(self):
+        # 全角記号は点字側で半角と区別が必要なため正規化しない
+        assert normalize_one_to_one("（）！？：・％") == "（）！？：・％"
 
     def test_passthrough_normal_kanji(self):
-        assert normalize_compat_ideographs("漢字") == "漢字"
+        assert normalize_one_to_one("漢字") == "漢字"
 
     def test_passthrough_non_kanji(self):
-        assert normalize_compat_ideographs("あいうえおABC123") == "あいうえおABC123"
+        assert normalize_one_to_one("あいうえおABC123") == "あいうえおABC123"
 
     def test_ligature_is_not_expanded(self):
         # 1→1変換専用なので欧文リガチャは対象外（normalize_input が担当）
-        assert normalize_compat_ideographs("ﬃ") == "ﬃ"
+        assert normalize_one_to_one("ﬃ") == "ﬃ"
 
 
 class TestNormalizeInput:
@@ -54,6 +64,12 @@ class TestNormalizeInput:
         text, index_map = normalize_input("⼀二")
         assert text == "一二"
         assert index_map == [0, 1]
+
+    def test_fullwidth_alnum_keeps_position(self):
+        # 全角英数字の1→1変換は位置が変わらない。全角記号は変換しない
+        text, index_map = normalize_input("３冊（Ａ）")
+        assert text == "3冊（A）"
+        assert index_map == [0, 1, 2, 3, 4]
 
     def test_mixed(self):
         text, index_map = normalize_input("⼀ﬀあ")

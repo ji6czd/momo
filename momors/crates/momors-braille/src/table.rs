@@ -3,19 +3,47 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-/// 予約クラス名。分類を持たない文字（class 未指定・非句読点）を表すため
-/// converter が暗黙に使う。
-pub(crate) const CLASS_NONE: &str = "none";
-/// テーブル所属から暗黙に決まる予約クラス名（`[table.kana]` の文字）。
-pub(crate) const CLASS_KANA: &str = "kana";
-/// テーブル所属から暗黙に決まる予約クラス名（`[table.digit]` の文字）。
-pub(crate) const CLASS_DIGIT: &str = "digit";
-/// テーブル所属から暗黙に決まる予約クラス名（`[table.latin]` の文字）。
-pub(crate) const CLASS_LATIN: &str = "latin";
+// ============================================================
+// クラスパス（ドット区切りの階層クラス名）
+// ============================================================
+//
+// 各文字は「フルパス」を1本持つ。テーブル所属（構造）＋ 句読点の意味クラス
+// （あれば末尾に1セグメント）を `.` で連結したもの。
+//
+//   ア           → "kana"
+//   1            → "digit"
+//   a            → "latin"
+//   .（ASCII）   → "punct.latin"          （class なし）
+//   。           → "punct.jp.stop"        （[table.punct.jp] + class=stop）
+//   未定義文字   → "none"
+//
+// `[transitions]` のキーはこのパスを**セグメント単位のプレフィックス**で参照する：
+//   "punct"        → punct.jp / punct.jp.stop / punct.latin すべてに一致
+//   "punct.jp"     → punct.jp と punct.jp.stop
+//   "punct.jp.stop"→ それだけ
+//   "*"            → すべて（match-all。内部表現は空文字列）
+//   "punct.*"      → "punct" と同義（末尾 `.*` は読みやすさのための別表記）
+// 特異度＝パターンのセグメント数（深いほど優先）。両側の合計が大きいルールが勝ち、
+// 同特異度の競合は値の max（現行の「完全一致 > ワイルドカード、両ワイルドカードは max」
+// の厳密な一般化）。
 
-/// すべての予約クラス名。`classes` での宣言は不可だが、
-/// `suppress_before` や `[transitions]` の条件には使える。
-pub(crate) const RESERVED_CLASSES: [&str; 4] = [CLASS_NONE, CLASS_KANA, CLASS_DIGIT, CLASS_LATIN];
+/// 分類を持たない文字（テーブル未定義文字）を表す予約クラスパス。
+pub(crate) const CLASS_NONE: &str = "none";
+/// `[table.kana.*]` の文字の構造クラスパス（single/compound は区別しない）。
+pub(crate) const CLASS_KANA: &str = "kana";
+/// `[table.digit]` の文字の構造クラスパス。
+pub(crate) const CLASS_DIGIT: &str = "digit";
+/// `[table.latin]` の文字の構造クラスパス。
+pub(crate) const CLASS_LATIN: &str = "latin";
+/// `[table.punct.jp]` の構造クラスパス接頭辞。
+pub(crate) const CLASS_PUNCT_JP: &str = "punct.jp";
+/// `[table.punct.latin]` の構造クラスパス接頭辞。
+pub(crate) const CLASS_PUNCT_LATIN: &str = "punct.latin";
+
+/// 予約構造クラス名。`[table.punct] classes`（意味クラス）での宣言は不可。
+/// `punct` / `punct.jp` / `punct.latin` は構造から決まるパスなので同様に宣言不可。
+pub(crate) const RESERVED_CLASSES: [&str; 5] =
+    [CLASS_NONE, CLASS_KANA, CLASS_DIGIT, CLASS_LATIN, "punct"];
 
 // ============================================================
 // TOML デシリアライズ用の中間型
@@ -41,13 +69,11 @@ enum PunctEntry {
 }
 
 impl PunctEntry {
-    fn into_cell(self) -> PunctCell {
+    /// braille 文字列と（あれば）意味クラス名に分解する。
+    fn split(self) -> (String, Option<String>) {
         match self {
-            PunctEntry::Simple(braille) => PunctCell {
-                braille,
-                class: None,
-            },
-            PunctEntry::WithClass { braille, class } => PunctCell { braille, class },
+            PunctEntry::Simple(braille) => (braille, None),
+            PunctEntry::WithClass { braille, class } => (braille, class),
         }
     }
 }
@@ -56,8 +82,9 @@ impl PunctEntry {
 #[derive(Debug, Clone)]
 pub(crate) struct PunctCell {
     pub braille: String,
-    /// この記号自身の分類（例: "stop", "pause"）。未分類なら `None`。
-    pub class: Option<String>,
+    /// この記号のフルクラスパス（例: "punct.jp.stop" / "punct.latin"）。
+    /// 構造接頭辞（所属テーブル）＋ 意味クラス（あれば末尾）を `.` で連結したもの。
+    pub path: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -221,15 +248,20 @@ impl BrailleTable {
     }
 
     fn from_raw(raw: RawBrailleFile) -> Result<Self> {
-        let to_punct = |map: HashMap<String, PunctEntry>| -> HashMap<String, PunctCell> {
-            map.into_iter().map(|(k, v)| (k, v.into_cell())).collect()
-        };
-
         let declared = raw.table.punct.classes;
-        let punct_jp = to_punct(raw.table.punct.jp);
-        let punct_latin = to_punct(raw.table.punct.latin);
-        validate_punct_classes(&declared, "jp", &punct_jp)?;
-        validate_punct_classes(&declared, "latin", &punct_latin)?;
+        // 予約名（none/kana/digit/latin/punct）を意味クラスとして宣言していないか検証
+        if let Some(reserved) = declared
+            .iter()
+            .find(|c| RESERVED_CLASSES.contains(&c.as_str()))
+        {
+            return Err(Error::Validation(format!(
+                "[table.punct] classes: \"{reserved}\" は予約名のため宣言できません"
+            )));
+        }
+
+        let punct_jp = build_punct_cells(CLASS_PUNCT_JP, "jp", raw.table.punct.jp, &declared)?;
+        let punct_latin =
+            build_punct_cells(CLASS_PUNCT_LATIN, "latin", raw.table.punct.latin, &declared)?;
         let transitions = parse_transitions(raw.transitions, &declared)?;
 
         Ok(Self {
@@ -248,52 +280,121 @@ impl BrailleTable {
         })
     }
 
-    /// クラス `from` から `to` への遷移で挿入する点字スペース数。
+    /// クラスパス `from` から `to` への遷移で挿入する点字スペース数。
     ///
-    /// - 完全一致のペアが最優先（明示した `= 0` による抑制もここに含まれる）
-    /// - なければワイルドカード `"from -> *"` と `"* -> to"` の**最大値**
-    ///   （例: `"stop -> *" = 2` と `"* -> inline" = 1` が同時に当たる「。→」は 2。
-    ///   「あとを二マス」「まえを一マス」の両方を満たすのは大きい方）
-    /// - どちらもなければ 0
+    /// - 各遷移ルールの両側パターンが `from` / `to` に**プレフィックス一致**するものを集める
+    /// - 特異度（両側パターンのセグメント数の合計）が最大のルールが勝つ
+    ///   （完全一致は深いパスなので必ずワイルドカードより優先される）
+    /// - 同特異度で複数当たったら値の **max**
+    ///   （例: `"punct.jp.stop -> *" = 2` と `"* -> punct.jp.inline" = 1` が同時に当たる
+    ///   「。→」は max の 2）
+    /// - どれも当たらなければ 0
     pub(crate) fn transition_spaces(&self, from: &str, to: &str) -> usize {
-        if let Some(&(_, _, n)) = self
-            .transitions
-            .iter()
-            .find(|(f, t, _)| f == from && t == to)
-        {
-            return n;
+        let mut best_spec: Option<usize> = None;
+        let mut best_val: usize = 0;
+        for (pf, pt, n) in &self.transitions {
+            if !pattern_matches(pf, from) || !pattern_matches(pt, to) {
+                continue;
+            }
+            let spec = pattern_spec(pf) + pattern_spec(pt);
+            match best_spec {
+                Some(b) if spec < b => {}
+                Some(b) if spec == b => best_val = best_val.max(*n),
+                _ => {
+                    best_spec = Some(spec);
+                    best_val = *n;
+                }
+            }
         }
-        let lookup = |f: &str, t: &str| {
-            self.transitions
-                .iter()
-                .find(|(tf, tt, _)| tf == f && tt == t)
-                .map_or(0, |&(_, _, n)| n)
-        };
-        lookup(from, "*").max(lookup("*", to))
+        best_val
     }
 
-    /// クラス `from` を起点とする遷移で挿入されうる最大スペース数。
+    /// クラスパス `from` を起点とする遷移で挿入されうる最大スペース数。
     /// 逆変換（backtranslator）が記号の直後のスペースを吸収する上限として使う。
+    ///
+    /// この記号自身が原因で挿入されるスペースだけを数えるため、from 側が
+    /// match-all（`*`）のルールは除外する（それらは「後続の to が原因」であって
+    /// この記号のトレイリングではない。例: `"* -> punct.jp.inline"` は … の前の
+    /// スペースであり、直前がどの記号でも起きるので開き括弧のトレイリングにしない）。
     pub(crate) fn max_transition_spaces_from(&self, from: &str) -> usize {
         self.transitions
             .iter()
-            .filter(|(f, _, _)| f == from)
+            .filter(|(pf, _, _)| !pf.is_empty() && pattern_matches(pf, from))
             .map(|&(_, _, n)| n)
             .max()
             .unwrap_or(0)
     }
 }
 
-/// `[transitions]` のキー `"A -> B"` をパースして検証する。
-/// 両側のクラス名は予約クラス（kana/digit/latin/none）か
-/// `[table.punct]` classes の宣言名、またはワイルドカード `*`（片側のみ）。
+/// 遷移パターン `pat`（正規化済み: `*` は空文字列、`X.*` は `X` に短縮済み）が
+/// クラスパス `class` にセグメント単位でプレフィックス一致するか。
+fn pattern_matches(pat: &str, class: &str) -> bool {
+    if pat.is_empty() {
+        return true; // match-all（元 "*"）
+    }
+    class == pat || class.starts_with(pat) && class[pat.len()..].starts_with('.')
+}
+
+/// 遷移パターンの特異度＝セグメント数（match-all は 0）。
+fn pattern_spec(pat: &str) -> usize {
+    if pat.is_empty() {
+        0
+    } else {
+        pat.split('.').count()
+    }
+}
+
+/// `[table.punct.{section}]` のエントリからフルパス付き [`PunctCell`] を構築する。
+/// セルの `class` は `declared`（`[table.punct] classes`）に宣言されていなければエラー。
+/// パスは `prefix`（"punct.jp" / "punct.latin"）＋ class（あれば `.class`）。
+fn build_punct_cells(
+    prefix: &str,
+    section: &str,
+    map: HashMap<String, PunctEntry>,
+    declared: &[String],
+) -> Result<HashMap<String, PunctCell>> {
+    let mut out = HashMap::with_capacity(map.len());
+    for (key, entry) in map {
+        let (braille, class) = entry.split();
+        let path = match class {
+            None => prefix.to_owned(),
+            Some(c) => {
+                if !declared.iter().any(|d| d == &c) {
+                    return Err(Error::Validation(format!(
+                        "[table.punct.{section}] \"{key}\": class \"{c}\" は \
+                         [table.punct] classes に宣言されていません"
+                    )));
+                }
+                format!("{prefix}.{c}")
+            }
+        };
+        out.insert(key, PunctCell { braille, path });
+    }
+    Ok(out)
+}
+
+/// `[transitions]` のキー `"A -> B"` をパースして検証・正規化する。
+/// 両側はクラスパスのプレフィックス（`kana` / `punct.jp` / `punct.jp.stop` …）か
+/// ワイルドカード `*`（片側のみ）。`X.*` は `X` に短縮、`*` は空文字列に正規化する。
 fn parse_transitions(
     raw: HashMap<String, usize>,
     declared: &[String],
 ) -> Result<Vec<(String, String, usize)>> {
-    let known = |name: &str| {
-        name == "*" || RESERVED_CLASSES.contains(&name) || declared.iter().any(|c| c == name)
-    };
+    // 有効なパスプレフィックスの集合を作る（typo 検出用）。
+    let mut allowed: Vec<String> = vec![
+        CLASS_NONE.into(),
+        CLASS_KANA.into(),
+        CLASS_DIGIT.into(),
+        CLASS_LATIN.into(),
+        "punct".into(),
+        CLASS_PUNCT_JP.into(),
+        CLASS_PUNCT_LATIN.into(),
+    ];
+    for c in declared {
+        allowed.push(format!("{CLASS_PUNCT_JP}.{c}"));
+        allowed.push(format!("{CLASS_PUNCT_LATIN}.{c}"));
+    }
+
     let mut out = Vec::with_capacity(raw.len());
     for (key, spaces) in raw {
         let Some((from, to)) = key.split_once("->") else {
@@ -301,53 +402,37 @@ fn parse_transitions(
                 "[transitions] \"{key}\": キーは \"クラス名 -> クラス名\" の形式で書いてください"
             )));
         };
-        let (from, to) = (from.trim(), to.trim());
-        if from == "*" && to == "*" {
+        let from = normalize_pattern(from.trim());
+        let to = normalize_pattern(to.trim());
+        if from.is_empty() && to.is_empty() {
             return Err(Error::Validation(format!(
                 "[transitions] \"{key}\": 両側をワイルドカード \"*\" にはできません"
             )));
         }
-        for name in [from, to] {
-            if name.is_empty() || !known(name) {
+        for pat in [&from, &to] {
+            if !pat.is_empty() && !allowed.iter().any(|a| a == pat) {
                 return Err(Error::Validation(format!(
-                    "[transitions] \"{key}\": クラス \"{name}\" は予約クラス\
-                     （kana/digit/latin/none）でも [table.punct] classes の宣言にもありません"
+                    "[transitions] \"{key}\": クラス \"{pat}\" は予約構造クラス\
+                     （kana/digit/latin/none/punct/punct.jp/punct.latin）でも \
+                     [table.punct] classes 由来のパス（punct.jp.<class> 等）にもありません"
                 )));
             }
         }
-        out.push((from.to_owned(), to.to_owned(), spaces));
+        out.push((from, to, spaces));
     }
     Ok(out)
 }
 
-/// セルの `class` に現れるクラス名がすべて `classes` に宣言されているかを検証する。
-/// 予約名（none/kana/digit/latin）は宣言不可・`class` に指定不可
-/// （kana/digit/latin はテーブル所属から暗黙に決まるため）。
-fn validate_punct_classes(
-    declared: &[String],
-    section: &str,
-    cells: &HashMap<String, PunctCell>,
-) -> Result<()> {
-    if let Some(reserved) = declared
-        .iter()
-        .find(|c| RESERVED_CLASSES.contains(&c.as_str()))
-    {
-        return Err(Error::Validation(format!(
-            "[table.punct] classes: \"{reserved}\" は予約名のため宣言できません"
-        )));
+/// 遷移パターンを内部表現に正規化する：`*` → 空文字列（match-all）、
+/// 末尾 `.*` → 除去（`punct.*` は `punct` と同義）。
+fn normalize_pattern(s: &str) -> String {
+    if s == "*" {
+        String::new()
+    } else if let Some(prefix) = s.strip_suffix(".*") {
+        prefix.to_owned()
+    } else {
+        s.to_owned()
     }
-    let is_declared = |name: &str| declared.iter().any(|c| c == name);
-    for (key, cell) in cells {
-        if let Some(class) = &cell.class {
-            if !is_declared(class) {
-                return Err(Error::Validation(format!(
-                    "[table.punct.{section}] \"{key}\": class \"{class}\" は \
-                     [table.punct] classes に宣言されていません"
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 // ============================================================
@@ -414,21 +499,21 @@ mod tests {
     fn spot_check_punct() {
         let table = BrailleTable::embedded().unwrap();
 
-        // 日本語記号（スペースはセルに書かず [transitions] で宣言する）
+        // 日本語記号（フルパス = 構造接頭辞 + 意味クラス）
         let cell = table.punct_jp.get("。").unwrap();
         assert_eq!(cell.braille.as_str(), "⠲");
-        assert_eq!(cell.class.as_deref(), Some("stop"));
+        assert_eq!(cell.path.as_str(), "punct.jp.stop");
         let cell2 = table.punct_jp.get("、").unwrap();
         assert_eq!(cell2.braille.as_str(), "⠰");
-        assert_eq!(cell2.class.as_deref(), Some("pause"));
+        assert_eq!(cell2.path.as_str(), "punct.jp.pause");
 
-        // ASCII 記号（"." "-" は無分類 = スペースなし）
+        // ASCII 記号（"." "-" は class なし = 構造パスのみ）
         let cell3 = table.punct_latin.get(".").unwrap();
         assert_eq!(cell3.braille.as_str(), "⠲");
-        assert_eq!(cell3.class, None);
+        assert_eq!(cell3.path.as_str(), "punct.latin");
         let cell4 = table.punct_latin.get("-").unwrap();
         assert_eq!(cell4.braille.as_str(), "⠤");
-        assert_eq!(cell4.class, None);
+        assert_eq!(cell4.path.as_str(), "punct.latin");
     }
 
     #[test]
@@ -436,15 +521,15 @@ mod tests {
         let table = BrailleTable::embedded().unwrap();
         for key in ["。", "！", "？"] {
             let cell = table.punct_jp.get(key).unwrap();
-            assert_eq!(cell.class.as_deref(), Some("stop"), "class of {key}");
+            assert_eq!(cell.path.as_str(), "punct.jp.stop", "path of {key}");
         }
         for key in ["、", "・"] {
             let cell = table.punct_jp.get(key).unwrap();
-            assert_eq!(cell.class.as_deref(), Some("pause"), "class of {key}");
+            assert_eq!(cell.path.as_str(), "punct.jp.pause", "path of {key}");
         }
         for key in ["→", "←", "…"] {
             let cell = table.punct_jp.get(key).unwrap();
-            assert_eq!(cell.class.as_deref(), Some("inline"), "class of {key}");
+            assert_eq!(cell.path.as_str(), "punct.jp.inline", "path of {key}");
         }
     }
 
@@ -571,19 +656,37 @@ classes = ["stop", "kana"]
             0,
             "未宣言ペアは 0"
         );
-        // 記号のあと（ワイルドカード）
-        assert_eq!(table.transition_spaces("stop", "kana"), 2);
-        assert_eq!(table.transition_spaces("stop", "stop"), 0, "明示 0 で抑制");
-        assert_eq!(table.transition_spaces("stop", "close"), 0);
-        assert_eq!(table.transition_spaces("pause", "kana"), 1);
+        // 英文句読点→かな（新規: Hello.こんにちは の分割）
+        assert_eq!(table.transition_spaces("punct.latin", "kana"), 1);
+        assert_eq!(
+            table.transition_spaces("punct.latin", "digit"),
+            0,
+            "3.14 は分割しない"
+        );
+        // 記号のあと（プレフィックスのワイルドカード）
+        assert_eq!(table.transition_spaces("punct.jp.stop", "kana"), 2);
+        assert_eq!(
+            table.transition_spaces("punct.jp.stop", "punct.jp.stop"),
+            0,
+            "明示 0 で抑制"
+        );
+        assert_eq!(
+            table.transition_spaces("punct.jp.stop", "punct.jp.close"),
+            0
+        );
+        assert_eq!(table.transition_spaces("punct.jp.pause", "kana"), 1);
         // 前後一マスの記号（両ワイルドカードの max）
-        assert_eq!(table.transition_spaces("kana", "inline"), 1);
-        assert_eq!(table.transition_spaces("inline", "kana"), 1);
-        assert_eq!(table.transition_spaces("stop", "inline"), 2, "max(2, 1)");
+        assert_eq!(table.transition_spaces("kana", "punct.jp.inline"), 1);
+        assert_eq!(table.transition_spaces("punct.jp.inline", "kana"), 1);
+        assert_eq!(
+            table.transition_spaces("punct.jp.stop", "punct.jp.inline"),
+            2,
+            "max(2, 1)"
+        );
         // 逆変換用の上限
-        assert_eq!(table.max_transition_spaces_from("stop"), 2);
-        assert_eq!(table.max_transition_spaces_from("pause"), 1);
-        assert_eq!(table.max_transition_spaces_from("open"), 0);
+        assert_eq!(table.max_transition_spaces_from("punct.jp.stop"), 2);
+        assert_eq!(table.max_transition_spaces_from("punct.jp.pause"), 1);
+        assert_eq!(table.max_transition_spaces_from("punct.jp.open"), 0);
     }
 
     #[test]
@@ -597,25 +700,78 @@ classes = ["stop", "inline"]
 "#,
         ) + r#"
 [transitions]
-"stop -> *" = 2
-"stop -> stop" = 0
-"* -> inline" = 1
-"stop -> inline" = 5
+"punct.jp.stop -> *" = 2
+"punct.jp.stop -> punct.jp.stop" = 0
+"* -> punct.jp.inline" = 1
+"punct.jp.stop -> punct.jp.inline" = 5
 "#;
         let table = BrailleTable::from_toml(&toml).unwrap();
-        assert_eq!(table.transition_spaces("stop", "kana"), 2, "from 側 *");
-        assert_eq!(table.transition_spaces("kana", "inline"), 1, "to 側 *");
         assert_eq!(
-            table.transition_spaces("stop", "stop"),
+            table.transition_spaces("punct.jp.stop", "kana"),
+            2,
+            "from 側 *"
+        );
+        assert_eq!(
+            table.transition_spaces("kana", "punct.jp.inline"),
+            1,
+            "to 側 *"
+        );
+        assert_eq!(
+            table.transition_spaces("punct.jp.stop", "punct.jp.stop"),
             0,
             "完全一致の明示 0"
         );
         assert_eq!(
-            table.transition_spaces("stop", "inline"),
+            table.transition_spaces("punct.jp.stop", "punct.jp.inline"),
             5,
-            "完全一致はワイルドカードより優先"
+            "深いパス（完全一致）はワイルドカードより優先"
         );
         assert_eq!(table.transition_spaces("kana", "latin"), 0);
+    }
+
+    #[test]
+    fn transitions_prefix_and_specificity_override() {
+        // 一般則 punct.jp.* -> kana = 1 に、特定の punct.jp.stop -> kana = 2 を重ねる。
+        // 階層クラスの主目的（デフォルト＋例外）が第一級で書けることの確認。
+        let toml = minimal_toml(
+            r#"
+[table.punct]
+classes = ["stop", "pause"]
+[table.punct.jp]
+[table.punct.latin]
+"#,
+        ) + r#"
+[transitions]
+"punct.jp.* -> kana" = 1
+"punct.jp.stop -> kana" = 2
+"#;
+        let table = BrailleTable::from_toml(&toml).unwrap();
+        // 一般則（プレフィックス punct.jp が pause に一致）
+        assert_eq!(table.transition_spaces("punct.jp.pause", "kana"), 1);
+        // 深い方が勝つ（特異度 3+1 > 2+1）
+        assert_eq!(table.transition_spaces("punct.jp.stop", "kana"), 2);
+        // punct.* も punct.jp.* と同様にプレフィックス一致する
+        assert_eq!(table.transition_spaces("punct.latin", "latin"), 0, "未宣言");
+    }
+
+    #[test]
+    fn transitions_accept_dotstar_sugar() {
+        // "punct.*" は "punct" と同義（末尾 .* は読みやすさのための別表記）
+        let toml = minimal_toml(
+            r#"
+[table.punct]
+classes = ["stop"]
+[table.punct.jp]
+[table.punct.latin]
+"#,
+        ) + r#"
+[transitions]
+"punct.* -> kana" = 1
+"#;
+        let table = BrailleTable::from_toml(&toml).unwrap();
+        assert_eq!(table.transition_spaces("punct.jp.stop", "kana"), 1);
+        assert_eq!(table.transition_spaces("punct.latin", "kana"), 1);
+        assert_eq!(table.transition_spaces("kana", "kana"), 0);
     }
 
     #[test]
@@ -646,12 +802,12 @@ classes = ["stop"]
         ) + r#"
 [transitions]
 "kana -> latin" = 1
-"latin -> stop" = 2
+"latin -> punct.jp.stop" = 2
 "#;
         let table = BrailleTable::from_toml(&toml).unwrap();
         assert_eq!(table.transition_spaces("kana", "latin"), 1);
-        assert_eq!(table.transition_spaces("latin", "stop"), 2);
-        assert_eq!(table.transition_spaces("stop", "latin"), 0);
+        assert_eq!(table.transition_spaces("latin", "punct.jp.stop"), 2);
+        assert_eq!(table.transition_spaces("punct.jp.stop", "latin"), 0);
     }
 
     #[test]

@@ -26,8 +26,10 @@
 pub mod backtranslator;
 pub mod converter;
 pub mod document;
+pub mod english;
 pub mod error;
 pub mod formatter;
+pub mod line;
 mod nabcc;
 pub mod reader;
 pub mod table;
@@ -38,8 +40,10 @@ pub use backtranslator::{
 };
 pub use converter::{BrailleConverter, BrailleResult, UnknownCharPolicy};
 pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
+pub use english::{EnglishResult, EnglishTranslator};
 pub use error::{Error, Result};
 pub use formatter::{render, FormattedDocument, RenderedLine};
+pub use line::{detect_language, is_japanese_char, Language, LineResult, LineTranslator};
 pub use reader::{read_bes, read_bet};
 pub use table::{embedded_table, embedded_tables, BrailleTable};
 pub use writer::OutputFormat;

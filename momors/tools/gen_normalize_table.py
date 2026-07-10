@@ -6,10 +6,10 @@ Python 側の入力正規化（momo_py/src/momo_py/utils.py）を真実の源と
 Rust 用の正規化テーブル `table.rs` を生成する。
 
 2種類のテーブルを生成する:
-  1. 互換漢字テーブル（1→1変換）: normalize_compat_ideographs() 相当
-  2. 展開テーブル（1→N展開）  : normalize_input() の _EXPANSION_RANGES 相当
+  1. 1→1変換テーブル（互換漢字・全角英数字）: normalize_one_to_one() 相当
+  2. 展開テーブル（1→N展開）              : normalize_input() の _EXPANSION_RANGES 相当
 
-対象コードポイント範囲は utils.py の _COMPAT_IDEOGRAPH_RANGES /
+対象コードポイント範囲は utils.py の _ONE_TO_ONE_RANGES /
 _EXPANSION_RANGES をファイルパス指定で直接読み込む（モノリポ前提）。
 utils.py に範囲を追加したら、このスクリプトを再実行するだけでよい。
 """
@@ -41,16 +41,16 @@ def _load_utils():
 
 
 _utils = _load_utils()
-# 1→1変換のみのカテゴリ
-_COMPAT_IDEOGRAPH_RANGES = _utils._COMPAT_IDEOGRAPH_RANGES
+# 1→1変換のみのカテゴリ（互換漢字 + 全角英数字）
+_ONE_TO_ONE_RANGES = _utils._ONE_TO_ONE_RANGES
 # 1→N展開を含むカテゴリ（カテゴリ名: レンジリスト）
 _EXPANSION_RANGES = _utils._EXPANSION_RANGES
 
 # ----------------------------------------------------------------------
-# 互換漢字テーブル（1→1）: 対象範囲を走査し、NFKC で畳み込まれるものだけを収集
+# 1→1変換テーブル: 対象範囲を走査し、NFKC で畳み込まれるものだけを収集
 # ----------------------------------------------------------------------
 entries: list[tuple[int, int]] = []
-for start, end in _COMPAT_IDEOGRAPH_RANGES:
+for start, end in _ONE_TO_ONE_RANGES:
     for cp in range(start, end + 1):
         c = chr(cp)
         if unicodedata.category(c) == "Cn":
@@ -59,7 +59,7 @@ for start, end in _COMPAT_IDEOGRAPH_RANGES:
         if nfkc == c:
             continue
         # 1文字→1文字の畳み込みのみをテーブル化する。
-        # (対象4レンジは全エントリが1:1であることを確認済み。
+        # (対象レンジは全エントリが1:1であることを確認済み。
         #  1:1でない変換が混入した場合は展開テーブル側で扱う必要があるため、
         #  ここで検出して失敗させる。)
         if len(nfkc) != 1:
@@ -128,7 +128,7 @@ to_strs = [f"0x{cp:06X}" for _, cp in entries]
 expand_from_strs = [f"0x{cp:06X}" for cp, _ in expand_entries]
 expand_to_strs = [rust_str_literal(s) for _, s in expand_entries]
 compat_ranges = " / ".join(
-    f"U+{lo:04X}-{hi:04X}" for lo, hi in _COMPAT_IDEOGRAPH_RANGES
+    f"U+{lo:04X}-{hi:04X}" for lo, hi in _ONE_TO_ONE_RANGES
 )
 expansion_categories = " / ".join(
     f"{name}({', '.join(f'U+{lo:04X}-{hi:04X}' for lo, hi in ranges)})"
@@ -141,7 +141,7 @@ with open(OUT_PATH, "w", encoding="utf-8", newline="\n") as f:
         f"""\
 // AUTO-GENERATED — DO NOT EDIT MANUALLY
 // Source : tools/gen_normalize_table.py
-// Truth  : momo_py/src/momo_py/utils.py (normalize_compat_ideographs / normalize_input)
+// Truth  : momo_py/src/momo_py/utils.py (normalize_one_to_one / normalize_input)
 // Unicode    : {unicode_version} (実行時 Python の unicodedata)
 // Ranges     : {compat_ranges}
 // Expansion  : {expansion_categories}
@@ -171,11 +171,11 @@ static EXPAND_TO: &[&str] = &[
 {format_block(expand_to_strs)}
 ];
 
-/// `cp` が互換漢字系ならNFKC正規化後のコードポイントを返す。
-/// 該当しなければ `None`。
+/// `cp` が1→1正規化対象（互換漢字系・全角英数字）ならNFKC正規化後の
+/// コードポイントを返す。該当しなければ `None`。
 ///
-/// Python の `unicodedata.normalize("NFKC", c)` による畳み込みと等価
-/// （対象4レンジ内、1文字→1文字変換のみ）。2分探索で O(log n) アクセス。
+/// Python の `normalize_one_to_one()` による畳み込みと等価
+/// （対象レンジ内、1文字→1文字変換のみ）。2分探索で O(log n) アクセス。
 pub(crate) fn normalize_lookup(cp: u32) -> Option<u32> {{
     match NORMALIZE_FROM_CP.binary_search(&cp) {{
         Ok(idx) => Some(NORMALIZE_TO_CP[idx]),

@@ -1,15 +1,15 @@
-use momors_braille::JapaneseTranslator;
+use momors_braille::BrailleTranslator;
 use momors_core::Predictor;
 use wasm_bindgen::prelude::*;
 
-/// 日本語テキストを点字に変換する WASM バインディング。
+/// 日本語/英語テキストを点字に変換する WASM バインディング。
 ///
 /// JS 側から `new MomoWasm(mbmBytes)` でインスタンスを生成し、
 /// `predictKana` / `predictBraille` / `predictSegmented` を呼ぶ。
 #[wasm_bindgen]
 pub struct MomoWasm {
     predictor: Predictor,
-    converter: JapaneseTranslator,
+    braille_translator: BrailleTranslator,
 }
 
 #[wasm_bindgen]
@@ -19,11 +19,11 @@ impl MomoWasm {
     pub fn new(mbm_data: &[u8]) -> Result<MomoWasm, JsValue> {
         let predictor =
             Predictor::from_model_bytes(mbm_data).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let converter =
-            JapaneseTranslator::from_embedded().map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let braille_translator =
+            BrailleTranslator::from_embedded().map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(MomoWasm {
             predictor,
-            converter,
+            braille_translator,
         })
     }
 
@@ -45,7 +45,7 @@ impl MomoWasm {
             .predict(text)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let braille = self
-            .converter
+            .braille_translator
             .translate(result.kana_text())
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(braille.braille_text().to_string())
@@ -69,7 +69,7 @@ impl MomoWasm {
             .predict(text)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let braille = self
-            .converter
+            .braille_translator
             .translate(result.kana_text())
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 

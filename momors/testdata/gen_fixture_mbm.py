@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-gen_dummy_mbm.py
+gen_fixture_mbm.py
 ================
-loader のテスト用ダミー `.mbm` ファイルを生成する。
+loader のテスト用 `.mbm` ファイルを生成する。
 
 scikit-learn は使わず、ハードコードされた小さなモデルを `.mbm` バイナリで
 書き出す。バイナリフォーマットは `momopy/src/momo_py/exporter.py` と同じ。
@@ -34,7 +34,7 @@ FT_KANJI_RUN_LEN = 0xC0
 CT_KANJI = 0x42
 
 # 出力先
-OUT_PATH = Path(__file__).parent.parent / "testdata" / "dummy.mbm"
+OUT_PATH = Path(__file__).parent.parent / "testdata" / "fixture.mbm"
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 

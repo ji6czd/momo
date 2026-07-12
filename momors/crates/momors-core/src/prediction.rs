@@ -1226,9 +1226,9 @@ mod tests {
 
     #[test]
     fn config_builder_chains() {
-        let config = PredictorConfig::new("dummy.mbm").with_numeric_confidence_threshold(0.4);
+        let config = PredictorConfig::new("fixture.mbm").with_numeric_confidence_threshold(0.4);
 
-        assert_eq!(config.model_path(), Path::new("dummy.mbm"));
+        assert_eq!(config.model_path(), Path::new("fixture.mbm"));
         assert!((config.numeric_confidence_threshold() - 0.4).abs() < 1e-6);
     }
 
@@ -1262,7 +1262,7 @@ mod tests {
 
     #[test]
     fn read_argmax_falls_back_to_unconstrained_when_dict_readings_absent_from_model() {
-        // dummy.mbm はクラス [カ, キ, ク] のみを持つ。
+        // fixture.mbm はクラス [カ, キ, ク] のみを持つ。
         // 辞書の読みがどれとも一致しない場合、read_argmax は
         // best_s=NEG_INFINITY のまま class 0 を返してはならず、
         // unconstrained_argmax と同じ結果にフォールバックすること。
@@ -1273,7 +1273,7 @@ mod tests {
         // "漢" (U+6F22) の読みを、モデルに存在しない読みだけにする
         std::fs::write(&dict_path, "漢\tケ\tコ\n").unwrap();
 
-        let config = PredictorConfig::new(dummy_model_path()).with_kanji_dict_path(&dict_path);
+        let config = PredictorConfig::new(fixture_model_path()).with_kanji_dict_path(&dict_path);
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("漢").unwrap();
@@ -1313,16 +1313,16 @@ mod tests {
         assert_eq!(small_kana_to_kana('A' as u32), 'A' as u32);
     }
 
-    // --- predict() の動作確認テスト (ダミーモデルで) ---
+    // --- predict() の動作確認テスト (テスト用モデルで) ---
 
-    fn dummy_model_path() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/dummy.mbm")
+    fn fixture_model_path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture.mbm")
     }
 
     #[test]
     fn predict_empty_string() {
-        let config = PredictorConfig::new(dummy_model_path());
-        let predictor = Predictor::load(config).expect("dummy.mbm が読めること");
+        let config = PredictorConfig::new(fixture_model_path());
+        let predictor = Predictor::load(config).expect("fixture.mbm が読めること");
 
         let result = predictor.predict("").unwrap();
         assert_eq!(result.source_text(), "");
@@ -1332,7 +1332,7 @@ mod tests {
 
     #[test]
     fn predict_bypass_symbol() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("、").unwrap();
@@ -1343,7 +1343,7 @@ mod tests {
 
     #[test]
     fn predict_bypass_alpha() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("abc").unwrap();
@@ -1352,7 +1352,7 @@ mod tests {
 
     #[test]
     fn predict_mixed_bypass() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("a、b").unwrap();
@@ -1361,7 +1361,7 @@ mod tests {
 
     #[test]
     fn predict_keeps_original_source_text_for_compat_ideographs() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // ⺟ (U+2E9F, CJK部首補助) は内部で「母」(U+6BCD) に畳み込んで推論するが、
@@ -1373,7 +1373,7 @@ mod tests {
 
     #[test]
     fn predict_expands_latin_ligature() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // ﬃ (U+FB03) は "ffi" に展開され ALPHA としてバイパスされる。
@@ -1404,7 +1404,7 @@ mod tests {
 
     #[test]
     fn predict_source_to_kana_indices() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("a").unwrap();
@@ -1414,8 +1414,8 @@ mod tests {
 
     #[test]
     fn predict_does_not_crash_on_complex_input() {
-        // dummy.mbm では意味のあるカナは出ないが、ロジックが落ちないことを確認
-        let config = PredictorConfig::new(dummy_model_path());
+        // fixture.mbm では意味のあるカナは出ないが、ロジックが落ちないことを確認
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // 小書き仮名、々、漢数字、句読点 - 全ロジックパスを通す
@@ -1431,7 +1431,7 @@ mod tests {
 
     #[test]
     fn get_source_segments_no_boundary() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパスのみ → 境界スペースなし → 全体が 1 セグメント
@@ -1441,7 +1441,7 @@ mod tests {
 
     #[test]
     fn get_source_segments_empty() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("").unwrap();
@@ -1450,7 +1450,7 @@ mod tests {
 
     #[test]
     fn format_source_segmented_no_boundary() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("abc").unwrap();
@@ -1459,7 +1459,7 @@ mod tests {
 
     #[test]
     fn format_segmented_ascii() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパス: 各文字が 1:1 でかなに対応
@@ -1469,7 +1469,7 @@ mod tests {
 
     #[test]
     fn format_segmented_symbol() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("、").unwrap();
@@ -1482,7 +1482,7 @@ mod tests {
 
     #[test]
     fn kana_to_source_char_ascii() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("abc").unwrap();
@@ -1492,7 +1492,7 @@ mod tests {
 
     #[test]
     fn source_to_kana_char_ascii() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("abc").unwrap();
@@ -1505,7 +1505,7 @@ mod tests {
 
     #[test]
     fn kana_to_source_char_and_source_to_kana_char_roundtrip() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // 記号 (マルチバイト) でも整合性が取れること
@@ -1532,7 +1532,7 @@ mod tests {
 
     #[test]
     fn source_to_braille_char_one_to_one() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパス: a→kana[0], b→kana[1], c→kana[2]
@@ -1549,7 +1549,7 @@ mod tests {
 
     #[test]
     fn source_to_braille_char_dedup_compound() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパス: a→kana[0], b→kana[1]
@@ -1565,7 +1565,7 @@ mod tests {
 
     #[test]
     fn source_to_braille_char_empty() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("").unwrap();
@@ -1579,7 +1579,7 @@ mod tests {
 
     #[test]
     fn braille_char_to_source_empty() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("").unwrap();
@@ -1588,7 +1588,7 @@ mod tests {
 
     #[test]
     fn braille_char_to_source_one_to_one() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパス: a→kana[0]→braille[0], b→kana[1]→braille[1], c→kana[2]→braille[2]
@@ -1599,7 +1599,7 @@ mod tests {
 
     #[test]
     fn braille_char_to_source_with_flag_cells() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // フラグセルを模倣: kana[0](a→src0) が braille [0,2) を占有（フラグ込み）
@@ -1611,7 +1611,7 @@ mod tests {
 
     #[test]
     fn braille_char_to_source_compound() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // 複合音を模倣: kana[0](a→src0) と kana[1](b→src1) が同じ braille pos 0 を指す。
@@ -1627,7 +1627,7 @@ mod tests {
 
     #[test]
     fn braille_char_to_source_roundtrip_consistency() {
-        let config = PredictorConfig::new(dummy_model_path());
+        let config = PredictorConfig::new(fixture_model_path());
         let predictor = Predictor::load(config).unwrap();
 
         // source_to_braille_char と braille_char_to_source の整合性:

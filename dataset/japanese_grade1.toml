@@ -31,34 +31,45 @@ double_entry_prefix = "⠠⠠" # 次の文字も大文字のとき（全大文�
 # スペースの挿入はすべてここで宣言する（セル側には書かない）。
 # 「A -> B」= クラス A の文字からクラス B の文字に切り替わる境界に
 # 挿入する点字スペース数。
-# クラス名は予約クラス（kana / digit / latin / none）か、
-# [table.punct] classes に宣言した句読点クラス。
-# - 片側にワイルドカード「*」が使える（「stop -> *」= 句点類のあとは常に）
-# - 完全一致のペアがワイルドカードより優先（「stop -> stop」= 0 のような明示抑制）
-# - 「stop -> *」と「* -> inline」が同時に当たる場合は大きい方（max）
+#
+# クラス名はドット区切りの「クラスパス」。各文字のフルパスは
+# テーブル所属（構造）＋句読点の意味クラス（あれば末尾）を連結したもの：
+#   ア→"kana"  1→"digit"  a→"latin"  .（ASCII）→"punct.latin"  。→"punct.jp.stop"
+# 遷移キーはこのパスを**セグメント単位のプレフィックス**で参照する：
+#   "punct"        → punct.jp / punct.jp.stop / punct.latin すべてに一致
+#   "punct.jp"     → punct.jp と punct.jp.stop / punct.jp.pause …
+#   "punct.jp.stop"→ それだけ
+#   "*"            → すべて（match-all）。"punct.*" は "punct" と同義
+# - 特異度＝両側パターンのセグメント数の合計。大きいルールが勝つ
+#   （深いパス＝完全一致は必ずワイルドカードより優先。「= 0」で明示抑制できる）
+# - 同特異度で複数当たったら大きい方（max）。例:「。→…」＝
+#   「punct.jp.stop -> *」(2) と「* -> punct.jp.inline」(1) の max で 2
 # - 宣言されていないペアには何も挿入しない
 # - 直前の出力がすでに点字スペースで終わっていれば挿入しない（二重防止）
 # - テキストの先頭・末尾では発火しない（次の文字がない場所にスペースは不要）
 
 [transitions]
 # 文字種境界
-"kana -> latin" = 1 # かな→英字: 外字符（⠰）の前を一マスあける
-"latin -> kana" = 1 # 英字→かな: 語の切れ目を一マスあける
+"kana -> latin" = 1        # かな→英字: 外字符（⠰）の前を一マスあける
+"latin -> kana" = 1        # 英字→かな: 語の切れ目を一マスあける
+"punct.latin -> kana" = 1  # 英文の句読点→かな: 「Hello.こんにちは」を分割する
 # 句点類（。！？）: あとを二マスあける。連続・閉じ括弧の前は除く
-"stop -> *" = 2
-"stop -> stop" = 0
-"stop -> close" = 0
+"punct.jp.stop -> *" = 2
+"punct.jp.stop -> punct.jp.stop" = 0
+"punct.jp.stop -> punct.jp.close" = 0
 # 読点類（、・：％～）: あとを一マスあける。連続・句点・閉じ括弧の前は除く
-"pause -> *" = 1
-"pause -> pause" = 0
-"pause -> stop" = 0
-"pause -> close" = 0
+"punct.jp.pause -> *" = 1
+"punct.jp.pause -> punct.jp.pause" = 0
+"punct.jp.pause -> punct.jp.stop" = 0
+"punct.jp.pause -> punct.jp.close" = 0
 # 前後一マスの記号（… → ←）
-"* -> inline" = 1
-"inline -> *" = 1
-"inline -> stop" = 0
-"inline -> pause" = 0
-"inline -> close" = 0
+"* -> punct.jp.inline" = 1
+"punct.jp.inline -> *" = 1
+"punct.jp.inline -> punct.jp.stop" = 0
+"punct.jp.inline -> punct.jp.pause" = 0
+"punct.jp.inline -> punct.jp.close" = 0
+# 閉じた括弧のあとに開き括弧が続く場合は一マスあける
+"punct.jp.close -> punct.jp.open" = 1
 
 # ==============================================================
 # 変換テーブル
@@ -281,10 +292,12 @@ double_entry_prefix = "⠠⠠" # 次の文字も大文字のとき（全大文�
 # --------------------------------------------------------------
 
 [table.punct]
-# このテーブルで使うクラス名の宣言。セルの class / [transitions] に現れる名前は
-# ここに宣言されていないとロードエラーになる（typo 検出のため）。
-# kana / digit / latin / none は予約名（テーブル所属から暗黙に決まる）。
-# 宣言はできないが、[transitions] の条件には使える。
+# ここに宣言するのは句読点の「意味クラス」名（セルの class= に使う末尾セグメント）。
+# セルの class / [transitions] に現れる名前がここに無いとロードエラー（typo 検出）。
+# 宣言した名前は [transitions] で "punct.jp.<名前>" / "punct.latin.<名前>" の
+# フルパスとして参照する。
+# kana / digit / latin / none / punct / punct.jp / punct.latin は構造から決まる
+# 予約パスなので宣言不可（[transitions] の条件には使える）。
 # 語彙: stop（文末記号） / pause（読点類） / open（開き括弧） / close（閉じ括弧）
 #       / inline（前後をあける記号）
 classes = ["stop", "pause", "open", "close", "inline"]

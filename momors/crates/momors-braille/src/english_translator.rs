@@ -1,8 +1,13 @@
-//! UEB (Unified English Braille) grade 2 の英語点字変換。
+//! UEB (Unified English Braille) の英語点字変換。
 //!
-//! **Phase 1「文脈非依存コア」＋ Phase 2a「lower signs」** を実装。
-//! 仕様: `docs/ueb-grade2-spec.md`（Phase 1）・`docs/ueb-grade2-lower-signs.md`（Phase 2a）。
-//! インベントリは `dataset/ueb_english.toml`。
+//! 変換規則は [`Table`] が持ち、縮約（`Table::contractions`）を含む grade 2 テーブル
+//! （`english_ueb_grade2.toml`）なら縮約あり、縮約を持たない grade 1 テーブル
+//! （`english_ueb_grade1.toml`）なら無縮約になる。適用ロジック（最長一致・語境界・
+//! ing 語頭例外・位置制約）はこのモジュールが持つ。shortform の allowlist は
+//! テーブルの `[shortforms]` セクション（`Table::shortform_words`）。
+//!
+//! **Phase 1「文脈非依存コア」＋ Phase 2a「lower signs」＋ Phase 3/4（頭字符・尾字符・shortforms）** を実装。
+//! 仕様: `docs/ueb-grade2-spec.md` ほか `docs/ueb-grade2-*.md`。
 //!
 //! この変換器は**スタンドアロン**（入出力は英語→UEB点字に閉じる）。日本語の状態
 //! （外字符・数符・prev_class）を一切持ち込まない。日本語中の英語は外国語引用符
@@ -22,99 +27,18 @@
 //!
 //! - 形態素境界を跨ぐ強縮約を抑制しない（`mishap` の `sh` を縮約してしまう）。
 //! - lower sign rule（dot 1/4 アンカー）は位置カテゴリで近似（厳密実装は Phase 2b）。
-//! - 頭字符・尾字符 / shortforms は未対応。
 //! - 大文字は語単位（先頭大文字→`⠠`、全大文字語→`⠠⠠`）のみ。語中の散在大文字は近似。
 //! - 数符後の grade-1 曖昧性回避は未対応。
 
-use crate::{Error, Result};
-use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use crate::table::{Contraction, Position, Table};
+use crate::{Error, Result, UnknownCharPolicy};
+use std::collections::HashMap;
+use std::sync::LazyLock;
 
 const BRAILLE_SPACE: char = '⠀'; // U+2800
 
-const TOML_UEB_ENGLISH: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../dataset/ueb_english.toml"
-));
-
-/// Rules of UEB, Appendix 1「Shortforms List」。この語の中では shortform を使ってよい。
-const TXT_SHORTFORM_WORDS: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../dataset/ueb_shortform_words.txt"
-));
-
-/// Appendix 1 の「s / 's を付けた語も shortform を使う」規則の**3つの例外**。
-/// これらは shortform を使わず綴る（`abouts`→a+b+ou+t+s、`almosts`→a+l+m+o+st+s、`hims`→h+i+m+s）。
-const SHORTFORM_PLURAL_EXCEPTIONS: [&str; 3] = ["abouts", "almosts", "hims"];
-
-// ============================================================
-// TOML デシリアライズ用の型
-// ============================================================
-
-#[derive(Debug, Deserialize)]
-struct RawUeb {
-    indicators: RawIndicators,
-    letters: HashMap<String, String>,
-    digits: HashMap<String, String>,
-    punctuation: HashMap<String, String>,
-    contractions: HashMap<String, RawContraction>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawIndicators {
-    capital: String,
-    capital_word: String,
-    number: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawContraction {
-    cell: String,
-    positions: Vec<String>,
-    /// 下方記号（dot 1/4 を含まない）か。lower wordsign の約物接触制限に使う。
-    #[serde(default)]
-    lower: bool,
-    /// `initial` position を解禁する語幹リスト（be / con / dis 用）。
-    ///
-    /// UEB では be/con/dis は「語の**第一音節**であるとき」しか groupsign にできないが、
-    /// 音節は綴りから決まらない（`become` は可・`benzene` は不可）。そこで**既定は不許可**とし、
-    /// ここに挙げた語幹で始まる語だけ `initial` を許可する（誤らない側に倒し、知識をデータで足す）。
-    /// 空・未指定なら `initial` は一切適用されない。
-    #[serde(default)]
-    initial_stems: Vec<String>,
-    /// shortform（略字）か。true のとき、語全体が Appendix 1 の
-    /// [`TXT_SHORTFORM_WORDS`] に載っていれば**語中のどこでも**使える。
-    #[serde(default)]
-    shortform: bool,
-}
-
-/// 縮約が適用できる語中の位置。1つの縮約は複数の position を持てる（いずれか一致で適用）。
-/// 語 `[start, end)`（連続英字）の中の位置 `i`・長さ `len` に対して判定する。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Position {
-    /// 語中どこでも（strong 系 / en / in の groupsign 役）。
-    Always,
-    /// 語頭でない（`i > start`）。ing 専用。
-    NonInitial,
-    /// 語頭＋後続が文字（`i == start && i+len < end`）。be / con / dis。
-    Initial,
-    /// 両側が文字＝語中（`start < i && i+len < end`）。ea / bb / cc / ff / gg。
-    Medial,
-    /// 単独で1語（`i == start && i+len == end`）。全 wordsign。
-    Wordsign,
-}
-
-#[derive(Debug, Clone)]
-struct Contraction {
-    cell: String,
-    positions: Vec<Position>,
-    lower: bool,
-    /// `initial` を解禁する語幹（空なら `initial` は使わない）。詳細は [`RawContraction`]。
-    initial_stems: Vec<String>,
-    /// shortform（略字）か。詳細は [`RawContraction`]。
-    shortform: bool,
-}
+// shortform の allowlist と例外は [`Table`]（`[shortforms]` セクション）が持つ。
+// grade1 テーブルには無いので grade1 は shortform を使わない。
 
 // ============================================================
 // EnglishResult
@@ -147,122 +71,102 @@ impl EnglishResult {
 // EnglishTranslator
 // ============================================================
 
-/// UEB grade 2（Phase 1 ＋ Phase 2a lower signs）英語点字変換器。
+/// UEB 英語点字変換器。[`Table`] を保持し、その `latin`/`digit`/`punct_latin`/
+/// `flag_capital`/`flag_digit`/`contractions` を参照して点訳する。縮約を持たない
+/// テーブル（grade 1）なら無縮約になる。char キーの参照キャッシュは `table` から派生する。
+///
+/// [`JapaneseTranslator`](crate::JapaneseTranslator) と同じインターフェース
+/// （`new`/`from_embedded`/`from_embedded_name`/`from_file`/`with_unknown_char_policy`/
+/// `set_unknown_char_policy`/`translate`）を持つ。
 pub struct EnglishTranslator {
+    /// 変換テーブル（正本）。
+    table: Table,
+    /// テーブル未定義文字の扱い。
+    unknown_char: UnknownCharPolicy,
+    // --- 以下は table から派生したキャッシュ（char キーで高速参照する） ---
     letters: HashMap<char, String>,
     digits: HashMap<char, String>,
     punctuation: HashMap<char, String>,
     cap: String,
     cap_word: String,
     number: String,
-    contractions: HashMap<String, Contraction>,
     max_contraction_len: usize,
-    /// Appendix 1「Shortforms List」。この語の中では shortform を語中でも使ってよい。
-    shortform_words: HashSet<String>,
 }
 
 impl EnglishTranslator {
-    /// 組み込みの UEB 英語テーブルで変換器を作る。
-    pub fn from_embedded() -> Result<Self> {
-        Self::from_toml(TOML_UEB_ENGLISH)
-    }
-
-    /// TOML 文字列から変換器を作る。
-    pub fn from_toml(toml_str: &str) -> Result<Self> {
-        let raw: RawUeb = toml::from_str(toml_str)?;
-
-        let to_char_map =
-            |m: HashMap<String, String>, what: &str| -> Result<HashMap<char, String>> {
-                let mut out = HashMap::with_capacity(m.len());
-                for (k, v) in m {
-                    let mut it = k.chars();
-                    match (it.next(), it.next()) {
-                        (Some(c), None) => {
-                            out.insert(c, v);
-                        }
-                        _ => {
-                            return Err(Error::Validation(format!(
-                                "[{what}] キー \"{k}\" は1文字でなければなりません"
-                            )))
-                        }
-                    }
-                }
-                Ok(out)
-            };
-
-        let letters = to_char_map(raw.letters, "letters")?;
-        let digits = to_char_map(raw.digits, "digits")?;
-        let punctuation = to_char_map(raw.punctuation, "punctuation")?;
-
-        let mut contractions = HashMap::with_capacity(raw.contractions.len());
-        let mut max_len = 0;
-        for (spelling, rc) in raw.contractions {
-            if !spelling.chars().all(|c| c.is_ascii_lowercase()) {
-                return Err(Error::Validation(format!(
-                    "[contractions] \"{spelling}\": 綴りは小文字 a-z のみ"
-                )));
-            }
-            if rc.positions.is_empty() {
-                return Err(Error::Validation(format!(
-                    "[contractions] \"{spelling}\": positions が空です"
-                )));
-            }
-            let mut positions = Vec::with_capacity(rc.positions.len());
-            for p in &rc.positions {
-                let pos = match p.as_str() {
-                    "always" => Position::Always,
-                    "noninitial" => Position::NonInitial,
-                    "initial" => Position::Initial,
-                    "medial" => Position::Medial,
-                    "wordsign" => Position::Wordsign,
-                    other => {
-                        return Err(Error::Validation(format!(
-                            "[contractions] \"{spelling}\": position \"{other}\" は \
-                             always/noninitial/initial/medial/wordsign のいずれか"
-                        )))
-                    }
-                };
-                positions.push(pos);
-            }
-            for stem in &rc.initial_stems {
-                if !stem.chars().all(|c| c.is_ascii_lowercase()) {
-                    return Err(Error::Validation(format!(
-                        "[contractions] \"{spelling}\": initial_stems \"{stem}\" は小文字 a-z のみ"
-                    )));
-                }
-            }
-            max_len = max_len.max(spelling.chars().count());
-            contractions.insert(
-                spelling,
-                Contraction {
-                    cell: rc.cell,
-                    positions,
-                    lower: rc.lower,
-                    initial_stems: rc.initial_stems,
-                    shortform: rc.shortform,
-                },
-            );
-        }
-
-        // Appendix 1 の語リスト（'#' 始まりはコメント、空行は無視）
-        let shortform_words: HashSet<String> = TXT_SHORTFORM_WORDS
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(str::to_owned)
+    /// テーブルを指定して変換器を作る。char キーのキャッシュと最長縮約長を派生する。
+    pub fn new(table: Table) -> Self {
+        let letters = char_keyed(&table.latin);
+        let digits = char_keyed(&table.digit);
+        let punctuation = table
+            .punct_latin
+            .iter()
+            .filter_map(|(k, pc)| single_char(k).map(|c| (c, pc.braille.clone())))
             .collect();
-
-        Ok(Self {
+        let cap = table.flag_capital.entry_prefix.clone();
+        let cap_word = table.flag_capital.double_entry_prefix.clone();
+        let number = table.flag_digit.entry_prefix.clone();
+        let max_contraction_len = table
+            .contractions
+            .keys()
+            .map(|s| s.chars().count())
+            .max()
+            .unwrap_or(0);
+        Self {
+            table,
+            unknown_char: UnknownCharPolicy::default(),
             letters,
             digits,
             punctuation,
-            cap: raw.indicators.capital,
-            cap_word: raw.indicators.capital_word,
-            number: raw.indicators.number,
-            contractions,
-            max_contraction_len: max_len,
-            shortform_words,
-        })
+            cap,
+            cap_word,
+            number,
+            max_contraction_len,
+        }
+    }
+
+    /// 組み込みの UEB grade 2（縮約あり）テーブルで変換器を作る。
+    pub fn from_embedded() -> Result<Self> {
+        Self::from_embedded_name("ueb_english_grade2")
+    }
+
+    /// 名前で組み込みテーブルを指定して変換器を作る（`[metadata].name` と照合）。
+    /// 例: `"ueb_english_grade1"` / `"ueb_english_grade2"`。見つからなければエラー。
+    pub fn from_embedded_name(name: &str) -> Result<Self> {
+        let table = crate::table::embedded_table(name)
+            .ok_or_else(|| Error::UnknownTable(name.to_owned()))?;
+        Ok(Self::new(table))
+    }
+
+    /// UEB スキーマの TOML ファイルからテーブルを読み込んで変換器を作る。
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Ok(Self::new(Table::from_ueb_file(path)?))
+    }
+
+    /// テーブル未定義文字の扱いを設定する（ビルダーメソッド）。
+    pub fn with_unknown_char_policy(mut self, policy: UnknownCharPolicy) -> Self {
+        self.unknown_char = policy;
+        self
+    }
+
+    /// テーブル未定義文字の扱いをその場で変更する。
+    pub fn set_unknown_char_policy(&mut self, policy: UnknownCharPolicy) {
+        self.unknown_char = policy;
+    }
+
+    /// 保持しているテーブルへの参照。
+    pub fn table(&self) -> &Table {
+        &self.table
+    }
+
+    /// テーブルの識別名（`[metadata].name`。例: `"ueb_english_grade2"`）。
+    pub fn name(&self) -> Option<&str> {
+        self.table.name.as_deref()
+    }
+
+    /// テーブルの表示名（`[metadata].displayname`。例: `"UEB English (Grade 2)"`）。
+    pub fn displayname(&self) -> Option<&str> {
+        self.table.displayname.as_deref()
     }
 
     /// 英語テキストを UEB 点字に変換する。
@@ -294,9 +198,13 @@ impl EnglishTranslator {
                 braille.push_str(cell);
                 i += 1;
             } else {
-                // 未対応文字は点字スペースに置換（Phase 1 の割り切り）。
+                // テーブル未定義文字。ポリシーに従う（既定はスペース、
+                // PassThrough は原文の文字をそのまま出す＝スクリーンリーダー用途）。
                 src_to_braille[i] = braille.chars().count();
-                braille.push(BRAILLE_SPACE);
+                match self.unknown_char {
+                    UnknownCharPolicy::PassThrough => braille.push(c),
+                    UnknownCharPolicy::Space => braille.push(BRAILLE_SPACE),
+                }
                 i += 1;
             }
         }
@@ -360,7 +268,7 @@ impl EnglishTranslator {
                 .iter()
                 .flat_map(|c| c.to_lowercase())
                 .collect();
-            if let Some(con) = self.contractions.get(&sub) {
+            if let Some(con) = self.table.contractions.get(&sub) {
                 if self.applicable(con, chars, i, len, word_start, word_end) {
                     return (len, con.cell.clone());
                 }
@@ -429,15 +337,15 @@ impl EnglishTranslator {
             .iter()
             .flat_map(|c| c.to_lowercase())
             .collect();
-        if SHORTFORM_PLURAL_EXCEPTIONS.contains(&word.as_str()) {
+        if self.table.shortform_plural_exceptions.contains(&word) {
             return false;
         }
-        if self.shortform_words.contains(&word) {
+        if self.table.shortform_words.contains(&word) {
             return true;
         }
         // 末尾の "s" を落とした語がリストにあれば可
         word.strip_suffix('s')
-            .is_some_and(|stem| self.shortform_words.contains(stem))
+            .is_some_and(|stem| self.table.shortform_words.contains(stem))
     }
 
     /// 語 `chars[word_start..word_end]` が `con.initial_stems` のいずれかで始まるか。
@@ -507,6 +415,31 @@ impl EnglishTranslator {
     }
 }
 
+/// 1文字だけの文字列ならその char。0文字・2文字以上なら None。
+fn single_char(s: &str) -> Option<char> {
+    let mut it = s.chars();
+    match (it.next(), it.next()) {
+        (Some(c), None) => Some(c),
+        _ => None,
+    }
+}
+
+/// `String` キーのマップを char キーのキャッシュに変換する（1文字キーのみ採用）。
+fn char_keyed(m: &HashMap<String, String>) -> HashMap<char, String> {
+    m.iter()
+        .filter_map(|(k, v)| single_char(k).map(|c| (c, v.clone())))
+        .collect()
+}
+
+/// 組み込み UEB 英語テーブル（grade 2）の表示名（例: `"UEB English (Grade 2)"`）。
+/// メニュー表示用。grade を選べるようにする段階で grade 引数版へ一般化する予定。
+pub fn embedded_english_displayname() -> Option<&'static str> {
+    static DISPLAYNAME: LazyLock<Option<String>> = LazyLock::new(|| {
+        crate::table::embedded_table("ueb_english_grade2").and_then(|t| t.displayname)
+    });
+    DISPLAYNAME.as_deref()
+}
+
 // ============================================================
 // テスト
 // ============================================================
@@ -521,6 +454,52 @@ mod tests {
 
     fn t(s: &str) -> String {
         tr().translate(s).braille_text().to_string()
+    }
+
+    fn t1(s: &str) -> String {
+        EnglishTranslator::from_embedded_name("ueb_english_grade1")
+            .expect("UEB 英語テーブル(grade1)をロードできること")
+            .translate(s)
+            .braille_text()
+            .to_string()
+    }
+
+    // --- grade 1（無縮約） ---
+
+    #[test]
+    fn grade1_has_no_contractions() {
+        // grade 2 で縮約される語が grade 1 では素の文字列になる。
+        assert_eq!(t("and"), "⠯"); // grade 2: strong contraction
+        assert_eq!(t1("and"), "⠁⠝⠙"); // grade 1: a + n + d
+        assert_eq!(t("the"), "⠮");
+        assert_eq!(t1("the"), "⠞⠓⠑");
+        assert_eq!(t("you"), "⠽"); // grade 2: wordsign
+        assert_eq!(t1("you"), "⠽⠕⠥");
+        assert_eq!(t("should"), "⠩⠙"); // grade 2: shortform
+        assert_eq!(t1("should"), "⠎⠓⠕⠥⠇⠙");
+    }
+
+    #[test]
+    fn grade1_keeps_capitals_and_numbers() {
+        // 大文字符・数符は grade 非依存。
+        assert_eq!(t1("Cat"), "⠠⠉⠁⠞"); // 大文字符 + c a t
+        assert_eq!(t1("NHK"), "⠠⠠⠝⠓⠅"); // 大文字語符 + n h k
+        assert_eq!(t1("123"), "⠼⠁⠃⠉"); // 数符 + 1 2 3
+    }
+
+    #[test]
+    fn table_metadata() {
+        let g2 = tr();
+        assert_eq!(g2.name(), Some("ueb_english_grade2"));
+        assert_eq!(g2.displayname(), Some("UEB English (Grade 2)"));
+
+        let g1 = EnglishTranslator::from_embedded_name("ueb_english_grade1").unwrap();
+        assert_eq!(g1.name(), Some("ueb_english_grade1"));
+        assert_eq!(g1.displayname(), Some("UEB English (Grade 1)"));
+        assert!(
+            g1.table().contractions.is_empty(),
+            "grade1 は縮約を持たない"
+        );
     }
 
     // --- 基本文字 ---

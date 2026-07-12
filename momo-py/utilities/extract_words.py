@@ -21,7 +21,7 @@ def extract_words_from_tsv(tsv_file: str) -> list[tuple[str, str]]:
                 read = parts[1]
                 tag = parts[3]
 
-                # '---'（継続文字のダミー読み）は無視、'+S'（分かち書き記号）は表示用に削除
+                # '---'（継続文字のプレースホルダ読み）は無視、'+S'（分かち書き記号）は表示用に削除
                 clean_read = "" if read == "---" else read.replace("+S", "")
 
                 # BIOESタグに基づく単語の組み立て

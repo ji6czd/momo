@@ -203,7 +203,7 @@ struct RawUeb {
     /// grade 1 テーブルは縮約を持たない（セクションを省略可）。
     #[serde(default)]
     contractions: HashMap<String, RawContraction>,
-    /// shortform（略字）の whitelist と例外。grade 1 は持たない（省略可）。
+    /// shortform（略字）の allowlist と例外。grade 1 は持たない（省略可）。
     #[serde(default)]
     shortforms: RawShortforms,
 }
@@ -276,7 +276,7 @@ pub struct Table {
     /// 英語（UEB）の縮約テーブル。綴り（小文字 a–z）→ 縮約定義。
     /// 日本語テーブルでは空。[`EnglishTranslator`](crate::EnglishTranslator) が参照する。
     pub(crate) contractions: HashMap<String, Contraction>,
-    /// shortform（略字）を語中でも使ってよい語の whitelist（UEB Appendix 1）。
+    /// shortform（略字）を語中でも使ってよい語の allowlist（UEB Appendix 1）。
     /// 縮約を持たないテーブル（grade 1）・日本語テーブルでは空。
     pub(crate) shortform_words: HashSet<String>,
     /// s / 's を付けても shortform を使わない例外語。

@@ -1,5 +1,5 @@
 use crate::table::{PunctCell, CLASS_DIGIT, CLASS_KANA, CLASS_LATIN, CLASS_NONE};
-use crate::{BrailleTable, Result};
+use crate::{Result, Table};
 use std::collections::HashSet;
 
 const BRAILLE_SPACE: char = '⠀'; // U+2800
@@ -15,18 +15,18 @@ pub enum UnknownCharPolicy {
 }
 
 // ============================================================
-// BrailleResult
+// JapaneseResult
 // ============================================================
 
 /// 点字変換の結果。
 #[derive(Debug, Clone)]
-pub struct BrailleResult {
+pub struct JapaneseResult {
     braille_text: String,
     /// かな文字インデックス → 点字文字インデックス（文字単位、先頭セル位置）
     kana_to_braille: Vec<usize>,
 }
 
-impl BrailleResult {
+impl JapaneseResult {
     /// 変換後の点字文字列。
     pub fn braille_text(&self) -> &str {
         &self.braille_text
@@ -43,16 +43,16 @@ impl BrailleResult {
 }
 
 // ============================================================
-// BrailleConverter
+// JapaneseTranslator
 // ============================================================
 
 /// 点字変換器。
 ///
-/// [`BrailleConverter::from_embedded`] で組み込みテーブルを使うか、
-/// [`BrailleConverter::new`] でテーブルを直接渡す。
-/// テーブル未定義文字の扱いは [`BrailleConverter::with_unknown_char_policy`] で変更できる。
-pub struct BrailleConverter {
-    table: BrailleTable,
+/// [`JapaneseTranslator::from_embedded`] で組み込みテーブルを使うか、
+/// [`JapaneseTranslator::new`] でテーブルを直接渡す。
+/// テーブル未定義文字の扱いは [`JapaneseTranslator::with_unknown_char_policy`] で変更できる。
+pub struct JapaneseTranslator {
+    table: Table,
     /// 数字モードで使われる点字セルの先頭文字集合。⠤ 挿入判定に使う。
     digit_cells: HashSet<char>,
     /// 数字モード中に現れても数字モードを終了させない文字（`flags.digit.exempt_chars` 由来）。
@@ -60,14 +60,14 @@ pub struct BrailleConverter {
     unknown_char: UnknownCharPolicy,
 }
 
-impl BrailleConverter {
+impl JapaneseTranslator {
     /// 保持しているテーブルへの参照を返す。
-    pub fn table(&self) -> &BrailleTable {
+    pub fn table(&self) -> &Table {
         &self.table
     }
 
     /// テーブルを指定して変換器を作る。
-    pub fn new(table: BrailleTable) -> Self {
+    pub fn new(table: Table) -> Self {
         // 数字テーブルの各エントリの先頭セルを集める
         let digit_cells = table
             .digit
@@ -90,7 +90,7 @@ impl BrailleConverter {
 
     /// デフォルトの組み込みテーブル（日本語１級）で変換器を作る。
     pub fn from_embedded() -> Result<Self> {
-        Ok(Self::new(BrailleTable::embedded()?))
+        Ok(Self::new(Table::embedded()?))
     }
 
     /// 名前で組み込みテーブルを指定して変換器を作る。
@@ -104,7 +104,7 @@ impl BrailleConverter {
 
     /// ファイルからテーブルを読み込んで変換器を作る。
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
-        Ok(Self::new(BrailleTable::from_file(path)?))
+        Ok(Self::new(Table::from_file(path)?))
     }
 
     /// テーブル未定義文字の扱いを設定する（ビルダーメソッド）。
@@ -120,9 +120,9 @@ impl BrailleConverter {
 
     /// かな文字列を点字に変換する。
     ///
-    /// `kana_text` には [`momors_core::PredictionResult::kana_text`] の出力を渡す。
+    /// `kana_text` は読みに変換済みのテキスト（上位の予測器の出力）。漢字は扱わない。
     /// ASCII 文字・数字・句読点が混在していても処理できる。
-    pub fn convert(&self, kana_text: &str) -> Result<BrailleResult> {
+    pub fn translate(&self, kana_text: &str) -> Result<JapaneseResult> {
         // momors-core がバイパスした全角数字・英字を ASCII に正規化する
         let normalized: String = kana_text
             .chars()
@@ -330,7 +330,7 @@ impl BrailleConverter {
             }
         }
 
-        Ok(BrailleResult {
+        Ok(JapaneseResult {
             braille_text: braille,
             kana_to_braille,
         })
@@ -410,29 +410,29 @@ impl BrailleConverter {
 mod tests {
     use super::*;
 
-    fn conv() -> BrailleConverter {
-        BrailleConverter::from_embedded().expect("テーブルをロードできること")
+    fn conv() -> JapaneseTranslator {
+        JapaneseTranslator::from_embedded().expect("テーブルをロードできること")
     }
 
     // --- 基本変換 ---
 
     #[test]
     fn kana_aiueo() {
-        let r = conv().convert("アイウエオ").unwrap();
+        let r = conv().translate("アイウエオ").unwrap();
         assert_eq!(r.braille_text(), "⠁⠃⠉⠋⠊");
     }
 
     #[test]
     fn kana_voiced() {
         // ガ = ⠐⠡（濁音プレフィックス + カ行）
-        let r = conv().convert("ガ").unwrap();
+        let r = conv().translate("ガ").unwrap();
         assert_eq!(r.braille_text(), "⠐⠡");
     }
 
     #[test]
     fn kana_compound_kya() {
         // キャ → ⠈⠡（2文字 → 1エントリ）
-        let r = conv().convert("キャ").unwrap();
+        let r = conv().translate("キャ").unwrap();
         assert_eq!(r.braille_text(), "⠈⠡");
         // 2 文字ともに同じ点字位置
         assert_eq!(r.kana_to_braille(), &[0, 0]);
@@ -443,41 +443,41 @@ mod tests {
         // コンニチワ、セカイ！
         // 、（pause）→ セ（kana）の境界に "pause -> *" = 1 のスペース。
         // 末尾の！は次の文字がないので遷移スペースなし。
-        let r = conv().convert("コンニチワ、セカイ！").unwrap();
+        let r = conv().translate("コンニチワ、セカイ！").unwrap();
         assert_eq!(r.braille_text(), "⠪⠴⠇⠗⠄⠰⠀⠻⠡⠃⠖");
     }
 
     #[test]
     fn stop_to_stop_suppressed() {
         // ！？ はどちらも stop。"stop -> stop" = 0 の明示宣言でスペースが入らない。
-        let r = conv().convert("！？").unwrap();
+        let r = conv().translate("！？").unwrap();
         assert_eq!(r.braille_text(), "⠖⠢");
     }
 
     #[test]
     fn stop_to_kana_inserts_two_spaces() {
         // ！→ ア は "stop -> *" = 2 で二マスあけ。
-        let r = conv().convert("！ア").unwrap();
+        let r = conv().translate("！ア").unwrap();
         assert_eq!(r.braille_text(), "⠖⠀⠀⠁");
     }
 
     #[test]
     fn three_stop_marks_no_spaces() {
         // ！？！ の連続はすべて "stop -> stop" = 0。
-        let r = conv().convert("！？！").unwrap();
+        let r = conv().translate("！？！").unwrap();
         assert_eq!(r.braille_text(), "⠖⠢⠖");
     }
 
     #[test]
     fn no_trailing_spaces_at_text_end() {
         // 遷移は「次の文字」がないと発火しない。文末の。にスペースは付かない。
-        let r = conv().convert("ア。").unwrap();
+        let r = conv().translate("ア。").unwrap();
         assert_eq!(r.braille_text(), "⠁⠲");
     }
 
     // --- ワイルドカード遷移: '→' のような前後必須スペース記号を想定した最小テーブル ---
 
-    fn conv_with_inline_arrow() -> BrailleConverter {
+    fn conv_with_inline_arrow() -> JapaneseTranslator {
         let toml = r#"
 [flags.digit]
 [flags.foreign_word]
@@ -503,27 +503,27 @@ classes = ["stop", "inline"]
 "* -> punct.jp.inline" = 1
 "punct.jp.inline -> *" = 1
 "#;
-        BrailleConverter::new(BrailleTable::from_toml(toml).expect("テストテーブルは有効"))
+        JapaneseTranslator::new(Table::from_toml(toml).expect("テストテーブルは有効"))
     }
 
     #[test]
     fn inline_no_space_at_text_start() {
         // 行頭には prev がないので "* -> inline" は発火しない
-        let r = conv_with_inline_arrow().convert("→").unwrap();
+        let r = conv_with_inline_arrow().translate("→").unwrap();
         assert_eq!(r.braille_text(), "⠿⠿");
     }
 
     #[test]
     fn inline_spaces_between_kana() {
         // ア→ア: "* -> inline" と "inline -> *" で前後一マスずつ
-        let r = conv_with_inline_arrow().convert("ア→ア").unwrap();
+        let r = conv_with_inline_arrow().translate("ア→ア").unwrap();
         assert_eq!(r.braille_text(), "⠁⠀⠿⠿⠀⠁");
     }
 
     #[test]
     fn wildcard_conflict_takes_max() {
         // 。→ は "stop -> *" = 2 と "* -> inline" = 1 が両方当たる → max の 2
-        let r = conv_with_inline_arrow().convert("。→").unwrap();
+        let r = conv_with_inline_arrow().translate("。→").unwrap();
         assert_eq!(r.braille_text(), "⠲⠀⠀⠿⠿");
     }
 
@@ -531,7 +531,7 @@ classes = ["stop", "inline"]
 
     #[test]
     fn digits_12345() {
-        let r = conv().convert("12345").unwrap();
+        let r = conv().translate("12345").unwrap();
         // ⠼ + 1〜5
         assert_eq!(r.braille_text(), "⠼⠁⠃⠉⠙⠑");
         // 最初の '1' → ⠼ 込みで位置 0
@@ -544,7 +544,7 @@ classes = ["stop", "inline"]
     fn digit_to_kana_explicit_exit() {
         // 1レツ → ⠼⠁⠤⠛⠝
         // レ = ⠛ はデジットセル（7）と衝突するので ⠤ が挿入される
-        let r = conv().convert("1レツ").unwrap();
+        let r = conv().translate("1レツ").unwrap();
         assert_eq!(r.braille_text(), "⠼⠁⠤⠛⠝");
     }
 
@@ -552,7 +552,7 @@ classes = ["stop", "inline"]
     fn digit_to_kana_no_explicit_exit() {
         // 1ガ → ⠼⠁⠐⠡
         // ガ の先頭セル ⠐ はデジットセルでないので ⠤ 不要
-        let r = conv().convert("1ガ").unwrap();
+        let r = conv().translate("1ガ").unwrap();
         assert_eq!(r.braille_text(), "⠼⠁⠐⠡");
     }
 
@@ -560,7 +560,7 @@ classes = ["stop", "inline"]
     fn decimal_point_preserves_digit_mode() {
         // 3.14 → ⠼⠉⠲⠁⠙
         // '.' は数字モードをリセットしない。ASCII 記号なので trailing なし。
-        let r = conv().convert("3.14").unwrap();
+        let r = conv().translate("3.14").unwrap();
         // ⠼⠉ (3) + ⠲ (.) + ⠁ (1) + ⠙ (4)
         assert_eq!(r.braille_text(), "⠼⠉⠲⠁⠙");
     }
@@ -569,7 +569,7 @@ classes = ["stop", "inline"]
     fn fullwidth_digit_treated_as_digit() {
         // momors-core がバイパスした全角数字 → ASCII に正規化されて数字モードで変換
         // １レツ → ⠼⠁⠤⠛⠝（ASCII "1レツ" と同じ結果）
-        let r = conv().convert("１レツ").unwrap();
+        let r = conv().translate("１レツ").unwrap();
         assert_eq!(r.braille_text(), "⠼⠁⠤⠛⠝");
     }
 
@@ -578,28 +578,28 @@ classes = ["stop", "inline"]
     #[test]
     fn latin_lowercase() {
         // abc → ⠰⠁⠃⠉（外来語フラグ + a + b + c）
-        let r = conv().convert("abc").unwrap();
+        let r = conv().translate("abc").unwrap();
         assert_eq!(r.braille_text(), "⠰⠁⠃⠉");
     }
 
     #[test]
     fn latin_single_capital() {
         // A → ⠰⠠⠁（外来語 + 大文字 + a）
-        let r = conv().convert("A").unwrap();
+        let r = conv().translate("A").unwrap();
         assert_eq!(r.braille_text(), "⠰⠠⠁");
     }
 
     #[test]
     fn latin_all_caps() {
         // NHK → ⠰⠠⠠⠝⠓⠅（外来語 + ⠠⠠ + n + h + k）
-        let r = conv().convert("NHK").unwrap();
+        let r = conv().translate("NHK").unwrap();
         assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅");
     }
 
     #[test]
     fn latin_followed_by_kana() {
         // NHK ラジオ → ⠰⠠⠠⠝⠓⠅ + スペース(⠀) + ラ(⠑) + ジ(⠐⠳) + オ(⠊)
-        let r = conv().convert("NHK ラジオ").unwrap();
+        let r = conv().translate("NHK ラジオ").unwrap();
         assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅⠀⠑⠐⠳⠊");
     }
 
@@ -607,7 +607,7 @@ classes = ["stop", "inline"]
     fn latin_to_kana_no_space_adds_transition_space() {
         // NHKラジオ（スペースなし）→ [transitions] "latin -> kana" でスペースが挿入される
         // スペースあり版と同じ結果になる
-        let r = conv().convert("NHKラジオ").unwrap();
+        let r = conv().translate("NHKラジオ").unwrap();
         assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅⠀⠑⠐⠳⠊");
     }
 
@@ -615,7 +615,7 @@ classes = ["stop", "inline"]
     fn latin_punct_to_kana_splits() {
         // 「a.ア」: 英文ピリオド（punct.latin）→ かな境界で "punct.latin -> kana" = 1
         // が発火し一マスあく。⠰⠁(a) ⠲(.) ⠀(遷移スペース) ⠁(ア)
-        let r = conv().convert("a.ア").unwrap();
+        let r = conv().translate("a.ア").unwrap();
         assert_eq!(r.braille_text(), "⠰⠁⠲⠀⠁");
     }
 
@@ -623,7 +623,7 @@ classes = ["stop", "inline"]
     fn decimal_point_not_split_by_latin_punct_rule() {
         // 「3.14」の '.' は punct.latin だが後続は数字（kana ではない）ので
         // "punct.latin -> kana" は発火しない。3.14 は分割されないまま。
-        let r = conv().convert("3.14").unwrap();
+        let r = conv().translate("3.14").unwrap();
         assert_eq!(r.braille_text(), "⠼⠉⠲⠁⠙");
     }
 
@@ -632,22 +632,22 @@ classes = ["stop", "inline"]
     #[test]
     fn kana_to_latin_inserts_transition_space() {
         // かな→latin 境界: "kana -> latin" = 1 により外字符（⠰）の前を一マスあける
-        let r = conv().convert("アイウエオabc").unwrap();
+        let r = conv().translate("アイウエオabc").unwrap();
         assert_eq!(r.braille_text(), "⠁⠃⠉⠋⠊⠀⠰⠁⠃⠉");
     }
 
     #[test]
     fn transition_space_idempotent_with_source_space() {
         // ソース側にスペースがあってもなくても同じ出力になる
-        let with_space = conv().convert("アイウエオ abc").unwrap();
-        let without = conv().convert("アイウエオabc").unwrap();
+        let with_space = conv().translate("アイウエオ abc").unwrap();
+        let without = conv().translate("アイウエオabc").unwrap();
         assert_eq!(with_space.braille_text(), without.braille_text());
     }
 
     #[test]
     fn kana_to_digit_no_transition_space() {
         // かな→数字は宣言がないのでスペースなし（語中数字: ダイ3カイ など）
-        let r = conv().convert("ア1").unwrap();
+        let r = conv().translate("ア1").unwrap();
         assert_eq!(r.braille_text(), "⠁⠼⠁");
     }
 
@@ -656,14 +656,14 @@ classes = ["stop", "inline"]
         // latin→句読点（stop）は宣言がないのでスペースなし。
         // 旧 exit_suffix 方式では latin→非ASCII に一律スペースが入っていた。
         // 文末の。にも遷移スペースは付かない。
-        let r = conv().convert("abc。").unwrap();
+        let r = conv().translate("abc。").unwrap();
         assert_eq!(r.braille_text(), "⠰⠁⠃⠉⠲");
     }
 
     #[test]
     fn no_transition_space_at_text_start() {
         // テキスト先頭では prev がないため発火しない
-        let r = conv().convert("abc").unwrap();
+        let r = conv().translate("abc").unwrap();
         assert_eq!(r.braille_text(), "⠰⠁⠃⠉");
     }
 
@@ -671,7 +671,7 @@ classes = ["stop", "inline"]
     fn index_with_transition_space() {
         // アa → （⠁ + 遷移スペース⠀）+ （⠰ + ⠁）
         // 遷移スペースは遷移前の文字（ア）の範囲に含まれる
-        let r = conv().convert("アa").unwrap();
+        let r = conv().translate("アa").unwrap();
         assert_eq!(r.braille_text(), "⠁⠀⠰⠁");
         assert_eq!(r.kana_to_braille(), &[0, 2]);
     }
@@ -680,7 +680,7 @@ classes = ["stop", "inline"]
     fn index_pause_space_belongs_to_pause() {
         // ア、カ → ⠁ + （⠰ + スペース⠀）+ ⠡
         // "pause -> *" のスペースは 、の範囲に含まれる
-        let r = conv().convert("ア、カ").unwrap();
+        let r = conv().translate("ア、カ").unwrap();
         assert_eq!(r.braille_text(), "⠁⠰⠀⠡");
         assert_eq!(r.kana_to_braille(), &[0, 1, 3]);
     }
@@ -689,7 +689,7 @@ classes = ["stop", "inline"]
     fn index_stop_spaces_belong_to_stop() {
         // ！ア → （⠖ + 二マスあけ⠀⠀）+ ⠁
         // "stop -> *" の 2 スペースはどちらも ！の範囲に含まれる
-        let r = conv().convert("！ア").unwrap();
+        let r = conv().translate("！ア").unwrap();
         assert_eq!(r.braille_text(), "⠖⠀⠀⠁");
         assert_eq!(r.kana_to_braille(), &[0, 3]);
     }
@@ -698,7 +698,7 @@ classes = ["stop", "inline"]
 
     #[test]
     fn index_simple() {
-        let r = conv().convert("アイウ").unwrap();
+        let r = conv().translate("アイウ").unwrap();
         assert_eq!(r.kana_to_braille(), &[0, 1, 2]);
     }
 
@@ -706,7 +706,7 @@ classes = ["stop", "inline"]
     fn index_with_digit_prefix() {
         // "1ア" → ⠼⠁⠤⠁
         // '1' → pos 0（⠼ 込み）。終了フラグ ⠤ は数字側に帰属し、'ア' → pos 3
-        let r = conv().convert("1ア").unwrap();
+        let r = conv().translate("1ア").unwrap();
         assert_eq!(r.kana_to_braille(), &[0, 3]);
     }
 
@@ -714,7 +714,7 @@ classes = ["stop", "inline"]
     fn index_compound_and_single() {
         // キャア → ⠈⠡⠁
         // キ→0, ャ→0（複合）, ア→2
-        let r = conv().convert("キャア").unwrap();
+        let r = conv().translate("キャア").unwrap();
         assert_eq!(r.kana_to_braille(), &[0, 0, 2]);
     }
 }

@@ -696,20 +696,28 @@ public static class MomoFfi
     {
         if (_predictorLoaded) return _predictor;
         _predictorLoaded = true;
-        if (_dllAvailable == false) return null;
 
         var modelPath = FindModelPath();
         if (modelPath == null) return null;
+        _predictor = CreatePredictor(modelPath);
+        return _predictor;
+    }
 
+    /// <summary>
+    /// .mbm モデルのパスを指定して予測器を作る（モデルを利用者に選ばせる UI 向け）。
+    /// 呼び出し側が Dispose すること。読み込み失敗・DLL 不在なら null。
+    /// </summary>
+    public static PredictorHandle? CreatePredictor(string modelPath)
+    {
+        if (_dllAvailable == false) return null;
         try
         {
             var ptr = momo_predictor_new_w(modelPath);
             _dllAvailable = true;
-            _predictor = ptr == nint.Zero ? null : new PredictorHandle(ptr);
+            return ptr == nint.Zero ? null : new PredictorHandle(ptr);
         }
-        catch (DllNotFoundException) { _dllAvailable = false; }
-        catch (EntryPointNotFoundException) { _dllAvailable = false; }
-        return _predictor;
+        catch (DllNotFoundException) { _dllAvailable = false; return null; }
+        catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
     }
 
     // モデルファイル (.mbm) を探す。large→medium→small の順に優先する。

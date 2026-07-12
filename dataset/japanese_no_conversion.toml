@@ -21,25 +21,30 @@ author = "MOMO Project"
 # ==============================================================
 # スペースの挿入はすべてここで宣言する（セル側には書かない）。
 
+# クラス名はドット区切りのクラスパス（プレフィックス参照・特異度max）。
+# 詳細は japanese_grade1_braille.toml のヘッダコメント参照。
 [transitions]
 # 文字種境界
-"kana -> latin" = 1 # かな→英字: 外字符（⠰）の前を一マスあける
-"latin -> kana" = 1 # 英字→かな: 語の切れ目を一マスあける
+"kana -> latin" = 1        # かな→英字: 外字符（⠰）の前を一マスあける
+"latin -> kana" = 1        # 英字→かな: 語の切れ目を一マスあける
+"punct.latin -> kana" = 1  # 英文の句読点→かな: 「Hello.こんにちは」を分割する
 # 句点類（。！？）: あとを二マスあける。連続・閉じ括弧の前は除く
-"stop -> *" = 2
-"stop -> stop" = 0
-"stop -> close" = 0
+"punct.jp.stop -> *" = 2
+"punct.jp.stop -> punct.jp.stop" = 0
+"punct.jp.stop -> punct.jp.close" = 0
 # 読点類（、・：％～）: あとを一マスあける。連続・句点・閉じ括弧の前は除く
-"pause -> *" = 1
-"pause -> pause" = 0
-"pause -> stop" = 0
-"pause -> close" = 0
+"punct.jp.pause -> *" = 1
+"punct.jp.pause -> punct.jp.pause" = 0
+"punct.jp.pause -> punct.jp.stop" = 0
+"punct.jp.pause -> punct.jp.close" = 0
 # 前後一マスの記号（…）
-"* -> inline" = 1
-"inline -> *" = 1
-"inline -> stop" = 0
-"inline -> pause" = 0
-"inline -> close" = 0
+"* -> punct.jp.inline" = 1
+"punct.jp.inline -> *" = 1
+"punct.jp.inline -> punct.jp.stop" = 0
+"punct.jp.inline -> punct.jp.pause" = 0
+"punct.jp.inline -> punct.jp.close" = 0
+# 閉じた括弧のあとに開き括弧が続く場合は一マスあける
+"punct.jp.close -> punct.jp.open" = 1
 
 # ==============================================================
 # 変換テーブル
@@ -262,9 +267,9 @@ author = "MOMO Project"
 # --------------------------------------------------------------
 
 [table.punct]
-# このテーブルで使うクラス名の宣言。セルの class / [transitions] に現れる名前は
-# ここに宣言されていないとロードエラーになる（typo 検出のため）。
-# kana / digit / latin / none は予約名（テーブル所属から暗黙に決まる）。
+# 句読点の「意味クラス」名の宣言（セルの class= と "punct.jp.<名前>" 参照に使う）。
+# ここに無い名前はロードエラー（typo 検出）。kana / digit / latin / none /
+# punct / punct.jp / punct.latin は構造から決まる予約パスなので宣言不可。
 # 語彙: stop（文末記号） / pause（読点類） / open（開き括弧） / close（閉じ括弧）
 #       / inline（前後をあける記号）
 classes = ["stop", "pause", "open", "close", "inline"]

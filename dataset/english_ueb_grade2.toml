@@ -1,11 +1,11 @@
-# ueb_english.toml
-# UEB (Unified English Braille) grade 2 — Phase 1「文脈非依存コア」の変換データ。
+# ueb_english_grade2.toml
+# UEB (Unified English Braille) grade 2（縮約あり）の変換テーブル。
 # 仕様: momors/crates/momors-braille/docs/ueb-grade2-spec.md
 #
 # インベントリ（データ）だけをここに置き、適用ロジック（最長一致・語境界・ing 語頭例外）は
-# english.rs のコードが持つ。以後の拡張（lower signs / 頭字符・尾字符 / shortforms）は
+# english_translator.rs のコードが持つ。以後の拡張（lower signs / 頭字符・尾字符 / shortforms）は
 # 原則このデータへ追加していく（機構を増やさない方針）。
-
+# grade 1（無縮約）は ueb_english_grade1.toml（縮約セクションを持たない）。
 [metadata]
 name = "ueb_english_grade2"
 displayname = "UEB English (Grade 2)"
@@ -326,3 +326,89 @@ z = "⠵"
 "your"       = { cell = "⠽⠗", positions = ["wordsign"], shortform = true }       # yr
 "yourself"   = { cell = "⠽⠗⠋", positions = ["wordsign"], shortform = true }      # yrf
 "yourselves" = { cell = "⠽⠗⠧⠎", positions = ["wordsign"], shortform = true }     # yrvs
+
+# ============================================================
+# Shortforms（略字の allowlist）
+# Rules of Unified English Braille, Appendix 1（pdftotext 抽出・584語）。
+# words: 語全体がこのリストにあるとき、その語中で shortform を使ってよい
+#        （語尾に s / 's を付けた語も可）。小文字 a-z。
+# plural_exceptions: s/'s を付けても shortform を使わない例外3語。
+# ============================================================
+[shortforms]
+plural_exceptions = ["abouts", "almosts", "hims"]
+words = [
+  "about", "aboutface", "aboutfaced", "aboutfacer", "aboutfacing", "aboutturn", "aboutturned", "above",
+  "aboveboard", "aboveground", "abovementioned", "according", "accordingly", "across", "aforesaid", "after",
+  "afterbattle", "afterbirth", "afterbreakfast", "afterburn", "afterburned", "afterburner", "afterburning", "aftercare",
+  "afterclap", "aftercoffee", "afterdamp", "afterdark", "afterdeck", "afterdinner", "afterflow", "aftergame",
+  "afterglow", "afterguard", "afterhatch", "afterhatches", "afterhour", "afterlife", "afterlight", "afterlives",
+  "afterlunch", "afterlunches", "aftermarket", "aftermatch", "aftermatches", "aftermath", "aftermeeting", "aftermidday",
+  "aftermidnight", "aftermost", "afternoon", "afternoontea", "afterpain", "afterparties", "afterparty", "afterpiece",
+  "afterplay", "aftersale", "afterschool", "aftersensation", "aftershave", "aftershock", "aftershow", "aftershower",
+  "aftersupper", "aftertaste", "aftertax", "aftertaxes", "aftertea", "aftertheatre", "afterthought", "aftertime",
+  "aftertreatment", "afterward", "afterword", "afterwork", "afterworld", "again", "against", "almost",
+  "already", "also", "although", "altogether", "always", "apperceive", "apperceived", "apperceiver",
+  "apperceiving", "archdeceiver", "because", "before", "beforehand", "befriend", "behind", "behindhand",
+  "belittle", "belittled", "belittlement", "belittler", "below", "belowdeck", "belowground", "belowmentioned",
+  "beneath", "beneathdeck", "beneathground", "beside", "between", "betweendeck", "betweentime", "betweenwhile",
+  "beyond", "blind", "blindfish", "blindfishes", "blindfold", "blindfolded", "blindfolder", "blindfolding",
+  "blindly", "blindman", "blindmen", "blindness", "blindnesses", "blindside", "blindsided", "blindsider",
+  "blindsiding", "blindsight", "blindstories", "blindstory", "blindworm", "bloodletter", "boyfriend", "brailled",
+  "brailler", "braillewriter", "braillewriting", "brailley", "brainchildren", "chainletter", "children", "colorblind",
+  "colorblindness", "colorblindnesses", "colourblind", "colourblindness", "colourblindnesses", "conceive", "conceived", "conceiver",
+  "conceiving", "could", "coulda", "couldest", "couldst", "deafblind", "deafblindness", "deafblindnesses",
+  "deceive", "deceived", "deceiver", "deceiving", "declare", "declared", "declarer", "declaring",
+  "defriend", "doublequick", "eastabout", "either", "feelgood", "feetfirst", "first", "firstaid",
+  "firstaider", "firstborn", "firstclass", "firstclasses", "firstday", "firstdayer", "firstfruit", "firstfruiting",
+  "firstgeneration", "firsthand", "firsthanded", "firstling", "firstly", "firstness", "firstnight", "firstnighter",
+  "firstrate", "firstrated", "firstrating", "firststring", "forasmuch", "foresaid", "fosterchildren", "friend",
+  "friendless", "friendlessness", "friendlessnesses", "friendlier", "friendlies", "friendliest", "friendliness", "friendlinesses",
+  "friendly", "friendship", "gadabout", "gainsaid", "galfriend", "gentlemanfriend", "gentlemenfriends", "girlfriend",
+  "godchildren", "good", "goodafternoon", "goodby", "goodbye", "goodbyeing", "goodbying", "goodday",
+  "gooder", "goodest", "goodevening", "goodfellow", "goodfellowship", "goodhearted", "goodheartedly", "goodheartedness",
+  "goodhumor", "goodhumored", "goodhumoredly", "goodhumoredness", "goodhumorednesses", "goodhumour", "goodhumoured", "goodhumouredly",
+  "goodhumouredness", "goodhumourednesses", "goodie", "goodish", "goodlier", "goodliest", "goodliness", "goodlook",
+  "goodlooker", "goodlooking", "goodly", "goodman", "goodmen", "goodmorning", "goodnature", "goodnatured",
+  "goodnaturedly", "goodnaturedness", "goodness", "goodnesses", "goodnight", "goodsize", "goodsized", "goodtempered",
+  "goodtemperedly", "goodtime", "goodun", "goodwife", "goodwill", "goodwilled", "goodwives", "goody",
+  "goodyear", "grandchildren", "great", "greataunt", "greatbatch", "greatcircle", "greatcoat", "greaten",
+  "greatened", "greatener", "greatening", "greater", "greatest", "greatgrandaunt", "greatgrandchild", "greatgrandchildren",
+  "greatgranddad", "greatgranddaughter", "greatgrandfather", "greatgrandfatherhood", "greatgrandma", "greatgrandmother", "greatgrandmotherhood", "greatgrandnephew",
+  "greatgrandniece", "greatgrandpa", "greatgrandparent", "greatgrandparenthood", "greatgrandson", "greatgranduncle", "greathearted", "greatheartedly",
+  "greatheartedness", "greatheartednesses", "greatly", "greatnephew", "greatness", "greatnesses", "greatniece", "greatsword",
+  "greatuncle", "guyfriend", "hateletter", "headfirst", "hereabout", "hereafter", "hereagain", "hereagainst",
+  "hereinabove", "hereinafter", "hereinagain", "herself", "highlypaid", "him", "himbo", "himboes",
+  "himself", "illpaid", "immediate", "immediately", "immediateness", "inasmuch", "insomuch", "its",
+  "itself", "knockabout", "ladyfriend", "layabout", "letter", "letterbodies", "letterbody", "letterbomb",
+  "letterbombed", "letterbomber", "letterbombing", "letterbox", "letterboxed", "letterboxer", "letterboxes", "letterboxing",
+  "lettered", "letterer", "letterform", "letterhead", "letterheading", "lettering", "letterman", "lettermen",
+  "letteropener", "letterperfect", "letterpress", "letterpressed", "letterpresses", "letterpressing", "letterquality", "letterspace",
+  "letterspaced", "letterspacing", "lettertext", "little", "littled", "littleneck", "littleness", "littlenesses",
+  "littler", "littlest", "lovechildren", "loveletter", "lowlypaid", "manfriend", "menfriends", "midafternoon",
+  "misbraille", "misbrailled", "misperceive", "misperceived", "misperceiver", "misperceiving", "missaid", "morningafter",
+  "much", "muchly", "muchness", "must", "musta", "mustard", "mustier", "mustiest",
+  "mustily", "mustiness", "musty", "myself", "necessary", "neither", "newsletter", "nonesuch",
+  "nonsuch", "northabout", "oneself", "ourselves", "overmuch", "overpaid", "paid", "penfriend",
+  "perceive", "perceived", "perceiver", "perceiving", "perhaps", "perhapses", "poorlypaid", "postpaid",
+  "preceive", "preceiver", "preceiving", "prepaid", "purblind", "purblindly", "purblindness", "purblindnesses",
+  "quick", "quickdraw", "quicken", "quickened", "quickener", "quickening", "quicker", "quickest",
+  "quickfire", "quickfiring", "quickfreeze", "quickfreezing", "quickfroze", "quickfrozen", "quickie", "quickish",
+  "quickishly", "quicklime", "quickly", "quickness", "quicknesses", "quicksand", "quickset", "quicksilver",
+  "quicksilvered", "quicksilvering", "quicksnap", "quickstep", "quickstepped", "quickstepper", "quickstepping", "quicktempered",
+  "quicktime", "quickwitted", "quickwittedly", "quickwittedness", "quicky", "readacross", "rebraille", "rebrailled",
+  "rebrailler", "receive", "received", "receiver", "receivership", "receiving", "rejoice", "rejoiced",
+  "rejoiceful", "rejoicefully", "rejoicefulness", "rejoicer", "rejoicing", "rejoicingly", "reletter", "relettered",
+  "relettering", "repaid", "rightabout", "roundabout", "roustabout", "runabout", "said", "saidest",
+  "saidst", "scattergood", "schoolchildren", "schoolfriend", "should", "shoulda", "shouldest", "shouldst",
+  "snowblind", "snowblindness", "snowblindnesses", "somesuch", "southabout", "stepchildren", "stirabout", "such",
+  "suchlike", "supergood", "superquick", "tailfirst", "themselves", "thereabout", "thereafter", "thereagain",
+  "thereagainst", "thereinafter", "thereinagain", "thyself", "today", "together", "togetherness", "tomorrow",
+  "tonight", "turnabout", "unaccording", "unaccordingly", "unblindfold", "unblindfolded", "unblindfolding", "unbraille",
+  "unbrailled", "undeceive", "undeceived", "undeceiver", "undeceiving", "undeclare", "undeclared", "underpaid",
+  "unfriend", "unfriendlier", "unfriendliest", "unfriendliness", "unfriendlinesses", "unfriendly", "unlettered", "unnecessary",
+  "unpaid", "unperceive", "unperceived", "unperceiving", "unquick", "unreceived", "unrejoice", "unrejoiced",
+  "unrejoiceful", "unrejoicefully", "unrejoicefulness", "unrejoicer", "unrejoicing", "unrejoicingly", "walkabout", "wellpaid",
+  "westabout", "whereabout", "whereafter", "whereagain", "whereagainst", "whereinafter", "whereinagain", "womanfriend",
+  "womenfriends", "would", "woulda", "wouldest", "wouldst", "your", "yourself", "yourselves",
+  
+]

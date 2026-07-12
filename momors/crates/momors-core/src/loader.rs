@@ -538,23 +538,23 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    /// dummy.mbm のパスを返す。
+    /// fixture.mbm のパスを返す。
     /// テストは crate ルートから実行される (`cargo test`) ことを前提とする。
-    fn dummy_path() -> PathBuf {
+    fn fixture_path() -> PathBuf {
         // crates/momors-core から見たプロジェクトルートの testdata
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/dummy.mbm")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture.mbm")
     }
 
     #[test]
-    fn load_dummy_header() {
-        let model = load(dummy_path()).expect("dummy.mbm が読めること");
+    fn load_fixture_header() {
+        let model = load(fixture_path()).expect("fixture.mbm が読めること");
         assert_eq!(model.n_classes(), 3);
         assert_eq!(model.n_features(), 5);
     }
 
     #[test]
-    fn load_dummy_labels() {
-        let model = load(dummy_path()).unwrap();
+    fn load_fixture_labels() {
+        let model = load(fixture_path()).unwrap();
         assert_eq!(model.read_class(0), Some("カ"));
         assert_eq!(model.read_class(1), Some("キ"));
         assert_eq!(model.read_class(2), Some("ク"));
@@ -562,8 +562,8 @@ mod tests {
     }
 
     #[test]
-    fn load_dummy_vocab() {
-        let model = load(dummy_path()).unwrap();
+    fn load_fixture_vocab() {
+        let model = load(fixture_path()).unwrap();
 
         // bias
         let k = FeatureKey::no_payload(FeatureType::Bias);
@@ -591,8 +591,8 @@ mod tests {
     }
 
     #[test]
-    fn load_dummy_read_weights() {
-        let model = load(dummy_path()).unwrap();
+    fn load_fixture_read_weights() {
+        let model = load(fixture_path()).unwrap();
 
         // QUANT_SCALES_READ = [0.01, 0.02, 0.005]（クラスごと）
         assert_eq!(model.read_scale.len(), 3);
@@ -618,8 +618,8 @@ mod tests {
     }
 
     #[test]
-    fn load_dummy_intercept() {
-        let model = load(dummy_path()).unwrap();
+    fn load_fixture_intercept() {
+        let model = load(fixture_path()).unwrap();
         assert_eq!(model.intercept_read.len(), 3);
         assert!((model.intercept_read[0] - 0.1).abs() < 1e-6);
         assert!((model.intercept_read[1] - 0.05).abs() < 1e-6);
@@ -627,8 +627,8 @@ mod tests {
     }
 
     #[test]
-    fn load_dummy_boundary() {
-        let model = load(dummy_path()).unwrap();
+    fn load_fixture_boundary() {
+        let model = load(fixture_path()).unwrap();
 
         assert!((model.boundary_scale - 0.005).abs() < 1e-6);
         assert_eq!(model.boundary_data, vec![10, -5, 20, 15, -3]);
@@ -683,9 +683,9 @@ mod tests {
     }
 
     #[test]
-    fn load_dummy_name_dict() {
-        let model = load(dummy_path()).unwrap();
-        // gen_dummy_mbm.py の NAME_DICT = [("佐藤", ["サ","トー"]), ("太郎", None)]
+    fn load_fixture_name_dict() {
+        let model = load(fixture_path()).unwrap();
+        // gen_fixture_mbm.py の NAME_DICT = [("佐藤", ["サ","トー"]), ("太郎", None)]
         // インデックスは先頭コードポイント引き
         let sa = model
             .name_dict
@@ -707,9 +707,9 @@ mod tests {
     }
 
     #[test]
-    fn load_dummy_kanji_dict() {
-        let model = load(dummy_path()).unwrap();
-        // gen_dummy_mbm.py の KANJI_DICT = [("漢", ["カン"]), ("字", ["ジ", "アザ"])]
+    fn load_fixture_kanji_dict() {
+        let model = load(fixture_path()).unwrap();
+        // gen_fixture_mbm.py の KANJI_DICT = [("漢", ["カン"]), ("字", ["ジ", "アザ"])]
         // char でソート済み（字 U+5B57 < 漢 U+6F22）
         assert_eq!(model.kanji_dict.len(), 2);
         assert_eq!(model.kanji_dict[0].0, '字');
@@ -721,9 +721,9 @@ mod tests {
     #[test]
     fn missing_kanji_dict_section_returns_corrupt_model() {
         // 単一漢字辞書テーブル追加前の旧 0x04 ファイルを模擬:
-        // dummy.mbm から同テーブル（gen_dummy_mbm.py の build_kanji_dict = 32 bytes）
+        // fixture.mbm から同テーブル（gen_fixture_mbm.py の build_kanji_dict = 32 bytes）
         // を末尾から削る。
-        let bytes = std::fs::read(dummy_path()).unwrap();
+        let bytes = std::fs::read(fixture_path()).unwrap();
         let truncated = &bytes[..bytes.len() - 32];
         let result = load_from_bytes(truncated);
         match result {
@@ -799,7 +799,7 @@ mod tests {
 
     #[test]
     fn csr_to_csc_simple() {
-        // 3 行 × 5 列、ダミー .mbm と同じパターン
+        // 3 行 × 5 列、テスト用 .mbm と同じパターン
         let indptr = vec![0u32, 3, 6, 8];
         let indices = vec![0u32, 1, 3, 0, 2, 3, 0, 4];
         let data = vec![50i8, 80, 30, 40, 70, 20, 10, 90];

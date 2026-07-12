@@ -1,4 +1,6 @@
-use momors_braille::BrailleConverter as RustBrailleConverter;
+use momors_braille::{
+    BrailleResult as RustBrailleResult, BrailleTranslator as RustBrailleTranslator, Language,
+};
 use momors_core::{
     PredictionResult as RustPredictionResult, Predictor as RustPredictor, PredictorConfig,
 };
@@ -163,19 +165,43 @@ impl Predictor {
 // BrailleResult
 // ============================================================
 
-/// 点字変換結果。`BrailleConverter.convert()` の戻り値。
+/// 点字変換結果。`BrailleTranslator.translate()` の戻り値。
 #[pyclass(get_all)]
 struct BrailleResult {
+    /// 点訳した経路（`"japanese"` / `"english"`）
+    language: String,
+    /// 点訳したテキスト（日本語=かな / 英語=英文）
+    text: String,
     /// 変換後の点字文字列
     braille: String,
-    /// かな文字インデックス → 点字先頭セルインデックス
-    kana_to_braille: Vec<usize>,
+    /// テキスト文字インデックス → 点字先頭セルインデックス
+    text_to_braille: Vec<usize>,
+    /// 点字セルインデックス → テキスト文字インデックス
+    braille_to_text: Vec<usize>,
+}
+
+impl BrailleResult {
+    fn from_rust(r: RustBrailleResult) -> Self {
+        Self {
+            language: match r.language() {
+                Language::Japanese => "japanese".to_string(),
+                Language::English => "english".to_string(),
+            },
+            text: r.text().to_string(),
+            braille: r.braille_text().to_string(),
+            text_to_braille: r.text_to_braille().to_vec(),
+            braille_to_text: r.braille_to_text().to_vec(),
+        }
+    }
 }
 
 #[pymethods]
 impl BrailleResult {
     fn __repr__(&self) -> String {
-        format!("BrailleResult(braille={:?})", self.braille)
+        format!(
+            "BrailleResult(language={:?}, braille={:?})",
+            self.language, self.braille
+        )
     }
 }
 
@@ -183,39 +209,54 @@ impl BrailleResult {
 // BrailleConverter
 // ============================================================
 
-/// カナ文字列 → 日本語点字変換器。
+/// 点訳器。行の言語を判定して日本語（かな→点字）／英語（UEB）へ振り分ける。
 ///
 /// ```python
 /// import momors_py
-/// c = momors_py.BrailleConverter()
-/// r = c.convert("ワガハイワネコデアル")
-/// print(r.braille)
+/// t = momors_py.BrailleTranslator()
+/// print(t.translate("ワガハイワネコデアル").braille)
+/// print(t.translate("you should be here today").braille)  # UEB grade 2
 /// ```
 #[pyclass]
-struct BrailleConverter {
-    inner: RustBrailleConverter,
+struct BrailleTranslator {
+    inner: RustBrailleTranslator,
 }
 
 #[pymethods]
-impl BrailleConverter {
+impl BrailleTranslator {
     /// 組み込みテーブルで変換器を作成する。
     #[new]
     fn new() -> PyResult<Self> {
-        let inner = RustBrailleConverter::from_embedded()
+        let inner = RustBrailleTranslator::from_embedded()
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         Ok(Self { inner })
     }
 
-    /// カナ文字列を点字に変換する。
-    fn convert(&self, kana: &str) -> PyResult<BrailleResult> {
+    /// 1行を言語判定して点字に変換する（日本語=かな / 英語=UEB）。
+    fn translate(&self, text: &str) -> PyResult<BrailleResult> {
         let result = self
             .inner
-            .convert(kana)
+            .translate(text)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        Ok(BrailleResult {
-            braille: result.braille_text().to_string(),
-            kana_to_braille: result.kana_to_braille().to_vec(),
-        })
+        Ok(BrailleResult::from_rust(result))
+    }
+
+    /// 言語判定せず、必ず日本語として点訳する（英字は外字符 ⠰ ＋無縮約）。
+    fn translate_japanese(&self, kana: &str) -> PyResult<BrailleResult> {
+        let result = self
+            .inner
+            .translate_japanese(kana)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        Ok(BrailleResult::from_rust(result))
+    }
+
+    /// 言語判定せず、必ず英語（UEB）として点訳する。
+    fn translate_english(&self, text: &str) -> PyResult<BrailleResult> {
+        let result = self
+            .inner
+            .translate_english(text)
+            .ok_or_else(|| PyRuntimeError::new_err("English translator is not available"))?;
+        Ok(BrailleResult::from_rust(result))
     }
 }
 
@@ -227,7 +268,7 @@ impl BrailleConverter {
 fn momors_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Predictor>()?;
     m.add_class::<PredictionResult>()?;
-    m.add_class::<BrailleConverter>()?;
+    m.add_class::<BrailleTranslator>()?;
     m.add_class::<BrailleResult>()?;
     Ok(())
 }

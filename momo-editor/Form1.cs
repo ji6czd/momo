@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using System.Windows.Forms.Automation;
+using Momo;
 
 namespace MomoEditor;
 
@@ -11,6 +12,13 @@ public partial class Form1 : Form
     private bool _suppressModified;
     private BrailleDocument _document = BrailleDocument.NewEmpty();
     private FormattedDocumentView? _view;
+
+    // テキスト→点字変換に使う点訳器。テーブルを切り替えたら破棄し、次の変換時に作り直す。
+    private MomoFfi.BrailleTranslatorHandle? _translator;
+
+    // 英語行に使う点字テーブル。true なら UEB Grade 2（縮約あり）、false なら Grade 1（無縮約）。
+    // 日本語行は常に日本語１級。切り替えたら _translator を破棄して作り直す。
+    private bool _grade2Table;
 
     // キーリマップテーブル（全モード共通）
     private readonly Dictionary<Keys, Action> _keyMap;
@@ -48,6 +56,9 @@ public partial class Form1 : Form
             [Keys.Back] = SimulateBackspace,
             [Keys.Delete] = SimulateDelete,
         };
+        // 英語点字メニューのラベルを実データの表示名に更新する。
+        InitTableMenu();
+
         // 新規ドキュメントで起動
         LoadDocumentToEditor();
         IsModified = false;
@@ -544,21 +555,35 @@ public partial class Form1 : Form
     private void LoadDocumentToEditor() => ReformatAndRender(-1, -1);
 
     /// <summary>
-    /// 漢字かな交じり文を 1 論理行ずつ点字へ変換してドキュメントを組み立てる。
-    /// 空行は空の段落として保持する。点字変換エンジンが使えない場合は null。
+    /// テキストを点字へ変換する。選択中のテーブルで点訳器を組み立て、日本語行は
+    /// 予測器（漢字かな交じり文→かな）を経由する。エンジンが使えないときは null。
     /// </summary>
-    private static BrailleDocument? TextToBrailleDocument(string text)
+    private Func<string, string>? GetTranslateLine()
     {
         var predictor = MomoFfi.GetPredictor();
         if (predictor == null) return null;
 
+        _translator ??= MomoFfi.CreateTranslator(
+            MomoFfi.TableJapaneseGrade1,
+            _grade2Table ? MomoFfi.TableUebEnglishGrade2 : MomoFfi.TableUebEnglishGrade1);
+        var translator = _translator;
+        if (translator == null) return null;
+
+        return line => line.Length == 0 ? "" : translator.ToBraille(line, predictor) ?? "";
+    }
+
+    /// <summary>
+    /// 漢字かな交じり文を 1 論理行ずつ点字へ変換してドキュメントを組み立てる。
+    /// 空行は空の段落として保持する。点字変換エンジンが使えない場合は null。
+    /// </summary>
+    private BrailleDocument? TextToBrailleDocument(string text)
+    {
+        var translate = GetTranslateLine();
+        if (translate == null) return null;
+
         var doc = new BrailleDocument();
         foreach (var raw in text.Split('\n'))
-        {
-            var line = raw.TrimEnd('\r');
-            var braille = line.Length == 0 ? "" : predictor.ToBraille(line) ?? "";
-            doc.Segments.Add(new Segment(braille, true));
-        }
+            doc.Segments.Add(new Segment(translate(raw.TrimEnd('\r')), true));
         if (doc.Segments.Count == 0)
             doc.Segments.Add(new Segment("", true));
         return doc;
@@ -617,6 +642,58 @@ public partial class Form1 : Form
         UpdateStatus();
 
         Announce(_brailleInputMode ? "点字入力モード オン" : "点字入力モード オフ",
+            AutomationNotificationProcessing.ImportantMostRecent);
+    }
+
+    // ---- 英語点字テーブルの切り替え ----
+    //
+    // 行ごとの言語判定は Rust 側の点訳器が行う。日本語を含む行は常に日本語１級で点訳され、
+    // ここで選べるのは英字だけの行に使う UEB のグレード（Grade 1 = 無縮約 / Grade 2 = 縮約）。
+    // 点字ドキュメント（点字セル）そのものには影響せず、テキストを変換して取り込む／
+    // 貼り付けるときにのみ効く。
+
+    // メニューのラベルはアクセラレータ記法（&1/&2）を含むため、読み上げにはこちらの
+    // 素の表示名を使う。
+    private string _grade1Name = "UEB English (Grade 1)";
+    private string _grade2Name = "UEB English (Grade 2)";
+
+    /// <summary>
+    /// 英語点字テーブルメニューのラベルを組み込みテーブルの表示名に更新する。
+    /// 先頭に "&amp;1" / "&amp;2" を付け、キーボードだけで選べるようにする。
+    /// </summary>
+    private void InitTableMenu()
+    {
+        var tables = MomoFfi.EmbeddedTables();
+        _grade1Name = TableDisplayName(tables, MomoFfi.TableUebEnglishGrade1, _grade1Name);
+        _grade2Name = TableDisplayName(tables, MomoFfi.TableUebEnglishGrade2, _grade2Name);
+        // 表示名中の & はメニューのアクセラレータ記法と衝突するのでエスケープする。
+        tableGrade1MenuItem.Text = $"&1 {_grade1Name.Replace("&", "&&")}";
+        tableGrade2MenuItem.Text = $"&2 {_grade2Name.Replace("&", "&&")}";
+    }
+
+    // DLL やテーブルが無い環境でもメニューは出すため、引けないときは既定のラベルを使う。
+    private static string TableDisplayName(
+        IReadOnlyList<MomoFfi.TableInfo> tables, string name, string fallback) =>
+        tables.FirstOrDefault(t => t.Name == name)?.DisplayName ?? fallback;
+
+    private void TableGrade1MenuItem_Click(object? sender, EventArgs e) => SelectTable(grade2: false);
+
+    private void TableGrade2MenuItem_Click(object? sender, EventArgs e) => SelectTable(grade2: true);
+
+    /// <summary>英語点字テーブルを切り替える。二択のチェック状態を排他的に更新する。</summary>
+    private void SelectTable(bool grade2)
+    {
+        tableGrade1MenuItem.Checked = !grade2;
+        tableGrade2MenuItem.Checked = grade2;
+        if (grade2 != _grade2Table)
+        {
+            _grade2Table = grade2;
+            _translator?.Dispose();
+            _translator = null;   // 次の変換時に新しいテーブルで作り直す
+        }
+        richTextBox.Focus();
+
+        Announce($"英語点字 {(grade2 ? _grade2Name : _grade1Name)}",
             AutomationNotificationProcessing.ImportantMostRecent);
     }
 
@@ -828,17 +905,15 @@ public partial class Form1 : Form
     /// <summary>漢字かな交じり文を 1 行ずつ点字へ変換し、カーソル位置に挿入する。</summary>
     private void InsertConvertedText(string text)
     {
-        var predictor = MomoFfi.GetPredictor();
-        if (predictor == null)
+        var translate = GetTranslateLine();
+        if (translate == null)
         {
             MessageBox.Show(
                 "点字変換エンジン（モデル）を読み込めないため、漢字かな交じり文を点字に変換できませんでした。",
                 "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
-        var lines = SplitLines(text);
-        var braille = Array.ConvertAll(lines, line => line.Length == 0 ? "" : predictor.ToBraille(line) ?? "");
-        InsertBrailleLines(braille);
+        InsertBrailleLines(Array.ConvertAll(SplitLines(text), line => translate(line)));
     }
 
     /// <summary>点字データ（複数行）をカーソル位置に挿入する。_view != null かつ非ヘッダ行で呼ぶこと。</summary>

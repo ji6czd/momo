@@ -8,6 +8,10 @@ namespace Momo;
 /// 点字ドキュメントの読み書き・折返し・ページ分割・ヘッダ生成・各形式の符号化は
 /// すべて Rust 側（momors-braille）に集約されている。クライアントはセグメント列＋設定を
 /// 保持し、ここを通して Rust にデータ生成を委ねる（ビルダー経由）。
+///
+/// 点訳は「点訳器（<see cref="BrailleTranslatorHandle"/>）＋予測器（<see cref="PredictorHandle"/>）」で行う。
+/// 点訳器が行ごとに言語を判定し、日本語行だけ予測器（漢字かな交じり文→かな）を使う。
+/// 結果は原文／読み／点字の3層と、その間の索引対応（<see cref="BrailleLine"/>）として返る。
 /// </summary>
 public static class MomoFfi
 {
@@ -25,25 +29,129 @@ public static class MomoFfi
     public const int ReadBes = FormatBes;
     public const int ReadBet = FormatBet;
 
-    // ---- 予測器（漢字かな交じり文 → 点字） ----
+    // 組み込みテーブル名（TOML の [metadata].name と一致させる）。
+    public const string TableJapaneseGrade1 = "japanese_grade1";
+    public const string TableJapaneseNoConversion = "japanese_noconversion";
+    public const string TableUebEnglishGrade2 = "ueb_english_grade2";
+    public const string TableUebEnglishGrade1 = "ueb_english_grade1";
+
+    // テーブル未定義文字の扱い（Rust 側 UnknownCharPolicy と一致させる）。
+    public const int PolicySpace = 0;
+    public const int PolicyPassThrough = 1;
+
+    // ---- 予測器（漢字かな交じり文 → かな） ----
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern nint momo_predictor_new_w(
-        [MarshalAs(UnmanagedType.LPWStr)] string modelPath,
-        [MarshalAs(UnmanagedType.LPWStr)] string? tableName,
-        [MarshalAs(UnmanagedType.LPWStr)] string? tomlPath);
+    static extern nint momo_predictor_new_w([MarshalAs(UnmanagedType.LPWStr)] string modelPath);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void momo_predictor_free(nint handle);
 
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern nint momo_predict_w(nint predictor, [MarshalAs(UnmanagedType.LPWStr)] string srcText);
+    // ---- 変換テーブル ----
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern void momo_prediction_free(nint handle);
+    static extern int momo_table_embedded_count();
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern int momo_prediction_braille_w(nint handle, nint buf, int bufLen);
+    static extern int momo_table_embedded_name_w(int idx, nint buf, int bufLen);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_table_embedded_displayname_w(int idx, nint buf, int bufLen);
+
+    // ---- 言語別変換器（点訳器の構築部品。ハンドルは点訳器に消費される） ----
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_japanese_translator_from_file_w(
+        [MarshalAs(UnmanagedType.LPWStr)] string path);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_japanese_translator_set_unknown_char_policy(nint handle, int policy);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_japanese_translator_free(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_english_translator_from_file_w(
+        [MarshalAs(UnmanagedType.LPWStr)] string path);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_english_translator_set_unknown_char_policy(nint handle, int policy);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_english_translator_free(nint handle);
+
+    // ---- 点訳器（入口） ----
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_braille_translator_from_embedded();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_braille_translator_from_names_w(
+        [MarshalAs(UnmanagedType.LPWStr)] string japaneseName,
+        [MarshalAs(UnmanagedType.LPWStr)] string? englishName);
+
+    // 日本語・英語変換器のハンドルを消費する（呼び出し後、両ハンドルは無効）。
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_braille_translator_new(nint japanese, nint english);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_braille_translator_translate_w(
+        nint handle, [MarshalAs(UnmanagedType.LPWStr)] string line, nint predictor);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_braille_translator_translate_japanese_w(
+        nint handle, [MarshalAs(UnmanagedType.LPWStr)] string line, nint predictor);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern nint momo_braille_translator_translate_english_w(
+        nint handle, [MarshalAs(UnmanagedType.LPWStr)] string line);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_braille_translator_free(nint handle);
+
+    // ---- 点訳結果（原文／読み／点字の3層） ----
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_braille_result_language(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_braille_result_source_text_w(nint handle, nint buf, int bufLen);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_braille_result_reading_text_w(nint handle, nint buf, int bufLen);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_braille_result_braille_text_w(nint handle, nint buf, int bufLen);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_braille_result_source_char_count(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_braille_result_reading_char_count(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_braille_result_braille_char_count(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_braille_result_reading_to_source(nint handle, [Out] int[] outIdx);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_braille_result_braille_to_source(nint handle, [Out] int[] outIdx);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_braille_result_source_to_reading(
+        nint handle, [Out] int[] rowPtr, [Out] int[] colIdx);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_braille_result_source_to_braille(
+        nint handle, [Out] int[] rowPtr, [Out] int[] colIdx);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    static extern bool momo_braille_result_has_prediction(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_braille_result_free(nint handle);
 
     // ---- ドキュメント読み込み ----
 
@@ -190,6 +298,144 @@ public static class MomoFfi
         finally { Marshal.FreeHGlobal(buf); }
     }
 
+    // ---- 点訳の型 ----
+
+    /// <summary>点訳経路。行ごとに点訳器が判定する。</summary>
+    public enum BrailleLanguage { Japanese = 0, English = 1 }
+
+    /// <summary>
+    /// 1 行の点訳結果。原文・読み・点字の3層と、その間の索引対応を持つ。
+    /// 索引はすべてコードポイント単位（UTF-16 ではない）。
+    /// 英語行では読み＝原文（恒等）で、<see cref="HasPrediction"/> は false。
+    /// </summary>
+    /// <param name="Language">この行がどちらの経路で点訳されたか。</param>
+    /// <param name="Source">原文。</param>
+    /// <param name="Reading">読み（日本語＝かな、英語＝原文）。</param>
+    /// <param name="Braille">点字。</param>
+    /// <param name="ReadingToSource">読みの各文字が原文の何文字目に由来するか。</param>
+    /// <param name="BrailleToSource">点字の各セルが原文の何文字目に由来するか。</param>
+    /// <param name="SourceToReading">原文の各文字が読みのどの文字群になったか（0個以上）。</param>
+    /// <param name="SourceToBraille">原文の各文字が点字のどのセル群になったか（0個以上）。</param>
+    /// <param name="HasPrediction">日本語予測（かな・確信度）が付随するか。</param>
+    public sealed record BrailleLine(
+        BrailleLanguage Language,
+        string Source,
+        string Reading,
+        string Braille,
+        IReadOnlyList<int> ReadingToSource,
+        IReadOnlyList<int> BrailleToSource,
+        IReadOnlyList<IReadOnlyList<int>> SourceToReading,
+        IReadOnlyList<IReadOnlyList<int>> SourceToBraille,
+        bool HasPrediction);
+
+    /// <summary>予測器（.mbm モデル）。読み込みが重いため使い回すこと。</summary>
+    public sealed class PredictorHandle : IDisposable
+    {
+        internal nint Ptr;
+        internal PredictorHandle(nint ptr) => Ptr = ptr;
+
+        public void Dispose()
+        {
+            if (Ptr != nint.Zero)
+            {
+                momo_predictor_free(Ptr);
+                Ptr = nint.Zero;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 点訳器。行ごとに日本語／英語を判定し、日本語行だけ予測器を使う。
+    /// 生成は <see cref="CreateTranslator(string, string?)"/> ほかのファクトリから行う。
+    /// </summary>
+    public sealed class BrailleTranslatorHandle : IDisposable
+    {
+        nint _ptr;
+        internal BrailleTranslatorHandle(nint ptr) => _ptr = ptr;
+
+        public void Dispose()
+        {
+            if (_ptr != nint.Zero)
+            {
+                momo_braille_translator_free(_ptr);
+                _ptr = nint.Zero;
+            }
+        }
+
+        /// <summary>1 行を言語判定して点訳する。失敗時は null。</summary>
+        public BrailleLine? Translate(string line, PredictorHandle predictor) =>
+            Materialize(momo_braille_translator_translate_w(_ptr, line, predictor.Ptr));
+
+        /// <summary>1 行を必ず日本語として点訳する（英字は外字符＋無縮約）。失敗時は null。</summary>
+        public BrailleLine? TranslateJapanese(string line, PredictorHandle predictor) =>
+            Materialize(momo_braille_translator_translate_japanese_w(_ptr, line, predictor.Ptr));
+
+        /// <summary>
+        /// 1 行を必ず英語（UEB）として点訳する。予測器は不要。
+        /// 英語エンジンを持たない点訳器では null。
+        /// </summary>
+        public BrailleLine? TranslateEnglish(string line) =>
+            Materialize(momo_braille_translator_translate_english_w(_ptr, line));
+
+        /// <summary>点字テキストだけが要るときの簡便版。失敗時は null。</summary>
+        public string? ToBraille(string line, PredictorHandle predictor) =>
+            Translate(line, predictor)?.Braille;
+    }
+
+    // 点訳結果ハンドルを C# 側のレコードへ写し取り、ハンドルは解放する。
+    // 呼び出し側にネイティブハンドルを持たせないことで、寿命管理を1か所に閉じ込める。
+    static BrailleLine? Materialize(nint h)
+    {
+        if (h == nint.Zero) return null;
+        try
+        {
+            var language = (BrailleLanguage)momo_braille_result_language(h);
+            string source  = ReadString((b, l) => momo_braille_result_source_text_w(h, b, l));
+            string reading = ReadString((b, l) => momo_braille_result_reading_text_w(h, b, l));
+            string braille = ReadString((b, l) => momo_braille_result_braille_text_w(h, b, l));
+
+            int srcCount = Math.Max(0, momo_braille_result_source_char_count(h));
+            int readCount = Math.Max(0, momo_braille_result_reading_char_count(h));
+            int brlCount = Math.Max(0, momo_braille_result_braille_char_count(h));
+
+            var readingToSource = new int[readCount];
+            if (readCount > 0) momo_braille_result_reading_to_source(h, readingToSource);
+            var brailleToSource = new int[brlCount];
+            if (brlCount > 0) momo_braille_result_braille_to_source(h, brailleToSource);
+
+            var sourceToReading = ReadCsr(srcCount, readCount,
+                (rows, cols) => momo_braille_result_source_to_reading(h, rows, cols));
+            var sourceToBraille = ReadCsr(srcCount, brlCount,
+                (rows, cols) => momo_braille_result_source_to_braille(h, rows, cols));
+
+            return new BrailleLine(
+                language, source, reading, braille,
+                readingToSource, brailleToSource,
+                sourceToReading, sourceToBraille,
+                momo_braille_result_has_prediction(h));
+        }
+        finally { momo_braille_result_free(h); }
+    }
+
+    // Rust 側の CSR（row_ptr: 行数+1 要素、col_idx: 非ゼロ要素数）を行ごとのリストへ展開する。
+    static IReadOnlyList<IReadOnlyList<int>> ReadCsr(int rowCount, int colCount, Action<int[], int[]> fill)
+    {
+        if (rowCount <= 0) return [];
+        var rowPtr = new int[rowCount + 1];
+        var colIdx = new int[colCount];
+        fill(rowPtr, colIdx);
+
+        var rows = new List<IReadOnlyList<int>>(rowCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            int start = rowPtr[i];
+            int end = rowPtr[i + 1];
+            if (start < 0 || end < start || end > colCount) { rows.Add([]); continue; }
+            rows.Add(colIdx[start..end]);
+        }
+        return rows;
+    }
+
     // ---- 描画ハンドル（印刷イメージ） ----
 
     public sealed class FormattedHandle : IDisposable
@@ -213,33 +459,6 @@ public static class MomoFfi
         public bool IsHeader(int page, int line) => momo_formatted_line_is_header(_ptr, page, line);
         public bool IsLogicalEnd(int page, int line) => momo_formatted_line_logical_end(_ptr, page, line);
         public int SegmentIndex(int page, int line) => momo_formatted_line_segment_index(_ptr, page, line);
-    }
-
-    public sealed class PredictorHandle : IDisposable
-    {
-        nint _ptr;
-        internal PredictorHandle(nint ptr) => _ptr = ptr;
-
-        public void Dispose()
-        {
-            if (_ptr != nint.Zero)
-            {
-                momo_predictor_free(_ptr);
-                _ptr = nint.Zero;
-            }
-        }
-
-        /// <summary>漢字かな交じり文を日本語点字に変換する。失敗時は null。</summary>
-        public string? ToBraille(string text)
-        {
-            var pred = momo_predict_w(_ptr, text);
-            if (pred == nint.Zero) return null;
-            try
-            {
-                return ReadString((b, l) => momo_prediction_braille_w(pred, b, l));
-            }
-            finally { momo_prediction_free(pred); }
-        }
     }
 
     // ---- 公開 API ----
@@ -359,12 +578,118 @@ public static class MomoFfi
         catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
     }
 
+    // ---- テーブル一覧 ----
+
+    /// <summary>組み込み変換テーブルの識別名と表示名。</summary>
+    public sealed record TableInfo(string Name, string DisplayName);
+
+    /// <summary>
+    /// 組み込みテーブルを列挙する（テーブル選択メニュー用）。DLL 不在なら空。
+    /// </summary>
+    public static IReadOnlyList<TableInfo> EmbeddedTables()
+    {
+        if (_dllAvailable == false) return [];
+        try
+        {
+            int count = momo_table_embedded_count();
+            _dllAvailable = true;
+            var list = new List<TableInfo>(Math.Max(0, count));
+            for (int i = 0; i < count; i++)
+            {
+                int idx = i;
+                var name = ReadString((b, l) => momo_table_embedded_name_w(idx, b, l));
+                var display = ReadString((b, l) => momo_table_embedded_displayname_w(idx, b, l));
+                if (name.Length > 0)
+                    list.Add(new TableInfo(name, display.Length > 0 ? display : name));
+            }
+            return list;
+        }
+        catch (DllNotFoundException) { _dllAvailable = false; return []; }
+        catch (EntryPointNotFoundException) { _dllAvailable = false; return []; }
+    }
+
+    // ---- 点訳器の生成 ----
+
+    /// <summary>
+    /// 組み込みテーブルを名前で指定して点訳器を作る。
+    /// <paramref name="englishTable"/> が null なら英語エンジンを持たず、英字も日本語テーブルで
+    /// 点訳する（無変換テーブルなどの用途）。名前が無効・DLL 不在なら null。
+    /// </summary>
+    public static BrailleTranslatorHandle? CreateTranslator(
+        string japaneseTable = TableJapaneseGrade1,
+        string? englishTable = TableUebEnglishGrade2)
+    {
+        if (_dllAvailable == false) return null;
+        try
+        {
+            var ptr = momo_braille_translator_from_names_w(japaneseTable, englishTable);
+            _dllAvailable = true;
+            return ptr == nint.Zero ? null : new BrailleTranslatorHandle(ptr);
+        }
+        catch (DllNotFoundException) { _dllAvailable = false; return null; }
+        catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
+    }
+
+    /// <summary>
+    /// 既定の組み込みテーブル（日本語１級 + UEB grade 2）で点訳器を作る。DLL 不在なら null。
+    /// </summary>
+    public static BrailleTranslatorHandle? CreateDefaultTranslator()
+    {
+        if (_dllAvailable == false) return null;
+        try
+        {
+            var ptr = momo_braille_translator_from_embedded();
+            _dllAvailable = true;
+            return ptr == nint.Zero ? null : new BrailleTranslatorHandle(ptr);
+        }
+        catch (DllNotFoundException) { _dllAvailable = false; return null; }
+        catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
+    }
+
+    /// <summary>
+    /// TOML ファイルから点訳器を作る（データセットのテーブルを差し替えたいとき）。
+    /// <paramref name="englishTomlPath"/> が null なら英語エンジンなし。
+    /// unknownCharPolicy はテーブル未定義文字の扱い（<see cref="PolicySpace"/> / <see cref="PolicyPassThrough"/>）。
+    /// 失敗・DLL 不在なら null。
+    /// </summary>
+    public static BrailleTranslatorHandle? CreateTranslatorFromFiles(
+        string japaneseTomlPath,
+        string? englishTomlPath = null,
+        int unknownCharPolicy = PolicySpace)
+    {
+        if (_dllAvailable == false) return null;
+
+        nint jp = nint.Zero, en = nint.Zero;
+        try
+        {
+            jp = momo_japanese_translator_from_file_w(japaneseTomlPath);
+            _dllAvailable = true;
+            if (jp == nint.Zero) return null;
+            momo_japanese_translator_set_unknown_char_policy(jp, unknownCharPolicy);
+
+            if (englishTomlPath != null)
+            {
+                en = momo_english_translator_from_file_w(englishTomlPath);
+                if (en == nint.Zero) { momo_japanese_translator_free(jp); return null; }
+                momo_english_translator_set_unknown_char_policy(en, unknownCharPolicy);
+            }
+
+            // 成功／失敗にかかわらず両ハンドルは Rust 側に消費される。以後 free してはならない。
+            var ptr = momo_braille_translator_new(jp, en);
+            return ptr == nint.Zero ? null : new BrailleTranslatorHandle(ptr);
+        }
+        catch (DllNotFoundException) { _dllAvailable = false; return null; }
+        catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
+    }
+
+    // ---- 予測器（プロセス内で使い回す） ----
+
     // 予測器はアプリ全体で 1 つだけ使い回す（モデル読み込みが重いため）。
     static PredictorHandle? _predictor;
     static bool _predictorLoaded;
 
     /// <summary>
-    /// 漢字かな交じり文を点字に変換するための予測器を返す。
+    /// 漢字かな交じり文の読みを推定する予測器を返す。日本語行の点訳に必要。
     /// モデルが見つからない／DLL 不在なら null。一度だけ読み込んで以降キャッシュする。
     /// </summary>
     public static PredictorHandle? GetPredictor()
@@ -378,7 +703,7 @@ public static class MomoFfi
 
         try
         {
-            var ptr = momo_predictor_new_w(modelPath, null, null);
+            var ptr = momo_predictor_new_w(modelPath);
             _dllAvailable = true;
             _predictor = ptr == nint.Zero ? null : new PredictorHandle(ptr);
         }

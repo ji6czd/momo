@@ -115,6 +115,12 @@
                                   Name='MomoEditor.runtimeconfig.json'
                                   DiskId='1'
                                   Source='$(var.StageDir)\bin\MomoEditor.runtimeconfig.json'/>
+                            <!-- 点字ドキュメントのモデルと momors_ffi.dll への P/Invoke ラッパ。
+                                 MomoEditor.exe はこのアセンブリが無いと起動できない。 -->
+                            <File Id='MomoFfiDll'
+                                  Name='Momo.Ffi.dll'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\bin\Momo.Ffi.dll'/>
                         </Component>
                         <!-- momo-gui.exe (.NET GUI) -->
                         <Component Id='MomoGui' Guid='97EA0808-62CA-4FF3-8C59-31CDC0D16CD8'>

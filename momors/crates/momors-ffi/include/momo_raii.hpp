@@ -12,7 +12,11 @@ namespace momo {
 
 namespace detail {
 struct PredictorDel  { void operator()(PredictorHandle*      p) const { momo_predictor_free(p); } };
-struct PredictionDel { void operator()(PredictionHandle*     p) const { momo_prediction_free(p); } };
+struct TableDel      { void operator()(TableHandle*          p) const { momo_table_free(p); } };
+struct JapaneseTranslatorDel { void operator()(JapaneseTranslatorHandle* p) const { momo_japanese_translator_free(p); } };
+struct EnglishTranslatorDel  { void operator()(EnglishTranslatorHandle*  p) const { momo_english_translator_free(p); } };
+struct BrailleTranslatorDel  { void operator()(BrailleTranslatorHandle*  p) const { momo_braille_translator_free(p); } };
+struct BrailleResultDel      { void operator()(BrailleResultHandle*      p) const { momo_braille_result_free(p); } };
 struct DocDel        { void operator()(BrailleDocHandle*     p) const { momo_doc_free(p); } };
 struct FormattedDel  { void operator()(FormattedDocHandle*   p) const { momo_formatted_free(p); } };
 struct BytesDel      { void operator()(ByteBuffer*           p) const { momo_bytes_free(p); } };
@@ -22,7 +26,13 @@ struct BackTranslatorDel { void operator()(BackTranslatorHandle* p) const { momo
 }  // namespace detail
 
 using PredictorPtr      = std::unique_ptr<PredictorHandle,      detail::PredictorDel>;
-using PredictionPtr     = std::unique_ptr<PredictionHandle,     detail::PredictionDel>;
+using TablePtr          = std::unique_ptr<TableHandle,          detail::TableDel>;
+// 変換器の new/braille_translator_new はハンドルを消費するので、その場合は .release() で
+// 所有権を放棄してから渡すこと（放棄しないと二重解放になる）。
+using JapaneseTranslatorPtr = std::unique_ptr<JapaneseTranslatorHandle, detail::JapaneseTranslatorDel>;
+using EnglishTranslatorPtr  = std::unique_ptr<EnglishTranslatorHandle,  detail::EnglishTranslatorDel>;
+using BrailleTranslatorPtr  = std::unique_ptr<BrailleTranslatorHandle,  detail::BrailleTranslatorDel>;
+using BrailleResultPtr      = std::unique_ptr<BrailleResultHandle,      detail::BrailleResultDel>;
 using DocPtr            = std::unique_ptr<BrailleDocHandle,     detail::DocDel>;
 using FormattedPtr      = std::unique_ptr<FormattedDocHandle,   detail::FormattedDel>;
 using BytesPtr          = std::unique_ptr<ByteBuffer,           detail::BytesDel>;

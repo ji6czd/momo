@@ -10,4 +10,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- 点字ドキュメントのモデルと momors_ffi への P/Invoke ラッパ（MomoEditor と共用）。 -->
+    <ProjectReference Include="..\momo-ffi-cs\Momo.Ffi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\momors\target\release\momors_ffi.dll" Condition="Exists('..\momors\target\release\momors_ffi.dll')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

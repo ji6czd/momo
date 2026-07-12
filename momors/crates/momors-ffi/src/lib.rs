@@ -2,80 +2,72 @@
 //!
 //! # 関数一覧
 //!
-//! ## 予測器ライフサイクル
+//! momors-core / momors-braille の公開型を C へ忠実に写す。各ハンドルは対応する
+//! `momo_*_free` で解放する。文字列の戻り値は必要バッファサイズ（null 終端含む）で、
+//! `buf_len` 不足時は書かずにサイズだけ返す。パスは UTF-16（`_w`）。
+//!
+//! ## 予測器（momors-core::Predictor）
 //! ```c
-//! // toml_path が NULL なら組み込みテーブルを使う
-//! // table_name: 組み込みテーブル名（[metadata].name）。非 NULL ならこちらを優先。
-//! // toml_path: 外部 TOML ファイルパス。table_name が NULL のとき参照。
-//! // 両方 NULL なら既定の組み込みテーブル（日本語１級）を使う。
-//! MomoPredictor momo_predictor_new  (const char*     model_path_utf8,  const char*     table_name_utf8,  const char*     toml_path_utf8);
-//! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16, const uint16_t* table_name_utf16, const uint16_t* toml_path_utf16);
-//! void          momo_predictor_free (MomoPredictor predictor);
-//! // 点字テーブルのみ差し替え（モデル再読み込みなし）。失敗時は false。
-//! bool          momo_predictor_set_table  (MomoPredictor, const char*     toml_path_utf8);
-//! bool          momo_predictor_set_table_w(MomoPredictor, const uint16_t* toml_path_utf16);
-//! // 組み込みテーブルを名前で切り替える（[metadata].name と照合）。失敗時は false。
-//! bool          momo_predictor_set_embedded_table_w(MomoPredictor, const uint16_t* name_utf16);
-//! // テーブル未定義文字のポリシーを設定する。テーブル差し替え後も引き継がれる。
-//! // policy: 0=Space（デフォルト）, 1=PassThrough（スクリーンリーダー用途）
-//! void          momo_predictor_set_unknown_char_policy(MomoPredictor, int32_t policy);
+//! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16); // .mbm
+//! void          momo_predictor_free(MomoPredictor);
 //! ```
 //!
-//! ## 予測実行
+//! ## 変換テーブル（momors-braille::Table。日本語・英語 両スキーマを同型で保持）
 //! ```c
-//! MomoPrediction momo_predict  (MomoPredictor, const char*     src_utf8);
-//! MomoPrediction momo_predict_w(MomoPredictor, const uint16_t* src_utf16);
-//! void           momo_prediction_free(MomoPrediction);
+//! int32_t   momo_table_embedded_count();
+//! int32_t   momo_table_embedded_name_w(int32_t idx, uint16_t* buf, int32_t len);
+//! int32_t   momo_table_embedded_displayname_w(int32_t idx, uint16_t* buf, int32_t len);
+//! MomoTable momo_table_from_embedded_name_w(const uint16_t* name);   // [metadata].name と照合
+//! MomoTable momo_table_from_file_w(const uint16_t* path);            // 日本語スキーマ
+//! MomoTable momo_table_from_ueb_file_w(const uint16_t* path);        // 英語(UEB)スキーマ
+//! int32_t   momo_table_name_w(MomoTable, uint16_t* buf, int32_t len);
+//! int32_t   momo_table_displayname_w(MomoTable, uint16_t* buf, int32_t len);
+//! void      momo_table_free(MomoTable);
 //! ```
 //!
-//! ## かな・点字テキスト取得
-//! 戻り値は必要なバッファサイズ（null 終端含む）。
-//! `buf_len` が足りない場合は buf に書かず、サイズだけ返す。
-//! 点字は予測結果のかなをさらに日本語点字へ変換したもの。
+//! ## 言語別変換器（JapaneseTranslator / EnglishTranslator）
+//! `_new` はテーブルを**消費**する。policy: 0=Space, 1=PassThrough。
 //! ```c
-//! int32_t momo_prediction_kana     (MomoPrediction, char*     buf, int32_t buf_len);
-//! int32_t momo_prediction_kana_w   (MomoPrediction, uint16_t* buf, int32_t buf_len);
-//! int32_t momo_prediction_braille  (MomoPrediction, char*     buf, int32_t buf_len);
-//! int32_t momo_prediction_braille_w(MomoPrediction, uint16_t* buf, int32_t buf_len);
+//! MomoJapaneseTranslator momo_japanese_translator_new(MomoTable /*consumed*/);
+//! MomoJapaneseTranslator momo_japanese_translator_from_embedded_name_w(const uint16_t* name);
+//! MomoJapaneseTranslator momo_japanese_translator_from_file_w(const uint16_t* path);
+//! void momo_japanese_translator_set_unknown_char_policy(MomoJapaneseTranslator, int32_t policy);
+//! void momo_japanese_translator_free(MomoJapaneseTranslator);
+//! // English 版も同名（momo_english_translator_*）。from_file は UEB スキーマ。
 //! ```
 //!
-//! ## サイズ照会
+//! ## 点訳器（BrailleTranslator）＝入口
+//! 行単位で日本語／英語を振り分ける。`_new`/`_japanese_only` はハンドルを**消費**する。
+//! english を持たない点訳器は英語行も日本語テーブルで点訳（no conversion 用途）。
 //! ```c
-//! int32_t momo_prediction_kana_char_count   (MomoPrediction);
-//! int32_t momo_prediction_src_char_count    (MomoPrediction);
-//! int32_t momo_prediction_braille_char_count(MomoPrediction);
+//! MomoBrailleTranslator momo_braille_translator_from_embedded();
+//! MomoBrailleTranslator momo_braille_translator_new(MomoJapaneseTranslator /*consumed*/, MomoEnglishTranslator /*consumed, NULL可*/);
+//! MomoBrailleTranslator momo_braille_translator_japanese_only(MomoJapaneseTranslator /*consumed*/);
+//! MomoBrailleTranslator momo_braille_translator_from_names_w(const uint16_t* jp_name, const uint16_t* en_name /*NULL可*/);
+//! MomoBrailleResult momo_braille_translator_translate_w         (MomoBrailleTranslator, const uint16_t* line, MomoPredictor);
+//! MomoBrailleResult momo_braille_translator_translate_japanese_w(MomoBrailleTranslator, const uint16_t* line, MomoPredictor);
+//! MomoBrailleResult momo_braille_translator_translate_english_w (MomoBrailleTranslator, const uint16_t* line); // 英語エンジン無→NULL
+//! void momo_braille_translator_free(MomoBrailleTranslator);
 //! ```
 //!
-//! ## インデックス配列（コードポイント単位）
+//! ## 点訳結果（BrailleResult）＝3層 source/reading/braille
+//! 英語行では reading=原文（恒等）。索引はコードポイント単位。
+//! momors-braille の点訳器は 読み(かな)↔点字 の 2層しか持たない（漢字列を扱わない）。
+//! 原文↔読み は予測器が持ち、**この FFI が両者を合成して 3層に組み立てる**。
 //! ```c
-//! // kana→src: kana_char_count 要素の int32_t 配列
-//! void momo_prediction_kana_to_src(MomoPrediction, int32_t* out);
-//!
-//! // src→kana: CSR 形式
-//! //   row_ptr: src_char_count+1 要素  (row_ptr[i]..row_ptr[i+1] が src[i] に対応するかなインデックス範囲)
-//! //   col_idx: kana_char_count 要素
-//! void momo_prediction_src_to_kana(MomoPrediction, int32_t* row_ptr, int32_t* col_idx);
-//!
-//! // src→点字: CSR 形式
-//! //   row_ptr: src_char_count+1 要素  (row_ptr[i]..row_ptr[i+1] が src[i] に対応する点字インデックス範囲)
-//! //   col_idx: 最大 braille_char_count 要素（複合音の重複を除いた実際の要素数は row_ptr 末尾値で確認）
-//! void momo_prediction_src_to_braille(MomoPrediction, int32_t* row_ptr, int32_t* col_idx);
-//!
-//! // 点字→src: braille_char_count 要素の int32_t 配列
-//! void momo_prediction_braille_to_src(MomoPrediction, int32_t* out);
-//! ```
-//!
-//! ## テーブルメタデータ
-//! ```c
-//! // 現在の予測器が使用しているテーブルの name / displayname（UTF-16）。
-//! // None の場合は 0、handle が NULL なら -1 を返す。
-//! int32_t momo_predictor_table_name_w      (MomoPredictor, uint16_t* buf, int32_t len);
-//! int32_t momo_predictor_table_displayname_w(MomoPredictor, uint16_t* buf, int32_t len);
-//!
-//! // 組み込みテーブルの一覧。
-//! int32_t momo_embedded_table_count();
-//! int32_t momo_embedded_table_name_w      (int32_t idx, uint16_t* buf, int32_t len);
-//! int32_t momo_embedded_table_displayname_w(int32_t idx, uint16_t* buf, int32_t len);
+//! int32_t momo_braille_result_language(MomoBrailleResult);       // 0=JP, 1=EN
+//! int32_t momo_braille_result_source_text_w (MomoBrailleResult, uint16_t* buf, int32_t len);
+//! int32_t momo_braille_result_reading_text_w(MomoBrailleResult, uint16_t* buf, int32_t len);
+//! int32_t momo_braille_result_braille_text_w(MomoBrailleResult, uint16_t* buf, int32_t len);
+//! int32_t momo_braille_result_source_char_count (MomoBrailleResult);
+//! int32_t momo_braille_result_reading_char_count(MomoBrailleResult);
+//! int32_t momo_braille_result_braille_char_count(MomoBrailleResult);
+//! void momo_braille_result_reading_to_source(MomoBrailleResult, int32_t* out);  // reading_char_count 要素
+//! void momo_braille_result_braille_to_source(MomoBrailleResult, int32_t* out);  // braille_char_count 要素
+//! void momo_braille_result_source_to_reading(MomoBrailleResult, int32_t* row_ptr, int32_t* col_idx); // CSR
+//! void momo_braille_result_source_to_braille(MomoBrailleResult, int32_t* row_ptr, int32_t* col_idx); // CSR
+//! bool momo_braille_result_has_prediction(MomoBrailleResult);
+//! void momo_braille_result_free(MomoBrailleResult);
 //! ```
 //!
 //! ## 点字ドキュメント（正本）の読み書き・描画
@@ -120,136 +112,134 @@
 // 1.82+ で発生する "unsafe attribute used without unsafe" lint を抑制する。
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use std::ffi::CStr;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::c_int;
 
 use momors_braille::document::{BrailleDocument, DocumentConfig, PageBreak, PhysicalLine};
 use momors_braille::formatter::{render, wrap_line, wrap_suffix, FormattedDocument, RenderedLine};
 use momors_braille::writer::OutputFormat;
-use momors_braille::{BackTransResult, BrailleBackTranslator, BrailleConverter, UnknownCharPolicy};
+use momors_braille::{
+    detect_language, embedded_table, embedded_tables, BackTransResult, BrailleBackTranslator,
+    BrailleResult, BrailleTranslator, EnglishTranslator, JapaneseTranslator, Language, Table,
+    UnknownCharPolicy,
+};
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
 // ============================================================
 // 内部ハンドル型
 // ============================================================
+//
+// momors-core / momors-braille の公開型を C へ忠実に写す薄いラッパ。
+// それぞれ対応する momo_*_free で解放する。
 
+/// [`Predictor`]（momors-core。漢字かな交じり文 → かな＋境界）。
 pub struct PredictorHandle {
     inner: Predictor,
-    /// かな→点字変換器。組み込みテーブルまたは指定ファイルから構築する。
-    converter: BrailleConverter,
-    /// テーブル差し替え後も引き継ぐポリシー。
-    unknown_char_policy: UnknownCharPolicy,
 }
 
-pub struct PredictionHandle {
-    /// null 終端 UTF-8 かなテキスト
-    kana_utf8: Vec<u8>,
-    /// null 終端 UTF-16 かなテキスト
-    kana_utf16: Vec<u16>,
-    /// null 終端 UTF-8 点字テキスト（かなを日本語点字に変換したもの）
-    braille_utf8: Vec<u8>,
-    /// null 終端 UTF-16 点字テキスト
-    braille_utf16: Vec<u16>,
-    /// 点字のコードポイント数
-    braille_char_count: i32,
-    /// かな char_idx → 原文 char_idx (kana_char_count 要素)
-    kana_to_src: Vec<i32>,
-    /// CSR 行ポインタ (src_char_count+1 要素)
-    src_to_kana_row: Vec<i32>,
-    /// CSR 列インデックス (kana_char_count 要素)
-    src_to_kana_col: Vec<i32>,
-    /// CSR 行ポインタ (src_char_count+1 要素)
-    src_to_braille_row: Vec<i32>,
-    /// CSR 列インデックス (≤ braille_char_count 要素、複合音の重複を除く)
-    src_to_braille_col: Vec<i32>,
-    /// 点字 char_idx → 原文 char_idx (braille_char_count 要素)
-    braille_to_src: Vec<i32>,
+/// [`Table`]（変換テーブル。日本語・英語(UEB) 両スキーマを同じ型で保持）。
+pub struct TableHandle {
+    inner: Table,
 }
 
-impl PredictionHandle {
-    fn new(result: PredictionResult, converter: &BrailleConverter) -> Self {
-        let k2s = result.kana_to_source_char();
-        let s2k = result.source_to_kana_char();
+/// [`JapaneseTranslator`]（かな → 日本語点字）。
+pub struct JapaneseTranslatorHandle {
+    inner: JapaneseTranslator,
+}
 
-        let mut kana_utf8 = result.kana_text().as_bytes().to_vec();
-        kana_utf8.push(0);
+/// [`EnglishTranslator`]（英語 → UEB 点字）。
+pub struct EnglishTranslatorHandle {
+    inner: EnglishTranslator,
+}
 
-        let mut kana_utf16: Vec<u16> = result.kana_text().encode_utf16().collect();
-        kana_utf16.push(0);
+/// [`BrailleTranslator`]（点訳の入口。行単位で日本語／英語を振り分ける）。
+pub struct BrailleTranslatorHandle {
+    inner: BrailleTranslator,
+}
 
-        // かな→点字。変換に失敗した場合は空文字列にフォールバックする。
-        let (braille_str, kana_to_braille) = match converter.convert(result.kana_text()) {
-            Ok(b) => {
-                let k2b = b.kana_to_braille().to_vec();
-                (b.braille_text().to_owned(), k2b)
-            }
-            Err(_) => (String::new(), Vec::new()),
+/// 1行の点訳結果（3層 source/reading/braille とインデックス）。
+///
+/// momors-braille は漢字列を扱わない（点訳器は読み＝かなを受け取る 2層）。原文
+/// （漢字かな交じり）との対応づけは**この FFI が上位として合成する**: 予測器の
+/// 原文↔かな と、点訳器の かな↔点字 を突き合わせて 3層に組み立てる。
+/// 英語行は予測を通さないので、読み層は原文と同一（恒等写像）になる。
+pub struct BrailleResultHandle {
+    inner: BrailleResult,
+    /// 原文（漢字かな交じり。点訳器へ渡す前のテキスト）。
+    source_text: String,
+    reading_to_source: Vec<usize>,
+    source_to_reading: Vec<Vec<usize>>,
+    braille_to_source: Vec<usize>,
+    source_to_braille: Vec<Vec<usize>>,
+    has_prediction: bool,
+}
+
+impl BrailleResultHandle {
+    /// 点訳結果と（日本語行なら）予測結果から 3層を組み立てる。
+    fn new(source: &str, inner: BrailleResult, pred: Option<PredictionResult>) -> Self {
+        let source_count = source.chars().count();
+        let braille_count = inner.braille_char_count();
+        let (reading_to_source, source_to_reading, braille_to_source) = match &pred {
+            // 日本語行: 原文↔かな は予測器が持つ。点字→原文は かな経由で合成する。
+            Some(pred) => (
+                pred.kana_to_source_char(),
+                pred.source_to_kana_char(),
+                pred.braille_char_to_source(inner.text_to_braille(), braille_count),
+            ),
+            // 英語行: 読み層＝原文（恒等）。点字→原文は点訳器の 点字→テキスト そのもの。
+            None => (
+                (0..source_count).collect(),
+                (0..source_count).map(|i| vec![i]).collect(),
+                inner.braille_to_text().to_vec(),
+            ),
         };
-        let braille_char_count = braille_str.chars().count() as i32;
-        let mut braille_utf8 = braille_str.as_bytes().to_vec();
-        braille_utf8.push(0);
-        let mut braille_utf16: Vec<u16> = braille_str.encode_utf16().collect();
-        braille_utf16.push(0);
-
-        let kana_to_src: Vec<i32> = k2s.iter().map(|&i| i as i32).collect();
-
-        let mut src_to_kana_row = Vec::with_capacity(s2k.len() + 1);
-        let mut src_to_kana_col = Vec::new();
-        let mut offset = 0i32;
-        for kanas in &s2k {
-            src_to_kana_row.push(offset);
-            for &ki in kanas {
-                src_to_kana_col.push(ki as i32);
-            }
-            offset += kanas.len() as i32;
-        }
-        src_to_kana_row.push(offset);
-
-        let s2b = result.source_to_braille_char(&kana_to_braille);
-        let mut src_to_braille_row = Vec::with_capacity(s2b.len() + 1);
-        let mut src_to_braille_col = Vec::new();
-        let mut offset = 0i32;
-        for brailles in &s2b {
-            src_to_braille_row.push(offset);
-            for &bi in brailles {
-                src_to_braille_col.push(bi as i32);
-            }
-            offset += brailles.len() as i32;
-        }
-        src_to_braille_row.push(offset);
-
-        let b2s_raw = result.braille_char_to_source(&kana_to_braille, braille_char_count as usize);
-        let braille_to_src: Vec<i32> = b2s_raw.iter().map(|&i| i as i32).collect();
-
+        let source_to_braille = invert(&braille_to_source, source_count);
         Self {
-            kana_utf8,
-            kana_utf16,
-            braille_utf8,
-            braille_utf16,
-            braille_char_count,
-            kana_to_src,
-            src_to_kana_row,
-            src_to_kana_col,
-            src_to_braille_row,
-            src_to_braille_col,
-            braille_to_src,
+            inner,
+            source_text: source.to_owned(),
+            reading_to_source,
+            source_to_reading,
+            braille_to_source,
+            source_to_braille,
+            has_prediction: pred.is_some(),
         }
     }
+}
+
+/// `x → 原文文字` の写像を反転し、`原文文字 → x の集合（昇順）` にする。
+/// 範囲外の原文インデックスは無視する。
+fn invert(to_source: &[usize], source_count: usize) -> Vec<Vec<usize>> {
+    let mut out = vec![Vec::new(); source_count];
+    for (idx, &s) in to_source.iter().enumerate() {
+        if s < source_count {
+            out[s].push(idx);
+        }
+    }
+    out
+}
+
+/// 1行を点訳する。日本語行は予測器で かな にしてから点訳器へ渡す。
+///
+/// `routing` が true なら日本語文字を含まない行を **予測を通さず** 英語（UEB）で点訳する
+/// （英語エンジンを持たない点訳器では日本語経路へ落ちる）。
+fn translate_line(
+    lt: &BrailleTranslator,
+    predictor: &Predictor,
+    line: &str,
+    routing: bool,
+) -> Option<BrailleResultHandle> {
+    if routing && detect_language(line) == Language::English {
+        if let Some(result) = lt.translate_english(line) {
+            return Some(BrailleResultHandle::new(line, result, None));
+        }
+    }
+    let pred = predictor.predict(line).ok()?;
+    let result = lt.translate_japanese(pred.kana_text()).ok()?;
+    Some(BrailleResultHandle::new(line, result, Some(pred)))
 }
 
 // ============================================================
 // 文字列変換ヘルパ
 // ============================================================
-
-unsafe fn lpstr_to_string(ptr: *const c_char) -> Option<String> {
-    if ptr.is_null() {
-        return None;
-    }
-    unsafe { CStr::from_ptr(ptr) }
-        .to_str()
-        .ok()
-        .map(str::to_owned)
-}
 
 unsafe fn lpwstr_to_string(ptr: *const u16) -> Option<String> {
     if ptr.is_null() {
@@ -263,260 +253,60 @@ unsafe fn lpwstr_to_string(ptr: *const u16) -> Option<String> {
 }
 
 // ============================================================
-// 予測器: 作成 / 解放
+// インデックス書き出しヘルパ
 // ============================================================
 
-/// モデルパスから予測器とかな→点字変換器を構築する。失敗時は NULL。
-///
-/// 単一漢字辞書は `.mbm` に同梱されたもの（学習時と同一）を使う。
-///
-/// テーブル選択の優先順位:
-/// 1. `table_name` が `Some` → 組み込みテーブルを名前で選択（失敗すれば NULL）
-/// 2. `toml_path` が `Some` → 外部ファイルを読む（失敗すれば NULL）
-/// 3. 両方 `None` → 既定の組み込みテーブル（日本語１級）
-fn build_predictor(
-    model_path: &str,
-    table_name: Option<&str>,
-    toml_path: Option<&str>,
-) -> *mut PredictorHandle {
-    let path = std::path::Path::new(model_path);
-
-    let config = PredictorConfig::new(path);
-
-    let predictor = match Predictor::load(config) {
-        Ok(p) => p,
-        Err(_) => return std::ptr::null_mut(),
-    };
-
-    let converter = if let Some(name) = table_name {
-        BrailleConverter::from_embedded_name(name).ok()
-    } else if let Some(table_path) = toml_path {
-        BrailleConverter::from_file(table_path).ok()
-    } else {
-        BrailleConverter::from_embedded().ok()
-    };
-    let converter = match converter {
-        Some(c) => c,
-        None => return std::ptr::null_mut(),
-    };
-
-    Box::into_raw(Box::new(PredictorHandle {
-        inner: predictor,
-        converter,
-        unknown_char_policy: UnknownCharPolicy::default(),
-    }))
-}
-
-/// 点字テーブルのみを差し替える（UTF-8 パス）。モデルの再読み込みは行わない。
-/// 成功時 true、失敗時 false（ハンドルの変換器は変更されない）。
-/// handle が NULL または toml_path が NULL なら false を返す。
-#[no_mangle]
-pub extern "C" fn momo_predictor_set_table(
-    handle: *mut PredictorHandle,
-    toml_path: *const c_char,
-) -> bool {
-    let h = match unsafe { handle.as_mut() } {
-        Some(h) => h,
-        None => return false,
-    };
-    let path = match unsafe { lpstr_to_string(toml_path) } {
-        Some(p) => p,
-        None => return false,
-    };
-    match BrailleConverter::from_file(&path) {
-        Ok(mut c) => {
-            c.set_unknown_char_policy(h.unknown_char_policy);
-            h.converter = c;
-            true
-        }
-        Err(_) => false,
+/// `usize` スライスを i32 配列として out に書く。out は src.len() 要素以上確保すること。
+/// out が NULL なら何もしない。
+fn write_usize_array(src: &[usize], out: *mut i32) {
+    if out.is_null() {
+        return;
+    }
+    for (i, &v) in src.iter().enumerate() {
+        unsafe { *out.add(i) = v as i32 };
     }
 }
 
-/// 点字テーブルのみを差し替える（UTF-16 パス）。モデルの再読み込みは行わない。
-/// 成功時 true、失敗時 false（ハンドルの変換器は変更されない）。
-/// handle が NULL または toml_path が NULL なら false を返す。
-#[no_mangle]
-pub extern "C" fn momo_predictor_set_table_w(
-    handle: *mut PredictorHandle,
-    toml_path: *const u16,
-) -> bool {
-    let h = match unsafe { handle.as_mut() } {
-        Some(h) => h,
-        None => return false,
-    };
-    let path = match unsafe { lpwstr_to_string(toml_path) } {
-        Some(p) => p,
-        None => return false,
-    };
-    match BrailleConverter::from_file(&path) {
-        Ok(mut c) => {
-            c.set_unknown_char_policy(h.unknown_char_policy);
-            h.converter = c;
-            true
+/// 一対多マップ（`&[Vec<usize>]`）を CSR 形式で書く。
+/// row_ptr は rows.len()+1 要素、col_idx は総要素数（各 Vec の長さの合計）以上を確保すること。
+/// 各ポインタは NULL 可（片方のみ書ける）。
+fn write_csr(rows: &[Vec<usize>], row_ptr: *mut i32, col_idx: *mut i32) {
+    let mut col_pos = 0usize;
+    let mut offset = 0i32;
+    for (i, cols) in rows.iter().enumerate() {
+        if !row_ptr.is_null() {
+            unsafe { *row_ptr.add(i) = offset };
         }
-        Err(_) => false,
+        for &c in cols {
+            if !col_idx.is_null() {
+                unsafe { *col_idx.add(col_pos) = c as i32 };
+            }
+            col_pos += 1;
+        }
+        offset += cols.len() as i32;
+    }
+    if !row_ptr.is_null() {
+        unsafe { *row_ptr.add(rows.len()) = offset };
     }
 }
 
 // ============================================================
-// テーブルメタデータ
+// 予測器（momors-core::Predictor）
 // ============================================================
 
-/// 現在の予測器が使用しているテーブルの name（UTF-16, null 終端）を buf に書く。
-/// 戻り値は必要な u16 要素数（null 含む）。name が None なら 0。handle が NULL なら -1。
+/// UTF-16 モデルパス（`.mbm`）から予測器を作る。単一漢字辞書はモデル同梱のものを使う。
+/// 失敗（ファイル不正・NULL）時は NULL を返す。
 #[no_mangle]
-pub extern "C" fn momo_predictor_table_name_w(
-    handle: *const PredictorHandle,
-    buf: *mut u16,
-    buf_len: c_int,
-) -> c_int {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1,
-    };
-    match h.converter.table().name.as_deref() {
-        Some(s) => write_utf16(s, buf, buf_len),
-        None => 0,
-    }
-}
-
-/// 現在の予測器が使用しているテーブルの displayname（UTF-16, null 終端）を buf に書く。
-/// 戻り値は必要な u16 要素数（null 含む）。displayname が None なら 0。handle が NULL なら -1。
-#[no_mangle]
-pub extern "C" fn momo_predictor_table_displayname_w(
-    handle: *const PredictorHandle,
-    buf: *mut u16,
-    buf_len: c_int,
-) -> c_int {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1,
-    };
-    match h.converter.table().displayname.as_deref() {
-        Some(s) => write_utf16(s, buf, buf_len),
-        None => 0,
-    }
-}
-
-/// 組み込みテーブルの数を返す。
-#[no_mangle]
-pub extern "C" fn momo_embedded_table_count() -> c_int {
-    momors_braille::embedded_tables().len() as c_int
-}
-
-/// 組み込みテーブル idx の name（UTF-16, null 終端）を buf に書く。
-/// 戻り値は必要な u16 要素数（null 含む）。name が None なら 0。idx が範囲外なら -1。
-#[no_mangle]
-pub extern "C" fn momo_embedded_table_name_w(idx: c_int, buf: *mut u16, buf_len: c_int) -> c_int {
-    match momors_braille::embedded_tables().get(idx as usize) {
-        Some(t) => match t.name.as_deref() {
-            Some(s) => write_utf16(s, buf, buf_len),
-            None => 0,
-        },
-        None => -1,
-    }
-}
-
-/// 組み込みテーブル idx の displayname（UTF-16, null 終端）を buf に書く。
-/// 戻り値は必要な u16 要素数（null 含む）。displayname が None なら 0。idx が範囲外なら -1。
-#[no_mangle]
-pub extern "C" fn momo_embedded_table_displayname_w(
-    idx: c_int,
-    buf: *mut u16,
-    buf_len: c_int,
-) -> c_int {
-    match momors_braille::embedded_tables().get(idx as usize) {
-        Some(t) => match t.displayname.as_deref() {
-            Some(s) => write_utf16(s, buf, buf_len),
-            None => 0,
-        },
-        None => -1,
-    }
-}
-
-/// 組み込みテーブルを名前（UTF-16）で切り替える。`[metadata].name` と照合する。
-/// 成功時 true、見つからない場合は false（ハンドルの変換器は変更されない）。
-/// handle または name が NULL なら false を返す。
-#[no_mangle]
-pub extern "C" fn momo_predictor_set_embedded_table_w(
-    handle: *mut PredictorHandle,
-    name: *const u16,
-) -> bool {
-    let h = match unsafe { handle.as_mut() } {
-        Some(h) => h,
-        None => return false,
-    };
-    let name = match unsafe { lpwstr_to_string(name) } {
-        Some(n) => n,
-        None => return false,
-    };
-    match BrailleConverter::from_embedded_name(&name) {
-        Ok(mut c) => {
-            c.set_unknown_char_policy(h.unknown_char_policy);
-            h.converter = c;
-            true
-        }
-        Err(_) => false,
-    }
-}
-
-/// テーブル未定義文字の扱いを設定する。テーブルを差し替えても引き継がれる。
-/// policy: 0=Space（デフォルト）, 1=PassThrough（スクリーンリーダー用途）。
-/// handle が NULL なら何もしない。
-#[no_mangle]
-pub extern "C" fn momo_predictor_set_unknown_char_policy(
-    handle: *mut PredictorHandle,
-    policy: c_int,
-) {
-    let h = match unsafe { handle.as_mut() } {
-        Some(h) => h,
-        None => return,
-    };
-    let p = match policy {
-        1 => UnknownCharPolicy::PassThrough,
-        _ => UnknownCharPolicy::Space,
-    };
-    h.unknown_char_policy = p;
-    h.converter.set_unknown_char_policy(p);
-}
-
-/// UTF-8 パスからモデルを読み込み予測器を作成する。
-/// `table_name` が非 NULL なら組み込みテーブルを名前で選択。
-/// `table_name` が NULL で `toml_path` が非 NULL なら外部ファイルを使う。
-/// 両方 NULL なら既定の組み込みテーブル（日本語１級）を使う。失敗時は NULL を返す。
-#[no_mangle]
-pub extern "C" fn momo_predictor_new(
-    model_path: *const c_char,
-    table_name: *const c_char,
-    toml_path: *const c_char,
-) -> *mut PredictorHandle {
-    let model = match unsafe { lpstr_to_string(model_path) } {
-        Some(p) => p,
-        None => return std::ptr::null_mut(),
-    };
-    let name = unsafe { lpstr_to_string(table_name) };
-    let path = unsafe { lpstr_to_string(toml_path) };
-    build_predictor(&model, name.as_deref(), path.as_deref())
-}
-
-/// UTF-16 パスからモデルを読み込み予測器を作成する。
-/// `table_name` が非 NULL なら組み込みテーブルを名前で選択。
-/// `table_name` が NULL で `toml_path` が非 NULL なら外部ファイルを使う。
-/// 両方 NULL なら既定の組み込みテーブル（日本語１級）を使う。失敗時は NULL を返す。
-#[no_mangle]
-pub extern "C" fn momo_predictor_new_w(
-    model_path: *const u16,
-    table_name: *const u16,
-    toml_path: *const u16,
-) -> *mut PredictorHandle {
+pub extern "C" fn momo_predictor_new_w(model_path: *const u16) -> *mut PredictorHandle {
     let model = match unsafe { lpwstr_to_string(model_path) } {
         Some(p) => p,
         None => return std::ptr::null_mut(),
     };
-    let name = unsafe { lpwstr_to_string(table_name) };
-    let path = unsafe { lpwstr_to_string(toml_path) };
-    build_predictor(&model, name.as_deref(), path.as_deref())
+    let config = PredictorConfig::new(std::path::Path::new(&model));
+    match Predictor::load(config) {
+        Ok(inner) => Box::into_raw(Box::new(PredictorHandle { inner })),
+        Err(_) => std::ptr::null_mut(),
+    }
 }
 
 /// 予測器を解放する。NULL は無視する。
@@ -528,306 +318,575 @@ pub extern "C" fn momo_predictor_free(handle: *mut PredictorHandle) {
 }
 
 // ============================================================
-// 予測: 実行 / 解放
+// 変換テーブル（momors-braille::Table）
 // ============================================================
 
-/// UTF-8 テキストを予測する。失敗時は NULL を返す。
+/// 組み込みテーブルの数。
 #[no_mangle]
-pub extern "C" fn momo_predict(
-    handle: *const PredictorHandle,
-    src_text: *const c_char,
-) -> *mut PredictionHandle {
-    let predictor = match unsafe { handle.as_ref() } {
-        Some(h) => h,
+pub extern "C" fn momo_table_embedded_count() -> c_int {
+    embedded_tables().len() as c_int
+}
+
+/// 組み込みテーブル idx の name（UTF-16, null 終端）を buf に書く。
+/// 戻り値は必要な u16 要素数。name が None なら 0、idx が範囲外なら -1。
+#[no_mangle]
+pub extern "C" fn momo_table_embedded_name_w(idx: c_int, buf: *mut u16, buf_len: c_int) -> c_int {
+    match embedded_tables().get(idx as usize) {
+        Some(t) => match t.name.as_deref() {
+            Some(s) => write_utf16(s, buf, buf_len),
+            None => 0,
+        },
+        None => -1,
+    }
+}
+
+/// 組み込みテーブル idx の displayname（UTF-16, null 終端）を buf に書く。
+/// 戻り値は必要な u16 要素数。displayname が None なら 0、idx が範囲外なら -1。
+#[no_mangle]
+pub extern "C" fn momo_table_embedded_displayname_w(
+    idx: c_int,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    match embedded_tables().get(idx as usize) {
+        Some(t) => match t.displayname.as_deref() {
+            Some(s) => write_utf16(s, buf, buf_len),
+            None => 0,
+        },
+        None => -1,
+    }
+}
+
+/// 名前（`[metadata].name`）で組み込みテーブルを引く。見つからない／NULL なら NULL。
+#[no_mangle]
+pub extern "C" fn momo_table_from_embedded_name_w(name: *const u16) -> *mut TableHandle {
+    let name = match unsafe { lpwstr_to_string(name) } {
+        Some(n) => n,
         None => return std::ptr::null_mut(),
     };
-    let text = match unsafe { lpstr_to_string(src_text) } {
-        Some(t) => t,
+    match embedded_table(&name) {
+        Some(inner) => Box::into_raw(Box::new(TableHandle { inner })),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// 日本語スキーマの TOML ファイルからテーブルを読む。失敗時 NULL。
+#[no_mangle]
+pub extern "C" fn momo_table_from_file_w(path: *const u16) -> *mut TableHandle {
+    let path = match unsafe { lpwstr_to_string(path) } {
+        Some(p) => p,
         None => return std::ptr::null_mut(),
     };
-    match predictor.inner.predict(&text) {
-        Ok(r) => Box::into_raw(Box::new(PredictionHandle::new(r, &predictor.converter))),
+    match Table::from_file(&path) {
+        Ok(inner) => Box::into_raw(Box::new(TableHandle { inner })),
         Err(_) => std::ptr::null_mut(),
     }
 }
 
-/// UTF-16 テキストを予測する。失敗時は NULL を返す。
+/// UEB（英語）スキーマの TOML ファイルからテーブルを読む。失敗時 NULL。
 #[no_mangle]
-pub extern "C" fn momo_predict_w(
-    handle: *const PredictorHandle,
-    src_text: *const u16,
-) -> *mut PredictionHandle {
-    let predictor = match unsafe { handle.as_ref() } {
-        Some(h) => h,
+pub extern "C" fn momo_table_from_ueb_file_w(path: *const u16) -> *mut TableHandle {
+    let path = match unsafe { lpwstr_to_string(path) } {
+        Some(p) => p,
         None => return std::ptr::null_mut(),
     };
-    let text = match unsafe { lpwstr_to_string(src_text) } {
-        Some(t) => t,
-        None => return std::ptr::null_mut(),
-    };
-    match predictor.inner.predict(&text) {
-        Ok(r) => Box::into_raw(Box::new(PredictionHandle::new(r, &predictor.converter))),
+    match Table::from_ueb_file(&path) {
+        Ok(inner) => Box::into_raw(Box::new(TableHandle { inner })),
         Err(_) => std::ptr::null_mut(),
     }
 }
 
-/// 予測結果を解放する。NULL は無視する。
+/// テーブルの name（UTF-16）。None なら 0、handle NULL なら -1。
 #[no_mangle]
-pub extern "C" fn momo_prediction_free(handle: *mut PredictionHandle) {
+pub extern "C" fn momo_table_name_w(
+    handle: *const TableHandle,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return -1,
+    };
+    match h.inner.name.as_deref() {
+        Some(s) => write_utf16(s, buf, buf_len),
+        None => 0,
+    }
+}
+
+/// テーブルの displayname（UTF-16）。None なら 0、handle NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_table_displayname_w(
+    handle: *const TableHandle,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return -1,
+    };
+    match h.inner.displayname.as_deref() {
+        Some(s) => write_utf16(s, buf, buf_len),
+        None => 0,
+    }
+}
+
+/// テーブルを解放する。NULL は無視する。
+#[no_mangle]
+pub extern "C" fn momo_table_free(handle: *mut TableHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
     }
 }
 
 // ============================================================
-// かなテキスト取得
+// 日本語変換器（momors-braille::JapaneseTranslator）
 // ============================================================
 
-/// かなテキスト (UTF-8, null 終端) を buf に書き込む。
-///
-/// 戻り値: 必要なバイト数 (null 終端含む)。
-/// buf_len が不足または buf が NULL の場合は書き込まず、必要サイズだけ返す。
-/// handle が NULL なら -1 を返す。
+/// テーブルから日本語変換器を作る。**`table` を消費する**（呼び出し後は無効・
+/// `momo_table_free` に渡してはならない）。table が NULL なら NULL。
 #[no_mangle]
-pub extern "C" fn momo_prediction_kana(
-    handle: *const PredictionHandle,
-    buf: *mut c_char,
-    buf_len: c_int,
-) -> c_int {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1,
-    };
-    let needed = h.kana_utf8.len() as c_int;
-    if !buf.is_null() && buf_len >= needed {
-        unsafe {
-            std::ptr::copy_nonoverlapping(h.kana_utf8.as_ptr(), buf as *mut u8, h.kana_utf8.len());
-        }
+pub extern "C" fn momo_japanese_translator_new(
+    table: *mut TableHandle,
+) -> *mut JapaneseTranslatorHandle {
+    if table.is_null() {
+        return std::ptr::null_mut();
     }
-    needed
+    let table = unsafe { *Box::from_raw(table) };
+    Box::into_raw(Box::new(JapaneseTranslatorHandle {
+        inner: JapaneseTranslator::new(table.inner),
+    }))
 }
 
-/// かなテキスト (UTF-16, null 終端) を buf に書き込む。
-///
-/// 戻り値: 必要な u16 要素数 (null 終端含む)。
-/// buf_len が不足または buf が NULL の場合は書き込まず、必要サイズだけ返す。
-/// handle が NULL なら -1 を返す。
+/// 名前で組み込みテーブルを指定して日本語変換器を作る。失敗時 NULL。
 #[no_mangle]
-pub extern "C" fn momo_prediction_kana_w(
-    handle: *const PredictionHandle,
-    buf: *mut u16,
-    buf_len: c_int,
-) -> c_int {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1,
+pub extern "C" fn momo_japanese_translator_from_embedded_name_w(
+    name: *const u16,
+) -> *mut JapaneseTranslatorHandle {
+    let name = match unsafe { lpwstr_to_string(name) } {
+        Some(n) => n,
+        None => return std::ptr::null_mut(),
     };
-    let needed = h.kana_utf16.len() as c_int;
-    if !buf.is_null() && buf_len >= needed {
-        unsafe {
-            std::ptr::copy_nonoverlapping(h.kana_utf16.as_ptr(), buf, h.kana_utf16.len());
-        }
+    match JapaneseTranslator::from_embedded_name(&name) {
+        Ok(inner) => Box::into_raw(Box::new(JapaneseTranslatorHandle { inner })),
+        Err(_) => std::ptr::null_mut(),
     }
-    needed
 }
 
-// ============================================================
-// 点字テキスト取得
-// ============================================================
-
-/// 点字テキスト (UTF-8, null 終端) を buf に書き込む。
-///
-/// 戻り値: 必要なバイト数 (null 終端含む)。
-/// buf_len が不足または buf が NULL の場合は書き込まず、必要サイズだけ返す。
-/// handle が NULL なら -1 を返す。
+/// 日本語スキーマの TOML ファイルから日本語変換器を作る。失敗時 NULL。
 #[no_mangle]
-pub extern "C" fn momo_prediction_braille(
-    handle: *const PredictionHandle,
-    buf: *mut c_char,
-    buf_len: c_int,
-) -> c_int {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1,
+pub extern "C" fn momo_japanese_translator_from_file_w(
+    path: *const u16,
+) -> *mut JapaneseTranslatorHandle {
+    let path = match unsafe { lpwstr_to_string(path) } {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
     };
-    let needed = h.braille_utf8.len() as c_int;
-    if !buf.is_null() && buf_len >= needed {
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                h.braille_utf8.as_ptr(),
-                buf as *mut u8,
-                h.braille_utf8.len(),
-            );
-        }
+    match JapaneseTranslator::from_file(&path) {
+        Ok(inner) => Box::into_raw(Box::new(JapaneseTranslatorHandle { inner })),
+        Err(_) => std::ptr::null_mut(),
     }
-    needed
 }
 
-/// 点字テキスト (UTF-16, null 終端) を buf に書き込む。
-///
-/// 戻り値: 必要な u16 要素数 (null 終端含む)。
-/// buf_len が不足または buf が NULL の場合は書き込まず、必要サイズだけ返す。
-/// handle が NULL なら -1 を返す。
+/// テーブル未定義文字のポリシー（0=Space, 1=PassThrough）。handle NULL なら何もしない。
 #[no_mangle]
-pub extern "C" fn momo_prediction_braille_w(
-    handle: *const PredictionHandle,
-    buf: *mut u16,
-    buf_len: c_int,
-) -> c_int {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1,
-    };
-    let needed = h.braille_utf16.len() as c_int;
-    if !buf.is_null() && buf_len >= needed {
-        unsafe {
-            std::ptr::copy_nonoverlapping(h.braille_utf16.as_ptr(), buf, h.braille_utf16.len());
-        }
+pub extern "C" fn momo_japanese_translator_set_unknown_char_policy(
+    handle: *mut JapaneseTranslatorHandle,
+    policy: c_int,
+) {
+    if let Some(h) = unsafe { handle.as_mut() } {
+        h.inner.set_unknown_char_policy(policy_from_i32(policy));
     }
-    needed
+}
+
+/// 日本語変換器を解放する。NULL は無視する。
+#[no_mangle]
+pub extern "C" fn momo_japanese_translator_free(handle: *mut JapaneseTranslatorHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
 }
 
 // ============================================================
-// サイズ照会
+// 英語変換器（momors-braille::EnglishTranslator）
 // ============================================================
 
-/// かなテキストのコードポイント数を返す。handle が NULL なら -1。
+/// テーブルから英語変換器を作る。**`table` を消費する**（呼び出し後は無効）。
+/// table が NULL なら NULL。
 #[no_mangle]
-pub extern "C" fn momo_prediction_kana_char_count(handle: *const PredictionHandle) -> c_int {
+pub extern "C" fn momo_english_translator_new(
+    table: *mut TableHandle,
+) -> *mut EnglishTranslatorHandle {
+    if table.is_null() {
+        return std::ptr::null_mut();
+    }
+    let table = unsafe { *Box::from_raw(table) };
+    Box::into_raw(Box::new(EnglishTranslatorHandle {
+        inner: EnglishTranslator::new(table.inner),
+    }))
+}
+
+/// 名前で組み込みテーブルを指定して英語変換器を作る（例: `"ueb_english_grade2"`）。失敗時 NULL。
+#[no_mangle]
+pub extern "C" fn momo_english_translator_from_embedded_name_w(
+    name: *const u16,
+) -> *mut EnglishTranslatorHandle {
+    let name = match unsafe { lpwstr_to_string(name) } {
+        Some(n) => n,
+        None => return std::ptr::null_mut(),
+    };
+    match EnglishTranslator::from_embedded_name(&name) {
+        Ok(inner) => Box::into_raw(Box::new(EnglishTranslatorHandle { inner })),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// UEB スキーマの TOML ファイルから英語変換器を作る。失敗時 NULL。
+#[no_mangle]
+pub extern "C" fn momo_english_translator_from_file_w(
+    path: *const u16,
+) -> *mut EnglishTranslatorHandle {
+    let path = match unsafe { lpwstr_to_string(path) } {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+    match EnglishTranslator::from_file(&path) {
+        Ok(inner) => Box::into_raw(Box::new(EnglishTranslatorHandle { inner })),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// テーブル未定義文字のポリシー（0=Space, 1=PassThrough）。handle NULL なら何もしない。
+#[no_mangle]
+pub extern "C" fn momo_english_translator_set_unknown_char_policy(
+    handle: *mut EnglishTranslatorHandle,
+    policy: c_int,
+) {
+    if let Some(h) = unsafe { handle.as_mut() } {
+        h.inner.set_unknown_char_policy(policy_from_i32(policy));
+    }
+}
+
+/// 英語変換器を解放する。NULL は無視する。
+#[no_mangle]
+pub extern "C" fn momo_english_translator_free(handle: *mut EnglishTranslatorHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+
+fn policy_from_i32(policy: c_int) -> UnknownCharPolicy {
+    match policy {
+        1 => UnknownCharPolicy::PassThrough,
+        _ => UnknownCharPolicy::Space,
+    }
+}
+
+// ============================================================
+// 点訳器（momors-braille::BrailleTranslator）= 入口
+// ============================================================
+
+/// 組み込みテーブル（日本語１級 + UEB grade 2）で点訳器を作る。失敗時 NULL。
+#[no_mangle]
+pub extern "C" fn momo_braille_translator_from_embedded() -> *mut BrailleTranslatorHandle {
+    match BrailleTranslator::from_embedded() {
+        Ok(inner) => Box::into_raw(Box::new(BrailleTranslatorHandle { inner })),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// 日本語変換器と英語変換器（NULL 可）から点訳器を作る。
+/// **両ハンドルを消費する**（呼び出し後は無効）。japanese が NULL なら NULL。
+/// english が NULL なら英語行も日本語テーブルで点訳する（no conversion 用途）。
+#[no_mangle]
+pub extern "C" fn momo_braille_translator_new(
+    japanese: *mut JapaneseTranslatorHandle,
+    english: *mut EnglishTranslatorHandle,
+) -> *mut BrailleTranslatorHandle {
+    if japanese.is_null() {
+        return std::ptr::null_mut();
+    }
+    let japanese = unsafe { *Box::from_raw(japanese) };
+    let english = if english.is_null() {
+        None
+    } else {
+        Some(unsafe { *Box::from_raw(english) }.inner)
+    };
+    Box::into_raw(Box::new(BrailleTranslatorHandle {
+        inner: BrailleTranslator::new(japanese.inner, english),
+    }))
+}
+
+/// 英語エンジンを持たない点訳器（全行を日本語テーブルで点訳）。
+/// **`japanese` を消費する**。japanese が NULL なら NULL。
+#[no_mangle]
+pub extern "C" fn momo_braille_translator_japanese_only(
+    japanese: *mut JapaneseTranslatorHandle,
+) -> *mut BrailleTranslatorHandle {
+    if japanese.is_null() {
+        return std::ptr::null_mut();
+    }
+    let japanese = unsafe { *Box::from_raw(japanese) };
+    Box::into_raw(Box::new(BrailleTranslatorHandle {
+        inner: BrailleTranslator::japanese_only(japanese.inner),
+    }))
+}
+
+/// 組み込みテーブルを名前で指定して点訳器を作る便宜関数。
+/// `english_name` が NULL なら英語エンジンなし。いずれかの名前が無効なら NULL。
+#[no_mangle]
+pub extern "C" fn momo_braille_translator_from_names_w(
+    japanese_name: *const u16,
+    english_name: *const u16,
+) -> *mut BrailleTranslatorHandle {
+    let jp_name = match unsafe { lpwstr_to_string(japanese_name) } {
+        Some(n) => n,
+        None => return std::ptr::null_mut(),
+    };
+    let japanese = match JapaneseTranslator::from_embedded_name(&jp_name) {
+        Ok(j) => j,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let english = match unsafe { lpwstr_to_string(english_name) } {
+        Some(n) => match EnglishTranslator::from_embedded_name(&n) {
+            Ok(e) => Some(e),
+            Err(_) => return std::ptr::null_mut(),
+        },
+        None => None,
+    };
+    Box::into_raw(Box::new(BrailleTranslatorHandle {
+        inner: BrailleTranslator::new(japanese, english),
+    }))
+}
+
+/// 1行を**言語判定して**点訳する。日本語行のみ predictor を使う。
+/// handle / predictor / line が NULL、または点訳失敗時は NULL。
+#[no_mangle]
+pub extern "C" fn momo_braille_translator_translate_w(
+    handle: *const BrailleTranslatorHandle,
+    line: *const u16,
+    predictor: *const PredictorHandle,
+) -> *mut BrailleResultHandle {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return std::ptr::null_mut(),
+    };
+    let p = match unsafe { predictor.as_ref() } {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+    let line = match unsafe { lpwstr_to_string(line) } {
+        Some(l) => l,
+        None => return std::ptr::null_mut(),
+    };
+    match translate_line(&h.inner, &p.inner, &line, true) {
+        Some(handle) => Box::into_raw(Box::new(handle)),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// 1行を**必ず日本語として**点訳する（英字は外字符＋無縮約）。失敗時 NULL。
+#[no_mangle]
+pub extern "C" fn momo_braille_translator_translate_japanese_w(
+    handle: *const BrailleTranslatorHandle,
+    line: *const u16,
+    predictor: *const PredictorHandle,
+) -> *mut BrailleResultHandle {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return std::ptr::null_mut(),
+    };
+    let p = match unsafe { predictor.as_ref() } {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+    let line = match unsafe { lpwstr_to_string(line) } {
+        Some(l) => l,
+        None => return std::ptr::null_mut(),
+    };
+    match translate_line(&h.inner, &p.inner, &line, false) {
+        Some(handle) => Box::into_raw(Box::new(handle)),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// 1行を**必ず英語（UEB）として**点訳する（予測不要）。
+/// 英語エンジンを持たない点訳器・NULL 引数の場合は NULL。
+#[no_mangle]
+pub extern "C" fn momo_braille_translator_translate_english_w(
+    handle: *const BrailleTranslatorHandle,
+    line: *const u16,
+) -> *mut BrailleResultHandle {
+    let h = match unsafe { handle.as_ref() } {
+        Some(h) => h,
+        None => return std::ptr::null_mut(),
+    };
+    let line = match unsafe { lpwstr_to_string(line) } {
+        Some(l) => l,
+        None => return std::ptr::null_mut(),
+    };
+    match h.inner.translate_english(&line) {
+        Some(inner) => Box::into_raw(Box::new(BrailleResultHandle::new(&line, inner, None))),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// 点訳器を解放する。NULL は無視する。
+#[no_mangle]
+pub extern "C" fn momo_braille_translator_free(handle: *mut BrailleTranslatorHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+
+// ============================================================
+// 点訳結果（momors-braille::BrailleResult）
+// ============================================================
+
+/// 点訳経路。0=Japanese, 1=English。handle NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_braille_result_language(handle: *const BrailleResultHandle) -> c_int {
     match unsafe { handle.as_ref() } {
-        Some(h) => h.kana_to_src.len() as c_int,
+        Some(h) => match h.inner.language() {
+            Language::Japanese => 0,
+            Language::English => 1,
+        },
         None => -1,
     }
 }
 
-/// 原文のコードポイント数を返す。handle が NULL なら -1。
+/// 原文テキスト（UTF-16, null 終端）。handle NULL なら -1。
 #[no_mangle]
-pub extern "C" fn momo_prediction_src_char_count(handle: *const PredictionHandle) -> c_int {
+pub extern "C" fn momo_braille_result_source_text_w(
+    handle: *const BrailleResultHandle,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
     match unsafe { handle.as_ref() } {
-        // src_to_kana_row は src_char_count+1 要素
-        Some(h) => (h.src_to_kana_row.len() as c_int) - 1,
+        Some(h) => write_utf16(&h.source_text, buf, buf_len),
         None => -1,
     }
 }
 
-// ============================================================
-// インデックス配列
-// ============================================================
-
-/// かな→原文 コードポイントインデックス配列を out に書き込む。
-///
-/// out は kana_char_count 要素以上の領域を確保しておくこと。
-/// handle または out が NULL なら何もしない。
+/// 読みテキスト（日本語=かな / 英語=原文。UTF-16, null 終端）。handle NULL なら -1。
 #[no_mangle]
-pub extern "C" fn momo_prediction_kana_to_src(handle: *const PredictionHandle, out: *mut i32) {
+pub extern "C" fn momo_braille_result_reading_text_w(
+    handle: *const BrailleResultHandle,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    match unsafe { handle.as_ref() } {
+        Some(h) => write_utf16(h.inner.text(), buf, buf_len),
+        None => -1,
+    }
+}
+
+/// 点字テキスト（UTF-16, null 終端）。handle NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_braille_result_braille_text_w(
+    handle: *const BrailleResultHandle,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    match unsafe { handle.as_ref() } {
+        Some(h) => write_utf16(h.inner.braille_text(), buf, buf_len),
+        None => -1,
+    }
+}
+
+/// 原文の文字数（コードポイント）。handle NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_braille_result_source_char_count(
+    handle: *const BrailleResultHandle,
+) -> c_int {
+    match unsafe { handle.as_ref() } {
+        Some(h) => h.source_to_reading.len() as c_int,
+        None => -1,
+    }
+}
+
+/// 読みの文字数（コードポイント）。handle NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_braille_result_reading_char_count(
+    handle: *const BrailleResultHandle,
+) -> c_int {
+    match unsafe { handle.as_ref() } {
+        Some(h) => h.inner.text_char_count() as c_int,
+        None => -1,
+    }
+}
+
+/// 点字の文字数（コードポイント）。handle NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_braille_result_braille_char_count(
+    handle: *const BrailleResultHandle,
+) -> c_int {
+    match unsafe { handle.as_ref() } {
+        Some(h) => h.inner.braille_char_count() as c_int,
+        None => -1,
+    }
+}
+
+/// 読み→原文 インデックス配列（reading_char_count 要素）を out に書く。
+/// handle / out が NULL なら何もしない。
+#[no_mangle]
+pub extern "C" fn momo_braille_result_reading_to_source(
+    handle: *const BrailleResultHandle,
+    out: *mut i32,
+) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        if !out.is_null() {
-            unsafe {
-                std::ptr::copy_nonoverlapping(h.kana_to_src.as_ptr(), out, h.kana_to_src.len());
-            }
-        }
+        write_usize_array(&h.reading_to_source, out);
     }
 }
 
-/// src→かな インデックスを CSR 形式で書き込む。
-///
-/// - row_ptr: src_char_count+1 要素以上の領域を確保すること。
-///   row_ptr[i]..row_ptr[i+1] が原文文字 i に対応するかな文字インデックスの範囲。
-/// - col_idx: kana_char_count 要素以上の領域を確保すること。
-///
-/// handle が NULL、または両ポインタが NULL なら何もしない。
-/// 片方のみ NULL の場合は非 NULL 側だけ書く。
+/// 点字→原文 インデックス配列（braille_char_count 要素）を out に書く。
+/// handle / out が NULL なら何もしない。
 #[no_mangle]
-pub extern "C" fn momo_prediction_src_to_kana(
-    handle: *const PredictionHandle,
+pub extern "C" fn momo_braille_result_braille_to_source(
+    handle: *const BrailleResultHandle,
+    out: *mut i32,
+) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        write_usize_array(&h.braille_to_source, out);
+    }
+}
+
+/// 原文→読み インデックスを CSR で書く。
+/// row_ptr: source_char_count+1 要素、col_idx: reading_char_count 要素。各 NULL 可。
+#[no_mangle]
+pub extern "C" fn momo_braille_result_source_to_reading(
+    handle: *const BrailleResultHandle,
     row_ptr: *mut i32,
     col_idx: *mut i32,
 ) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        if !row_ptr.is_null() {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    h.src_to_kana_row.as_ptr(),
-                    row_ptr,
-                    h.src_to_kana_row.len(),
-                );
-            }
-        }
-        if !col_idx.is_null() {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    h.src_to_kana_col.as_ptr(),
-                    col_idx,
-                    h.src_to_kana_col.len(),
-                );
-            }
-        }
+        write_csr(&h.source_to_reading, row_ptr, col_idx);
     }
 }
 
-/// 点字テキストのコードポイント数を返す。handle が NULL なら -1。
+/// 原文→点字 インデックスを CSR で書く。
+/// row_ptr: source_char_count+1 要素、col_idx: braille_char_count 要素。各 NULL 可。
 #[no_mangle]
-pub extern "C" fn momo_prediction_braille_char_count(handle: *const PredictionHandle) -> c_int {
-    match unsafe { handle.as_ref() } {
-        Some(h) => h.braille_char_count,
-        None => -1,
-    }
-}
-
-/// src→点字 インデックスを CSR 形式で書き込む。
-///
-/// - row_ptr: src_char_count+1 要素以上の領域を確保すること。
-///   row_ptr[i]..row_ptr[i+1] が原文文字 i に対応する点字文字インデックスの範囲。
-/// - col_idx: braille_char_count 要素以上の領域を確保すること。
-///   複合音（キャ など）は重複が除去されるため、実際の要素数は
-///   row_ptr[src_char_count]（末尾値）で確認する。
-///
-/// handle が NULL、または両ポインタが NULL なら何もしない。
-/// 片方のみ NULL の場合は非 NULL 側だけ書く。
-#[no_mangle]
-pub extern "C" fn momo_prediction_src_to_braille(
-    handle: *const PredictionHandle,
+pub extern "C" fn momo_braille_result_source_to_braille(
+    handle: *const BrailleResultHandle,
     row_ptr: *mut i32,
     col_idx: *mut i32,
 ) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        if !row_ptr.is_null() {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    h.src_to_braille_row.as_ptr(),
-                    row_ptr,
-                    h.src_to_braille_row.len(),
-                );
-            }
-        }
-        if !col_idx.is_null() {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    h.src_to_braille_col.as_ptr(),
-                    col_idx,
-                    h.src_to_braille_col.len(),
-                );
-            }
-        }
+        write_csr(&h.source_to_braille, row_ptr, col_idx);
     }
 }
 
-/// 点字→原文 コードポイントインデックス配列を out に書き込む。
-///
-/// out は braille_char_count 要素以上の領域を確保しておくこと。
-/// handle または out が NULL なら何もしない。
+/// 日本語予測（かな・確信度）が付随するか。英語行では false。handle NULL でも false。
 #[no_mangle]
-pub extern "C" fn momo_prediction_braille_to_src(handle: *const PredictionHandle, out: *mut i32) {
-    if let Some(h) = unsafe { handle.as_ref() } {
-        if !out.is_null() {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    h.braille_to_src.as_ptr(),
-                    out,
-                    h.braille_to_src.len(),
-                );
-            }
-        }
+pub extern "C" fn momo_braille_result_has_prediction(handle: *const BrailleResultHandle) -> bool {
+    unsafe { handle.as_ref() }.is_some_and(|h| h.has_prediction)
+}
+
+/// 点訳結果を解放する。NULL は無視する。
+#[no_mangle]
+pub extern "C" fn momo_braille_result_free(handle: *mut BrailleResultHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
     }
 }
 

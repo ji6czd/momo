@@ -21,6 +21,7 @@ partial class MainForm
         btnBrowseOutput = new Button();
         lblOutputFormat = new Label();
         cmbOutputFormat = new ComboBox();
+        chkEnglishGrade2 = new CheckBox();
         grpModel = new GroupBox();
         rdoSmall = new RadioButton();
         rdoMedium = new RadioButton();
@@ -88,8 +89,14 @@ partial class MainForm
         cmbOutputFormat.SelectedIndex = 1;
         cmbOutputFormat.SelectedIndexChanged += cmbOutputFormat_SelectedIndexChanged;
 
+        // chkEnglishGrade2
+        // 英語（UEB）の級を選ぶ。オフなら 1 級（無縮約）、オンなら 2 級（縮約あり）。
+        chkEnglishGrade2.AutoSize = true;
+        chkEnglishGrade2.Location = new Point(12, 110);
+        chkEnglishGrade2.Text = "英語2級を使う(&2)";
+
         // grpModel
-        grpModel.Location = new Point(12, 110);
+        grpModel.Location = new Point(12, 136);
         grpModel.Size = new Size(200, 54);
         grpModel.Text = "モデル";
         grpModel.Controls.Add(rdoSmall);
@@ -113,7 +120,7 @@ partial class MainForm
         rdoLarge.Text = "Large";
 
         // grpFormat
-        grpFormat.Location = new Point(220, 110);
+        grpFormat.Location = new Point(220, 136);
         grpFormat.Size = new Size(294, 88);
         grpFormat.Text = "フォーマット";
         grpFormat.Controls.Add(lblLineWidth);
@@ -157,14 +164,14 @@ partial class MainForm
         txtTitle.Size = new Size(222, 23);
 
         // btnOk
-        btnOk.Location = new Point(346, 210);
+        btnOk.Location = new Point(346, 236);
         btnOk.Size = new Size(80, 28);
         btnOk.Text = "OK";
         btnOk.Click += btnOk_Click;
 
         // btnCancel
         btnCancel.DialogResult = DialogResult.Cancel;
-        btnCancel.Location = new Point(434, 210);
+        btnCancel.Location = new Point(434, 236);
         btnCancel.Size = new Size(80, 28);
         btnCancel.Text = "キャンセル";
         btnCancel.Click += (_, _) => Close();
@@ -179,7 +186,7 @@ partial class MainForm
         // Form
         AcceptButton = btnOk;
         CancelButton = btnCancel;
-        ClientSize = new Size(526, 250);
+        ClientSize = new Size(526, 276);
         Controls.Add(lblInput);
         Controls.Add(txtInput);
         Controls.Add(btnBrowseInput);
@@ -188,6 +195,7 @@ partial class MainForm
         Controls.Add(btnBrowseOutput);
         Controls.Add(lblOutputFormat);
         Controls.Add(cmbOutputFormat);
+        Controls.Add(chkEnglishGrade2);
         Controls.Add(grpModel);
         Controls.Add(grpFormat);
         Controls.Add(btnOk);
@@ -210,6 +218,7 @@ partial class MainForm
     private Button btnBrowseOutput;
     private Label lblOutputFormat;
     private ComboBox cmbOutputFormat;
+    private CheckBox chkEnglishGrade2;
     private GroupBox grpModel;
     private RadioButton rdoSmall;
     private RadioButton rdoMedium;

@@ -1,7 +1,5 @@
 namespace Momo;
 
-using System.Runtime.InteropServices;
-
 public partial class MainForm : Form
 {
     public MainForm()
@@ -82,11 +80,22 @@ public partial class MainForm : Form
         try
         {
             string input = txtInput.Text, output = txtOutput.Text;
-            int format = cmbOutputFormat.SelectedIndex switch { 0 => 0, _ => 3 };
-            int lw = (int)numLineWidth.Value, lpp = (int)numLinesPerPage.Value;
+            int format = cmbOutputFormat.SelectedIndex switch
+            {
+                0 => MomoFfi.FormatMbr,
+                _ => MomoFfi.FormatBase,
+            };
+            var config = new FormatterConfig
+            {
+                LineWidth = (int)numLineWidth.Value,
+                LinesPerPage = (int)numLinesPerPage.Value,
+                PageHeader = true,
+            };
             string title = txtTitle.Text;
+            bool englishGrade2 = chkEnglishGrade2.Checked;
 
-            var error = await Task.Run(() => RunConversion(modelPath, input, output, format, lw, lpp, title));
+            var error = await Task.Run(
+                () => RunConversion(modelPath, englishGrade2, input, output, format, config, title));
 
             if (error is null)
                 MessageBox.Show("変換が完了しました。", "完了",
@@ -120,129 +129,55 @@ public partial class MainForm : Form
         return null;
     }
 
+    /// <summary>
+    /// テキストファイルを 1 行ずつ点訳し、指定形式で書き出す。成功なら null、失敗ならメッセージ。
+    /// 日本語は１級固定、英語は <paramref name="englishGrade2"/> で UEB の級を切り替える。
+    /// </summary>
     private static string? RunConversion(
-        string modelPath, string inputFile, string outputFile,
-        int format, int lineWidth, int linesPerPage, string title)
+        string modelPath, bool englishGrade2, string inputFile, string outputFile,
+        int format, FormatterConfig config, string title)
     {
-        var predictor = MomoNative.momo_predictor_new_w(modelPath, null, null);
-        if (predictor == 0)
+        using var predictor = MomoFfi.CreatePredictor(modelPath);
+        if (predictor is null)
             return $"モデルの読み込みに失敗しました: {Path.GetFileName(modelPath)}";
-        try
-        {
-            string text;
-            try { text = File.ReadAllText(inputFile); }
-            catch (Exception ex) { return $"ファイル読み込みエラー: {ex.Message}"; }
 
-            var lines = text.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
+        using var translator = MomoFfi.CreateTranslator(
+            MomoFfi.TableJapaneseGrade1,
+            englishGrade2 ? MomoFfi.TableUebEnglishGrade2 : MomoFfi.TableUebEnglishGrade1);
+        if (translator is null)
+            return "点訳器の初期化に失敗しました";
 
-            return ConvertToBraille(predictor, lines, outputFile, lineWidth, linesPerPage, title, format);
-        }
-        finally
-        {
-            MomoNative.momo_predictor_free(predictor);
-        }
-    }
+        string text;
+        try { text = File.ReadAllText(inputFile); }
+        catch (Exception ex) { return $"ファイル読み込みエラー: {ex.Message}"; }
 
-    private static string? ConvertToBraille(
-        nint predictor, string[] lines, string outputFile,
-        int lineWidth, int linesPerPage, string title, int format)
-    {
-        var brailleLines = new string[lines.Length];
-        for (int i = 0; i < lines.Length; i++)
-        {
-            if (lines[i].Length == 0) { brailleLines[i] = ""; continue; }
-            var brl = PredictText(predictor, lines[i], kana: false);
-            if (brl is null) return "点字変換エラーが発生しました";
-            brailleLines[i] = brl;
-        }
+        // 点訳器が行ごとに日本語／英語を判定する。日本語行だけ予測器（漢字かな交じり文→かな）を通る。
+        string? Translate(string line) =>
+            line.Length == 0 ? "" : translator.ToBraille(line, predictor);
 
-        string? titleBraille = null;
+        string? brailleTitle = null;
         if (!string.IsNullOrWhiteSpace(title))
         {
-            titleBraille = PredictText(predictor, title, kana: false);
-            if (titleBraille is null) return "タイトル点字変換エラーが発生しました";
+            brailleTitle = Translate(title);
+            if (brailleTitle is null) return "タイトル点字変換エラーが発生しました";
         }
 
-        var paragraphs = string.Join("\n", brailleLines);
-        var bytes = MomoNative.momo_doc_write_from_paragraphs(
-            paragraphs, lineWidth, linesPerPage, true, 0, titleBraille, format);
-        if (bytes == 0) return "ドキュメント生成に失敗しました";
-        try
+        var doc = new BrailleDocument { Config = config with { Title = brailleTitle } };
+        foreach (var line in text.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
         {
-            int len = MomoNative.momo_bytes_len(bytes);
-            var buf = new byte[len];
-            MomoNative.momo_bytes_copy(bytes, buf);
-            try { File.WriteAllBytes(outputFile, buf); }
-            catch (Exception ex) { return $"ファイル書き込みエラー: {ex.Message}"; }
+            var braille = Translate(line);
+            if (braille is null) return "点字変換エラーが発生しました";
+            doc.Segments.Add(new Segment(braille, paragraphEnd: true));
         }
-        finally { MomoNative.momo_bytes_free(bytes); }
+        if (doc.Segments.Count == 0)
+            doc.Segments.Add(new Segment("", paragraphEnd: true));
+
+        // 折返し・ページ分割・ヘッダ生成・符号化はすべて Rust(momors-braille) 側が行う。
+        var bytes = MomoFfi.WriteDocument(doc, format);
+        if (bytes is null) return "ドキュメント生成に失敗しました";
+
+        try { File.WriteAllBytes(outputFile, bytes); }
+        catch (Exception ex) { return $"ファイル書き込みエラー: {ex.Message}"; }
         return null;
     }
-
-    private static string? PredictText(nint predictor, string text, bool kana)
-    {
-        var pred = MomoNative.momo_predict_w(predictor, text);
-        if (pred == 0) return null;
-        try
-        {
-            int size = kana
-                ? MomoNative.momo_prediction_kana_w(pred, nint.Zero, 0)
-                : MomoNative.momo_prediction_braille_w(pred, nint.Zero, 0);
-            if (size <= 1) return "";
-            var buf = Marshal.AllocHGlobal(size * 2);
-            try
-            {
-                if (kana) _ = MomoNative.momo_prediction_kana_w(pred, buf, size);
-                else _ = MomoNative.momo_prediction_braille_w(pred, buf, size);
-                return Marshal.PtrToStringUni(buf, size - 1);
-            }
-            finally { Marshal.FreeHGlobal(buf); }
-        }
-        finally { MomoNative.momo_prediction_free(pred); }
-    }
-}
-
-internal static class MomoNative
-{
-    private const string Dll = "momors_ffi";
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern nint momo_predictor_new_w(
-        [MarshalAs(UnmanagedType.LPWStr)] string model_path,
-        [MarshalAs(UnmanagedType.LPWStr)] string? table_name,
-        [MarshalAs(UnmanagedType.LPWStr)] string? toml_path);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void momo_predictor_free(nint handle);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern nint momo_predict_w(nint handle, [MarshalAs(UnmanagedType.LPWStr)] string src_text);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void momo_prediction_free(nint handle);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern int momo_prediction_kana_w(nint handle, nint buf, int buf_len);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern int momo_prediction_braille_w(nint handle, nint buf, int buf_len);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern nint momo_doc_write_from_paragraphs(
-        [MarshalAs(UnmanagedType.LPWStr)] string paragraphs,
-        int line_width,
-        int lines_per_page,
-        [MarshalAs(UnmanagedType.U1)] bool page_header,
-        int number_start,
-        [MarshalAs(UnmanagedType.LPWStr)] string? title,
-        int format);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern int momo_bytes_len(nint b);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void momo_bytes_copy(nint b, [Out] byte[] out_buf);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void momo_bytes_free(nint b);
 }

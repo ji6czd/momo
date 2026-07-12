@@ -1,0 +1,66 @@
+# ueb_english_grade1.toml
+# UEB (Unified English Braille) grade 1（無縮約）の変換テーブル。
+# letters / 大文字符 / 数符 / 約物のみ。縮約（[contractions]）を持たない。
+# grade 2（縮約あり）は ueb_english_grade2.toml。インベントリは grade2 と共通。
+[metadata]
+name = "ueb_english_grade1"
+displayname = "UEB English (Grade 1)"
+author = "MOMO Project"
+
+[indicators]
+capital = "⠠"        # 大文字符（1文字）
+capital_word = "⠠⠠"  # 大文字語符（語全体が大文字）
+number = "⠼"         # 数符
+
+# 基本文字（grade 1）
+[letters]
+a = "⠁"
+b = "⠃"
+c = "⠉"
+d = "⠙"
+e = "⠑"
+f = "⠋"
+g = "⠛"
+h = "⠓"
+i = "⠊"
+j = "⠚"
+k = "⠅"
+l = "⠇"
+m = "⠍"
+n = "⠝"
+o = "⠕"
+p = "⠏"
+q = "⠟"
+r = "⠗"
+s = "⠎"
+t = "⠞"
+u = "⠥"
+v = "⠧"
+w = "⠺"
+x = "⠭"
+y = "⠽"
+z = "⠵"
+
+# 数字（数符のあと。1-9,0 = a-i,j）
+[digits]
+"1" = "⠁"
+"2" = "⠃"
+"3" = "⠉"
+"4" = "⠙"
+"5" = "⠑"
+"6" = "⠋"
+"7" = "⠛"
+"8" = "⠓"
+"9" = "⠊"
+"0" = "⠚"
+
+# 基本約物（Phase 1 の最小セット。括弧・引用符などは後で追加）
+[punctuation]
+"." = "⠲"
+"," = "⠂"
+";" = "⠆"
+":" = "⠒"
+"?" = "⠦"
+"!" = "⠖"
+"'" = "⠄"
+"-" = "⠤"

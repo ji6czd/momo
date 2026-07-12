@@ -60,7 +60,17 @@ tasks:
 
   test:
     desc: Run all tests
-    deps: [test:rust, python:test]
+    deps: [check:rust, test:rust, python:test]
+
+  check:rust:
+    # momors-pyo3 / momors-wasm は maturin / wasm-pack でビルドするため default-members
+    # から外してある。その結果 cargo build も cargo test も触らないので、上位 API を変えた
+    # ときの追従漏れが検出できない。リンクを伴わない cargo check なら Python ライブラリも
+    # wasm ターゲットも要らないので、ここで全クレートまとめて型検査する。
+    desc: Type-check every Rust crate (including momors-pyo3 / momors-wasm)
+    dir: momors
+    cmds:
+      - cargo check --workspace --all-targets
 
   test:rust:
     desc: Run Rust tests

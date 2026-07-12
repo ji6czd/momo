@@ -30,6 +30,9 @@ partial class Form1
         pageBreakMenuItem = new ToolStripMenuItem();
         selectAllMenuItem = new ToolStripMenuItem();
         brailleInputMenuItem = new ToolStripMenuItem();
+        tableMenu = new ToolStripMenuItem();
+        tableGrade1MenuItem = new ToolStripMenuItem();
+        tableGrade2MenuItem = new ToolStripMenuItem();
         formatMenu = new ToolStripMenuItem();
         pageSetupMenuItem = new ToolStripMenuItem();
         viewMenu = new ToolStripMenuItem();
@@ -96,6 +99,8 @@ partial class Form1
             new ToolStripSeparator(),
             selectAllMenuItem,
             brailleInputMenuItem,
+            new ToolStripSeparator(),
+            tableMenu,
         });
 
         undoMenuItem.Text = "元に戻す(&U)";
@@ -138,6 +143,21 @@ partial class Form1
         brailleInputMenuItem.Checked = true;
         brailleInputMenuItem.Visible = false;
         brailleInputMenuItem.Click += BrailleInputMenuItem_Click;
+
+        // 英語点字: 英字だけの行に使う UEB のグレードを切り替える（日本語行は常に日本語１級）。
+        // 表示名（ラベル）は実行時に FFI から取得して設定する（Form1 コンストラクタ）。
+        tableMenu.Text = "英語点字(&E)";
+        tableMenu.DropDownItems.AddRange(new ToolStripItem[] {
+            tableGrade1MenuItem,
+            tableGrade2MenuItem,
+        });
+
+        tableGrade1MenuItem.Text = "&1 UEB English (Grade 1)";
+        tableGrade1MenuItem.Checked = true; // 既定は Grade 1（無縮約）
+        tableGrade1MenuItem.Click += TableGrade1MenuItem_Click;
+
+        tableGrade2MenuItem.Text = "&2 UEB English (Grade 2)";
+        tableGrade2MenuItem.Click += TableGrade2MenuItem_Click;
 
         // formatMenu
         formatMenu.Text = "書式(&O)";
@@ -241,6 +261,9 @@ partial class Form1
     private StatusStrip statusStrip;
     private ToolStripStatusLabel statusLabel;
     private ToolStripMenuItem brailleInputMenuItem;
+    private ToolStripMenuItem tableMenu;
+    private ToolStripMenuItem tableGrade1MenuItem;
+    private ToolStripMenuItem tableGrade2MenuItem;
     private ToolStripMenuItem helpMenu;
     private ToolStripMenuItem aboutMenuItem;
 }

@@ -1,4 +1,4 @@
-use crate::{BrailleTable, Result};
+use crate::{Result, Table};
 use std::collections::{HashMap, HashSet};
 
 const SPACE: char = '⠀'; // U+2800 点字スペース
@@ -150,8 +150,8 @@ pub struct BrailleBackTranslator {
 }
 
 impl BrailleBackTranslator {
-    /// テーブルを指定して逆変換器を作る（順方向 [`BrailleTable`] を反転構築）。
-    pub fn new(table: BrailleTable) -> Self {
+    /// テーブルを指定して逆変換器を作る（順方向 [`Table`] を反転構築）。
+    pub fn new(table: Table) -> Self {
         let mut kana1: HashMap<char, String> = HashMap::new();
         let mut kana2: HashMap<(char, char), String> = HashMap::new();
         let mut prefix_cells: HashSet<char> = HashSet::new();
@@ -225,12 +225,12 @@ impl BrailleBackTranslator {
 
     /// 組み込みテーブルで逆変換器を作る。
     pub fn from_embedded() -> Result<Self> {
-        Ok(Self::new(BrailleTable::embedded()?))
+        Ok(Self::new(Table::embedded()?))
     }
 
     /// ファイルからテーブルを読み込んで逆変換器を作る。
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
-        Ok(Self::new(BrailleTable::from_file(path)?))
+        Ok(Self::new(Table::from_file(path)?))
     }
 
     /// 点字 1 セルを逆変換する純粋関数。
@@ -611,8 +611,8 @@ mod tests {
 
     #[test]
     fn round_trip_via_converter() {
-        use crate::BrailleConverter;
-        let conv = BrailleConverter::from_embedded().unwrap();
+        use crate::JapaneseTranslator;
+        let conv = JapaneseTranslator::from_embedded().unwrap();
         let back = bt();
         for kana in [
             "アイウエオ",
@@ -621,7 +621,7 @@ mod tests {
             "パピプペポ",
             "ッー",
         ] {
-            let brl = conv.convert(kana).unwrap();
+            let brl = conv.translate(kana).unwrap();
             assert_eq!(
                 back.back_translate(brl.braille_text()),
                 kana,

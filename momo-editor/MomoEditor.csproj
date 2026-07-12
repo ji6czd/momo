@@ -9,10 +9,16 @@
 
     <!-- About ダイアログに表示する情報。ここを書き換えればバージョン・著作権が反映される。 -->
     <Product>Momo Editor</Product>
-    <Version>0.8.10</Version>
+    <Version>0.8.11</Version>
     <Company>Momo Project Team</Company>
     <Copyright>Copyright © 2026 Momo Project Team</Copyright>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 点字ドキュメントのモデルと momors_ffi への P/Invoke ラッパ。エディタ専用ではなく
+         共有ライブラリ（Momo.Ffi）に一本化してある。 -->
+    <ProjectReference Include="..\momo-ffi-cs\Momo.Ffi.csproj" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Include="..\momors\target\release\momors_ffi.dll" Condition="Exists('..\momors\target\release\momors_ffi.dll')">

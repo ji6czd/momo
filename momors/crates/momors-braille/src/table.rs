@@ -1,6 +1,6 @@
 use crate::{Error, Result};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 // ============================================================
@@ -126,7 +126,7 @@ struct RawFlags {
     capital: CapitalFlagDef,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct FlagDef {
     #[serde(default)]
     pub entry_prefix: String,
@@ -159,16 +159,96 @@ struct RawBrailleFile {
 }
 
 // ============================================================
-// BrailleTable
+// UEB（英語）縮約型と TOML デシリアライズ
+// ============================================================
+
+/// 縮約が適用できる語中の位置。1つの縮約は複数の position を持てる（いずれか一致で適用）。
+/// 語 `[start, end)`（連続英字）の中の位置 `i`・長さ `len` に対して判定する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Position {
+    /// 語中どこでも（strong 系 / en / in の groupsign 役）。
+    Always,
+    /// 語頭でない（`i > start`）。ing 専用。
+    NonInitial,
+    /// 語頭＋後続が文字（`i == start && i+len < end`）。be / con / dis。
+    Initial,
+    /// 両側が文字＝語中（`start < i && i+len < end`）。ea / bb / cc / ff / gg。
+    Medial,
+    /// 単独で1語（`i == start && i+len == end`）。全 wordsign。
+    Wordsign,
+}
+
+/// UEB 縮約の1エントリ。[`Table::contractions`] が保持し、
+/// [`EnglishTranslator`](crate::EnglishTranslator) が適用する。
+#[derive(Debug, Clone)]
+pub(crate) struct Contraction {
+    pub cell: String,
+    pub positions: Vec<Position>,
+    /// 下方記号（dot 1/4 を含まない）か。lower wordsign の約物接触制限に使う。
+    pub lower: bool,
+    /// `initial` を解禁する語幹（空なら `initial` は使わない）。be / con / dis 用。
+    pub initial_stems: Vec<String>,
+    /// shortform（略字）か。
+    pub shortform: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawUeb {
+    #[serde(default)]
+    metadata: RawMetadata,
+    indicators: RawIndicators,
+    letters: HashMap<String, String>,
+    digits: HashMap<String, String>,
+    punctuation: HashMap<String, String>,
+    /// grade 1 テーブルは縮約を持たない（セクションを省略可）。
+    #[serde(default)]
+    contractions: HashMap<String, RawContraction>,
+    /// shortform（略字）の whitelist と例外。grade 1 は持たない（省略可）。
+    #[serde(default)]
+    shortforms: RawShortforms,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawShortforms {
+    /// この語の中では shortform を使ってよい（Appendix 1）。
+    #[serde(default)]
+    words: Vec<String>,
+    /// s / 's を付けても shortform を使わない例外語。
+    #[serde(default)]
+    plural_exceptions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawIndicators {
+    capital: String,
+    capital_word: String,
+    number: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawContraction {
+    cell: String,
+    positions: Vec<String>,
+    #[serde(default)]
+    lower: bool,
+    #[serde(default)]
+    initial_stems: Vec<String>,
+    #[serde(default)]
+    shortform: bool,
+}
+
+// ============================================================
+// Table
 // ============================================================
 
 /// 変換テーブルとフラグ定義を保持する。
 ///
-/// [`BrailleTable::embedded`] でデフォルトの組み込みテーブルを使うか、
+/// [`Table::embedded`] でデフォルトの組み込みテーブルを使うか、
 /// [`embedded_tables`] で全テーブルを列挙するか、
-/// [`BrailleTable::from_toml`] でビルドする。
+/// [`Table::from_toml`] でビルドする。
 #[derive(Debug, Clone)]
-pub struct BrailleTable {
+pub struct Table {
     /// テーブルの識別名（TOML `[metadata].name`）。
     pub name: Option<String>,
     /// テーブルの表示名（TOML `[metadata].displayname`）。
@@ -193,6 +273,14 @@ pub struct BrailleTable {
     pub(crate) flag_capital: CapitalFlagDef,
     /// クラス遷移 (from, to) → 挿入する点字スペース数。エントリ数は少ないため線形探索。
     pub(crate) transitions: Vec<(String, String, usize)>,
+    /// 英語（UEB）の縮約テーブル。綴り（小文字 a–z）→ 縮約定義。
+    /// 日本語テーブルでは空。[`EnglishTranslator`](crate::EnglishTranslator) が参照する。
+    pub(crate) contractions: HashMap<String, Contraction>,
+    /// shortform（略字）を語中でも使ってよい語の whitelist（UEB Appendix 1）。
+    /// 縮約を持たないテーブル（grade 1）・日本語テーブルでは空。
+    pub(crate) shortform_words: HashSet<String>,
+    /// s / 's を付けても shortform を使わない例外語。
+    pub(crate) shortform_plural_exceptions: HashSet<String>,
 }
 
 // ============================================================
@@ -201,35 +289,49 @@ pub struct BrailleTable {
 
 const TOML_GRADE1: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../dataset/japanese_grade1_braille.toml"
+    "/../../../dataset/japanese_grade1.toml"
 ));
 
 const TOML_NOCONVERSION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../dataset/japanese_no_conversion_braille.toml"
+    "/../../../dataset/japanese_no_conversion.toml"
 ));
 
-static EMBEDDED: LazyLock<Vec<BrailleTable>> = LazyLock::new(|| {
+const TOML_UEB_GRADE2: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../dataset/english_ueb_grade2.toml"
+));
+
+const TOML_UEB_GRADE1: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../dataset/english_ueb_grade1.toml"
+));
+
+static EMBEDDED: LazyLock<Vec<Table>> = LazyLock::new(|| {
     vec![
-        BrailleTable::from_toml(TOML_GRADE1).expect("grade1 TOML は有効"),
-        BrailleTable::from_toml(TOML_NOCONVERSION).expect("noconversion TOML は有効"),
+        // [0] がデフォルト（Table::embedded）。日本語テーブルと英語テーブルを同じ
+        // カタログに載せ、Japanese/English どちらの from_embedded_name も名前で引く。
+        Table::from_toml(TOML_GRADE1).expect("grade1 TOML は有効"),
+        Table::from_toml(TOML_NOCONVERSION).expect("noconversion TOML は有効"),
+        Table::from_ueb_toml(TOML_UEB_GRADE2).expect("UEB grade2 TOML は有効"),
+        Table::from_ueb_toml(TOML_UEB_GRADE1).expect("UEB grade1 TOML は有効"),
     ]
 });
 
-/// 組み込みテーブルの一覧を返す。最初のエントリがデフォルト（[`BrailleTable::embedded`]）。
-pub fn embedded_tables() -> &'static [BrailleTable] {
+/// 組み込みテーブルの一覧を返す。最初のエントリがデフォルト（[`Table::embedded`]）。
+pub fn embedded_tables() -> &'static [Table] {
     &EMBEDDED
 }
 
 /// 名前で組み込みテーブルを引く。TOML の `[metadata].name` と照合する。
-pub fn embedded_table(name: &str) -> Option<BrailleTable> {
+pub fn embedded_table(name: &str) -> Option<Table> {
     EMBEDDED
         .iter()
         .find(|t| t.name.as_deref() == Some(name))
         .cloned()
 }
 
-impl BrailleTable {
+impl Table {
     /// TOML 文字列からテーブルを構築する。
     pub fn from_toml(toml_str: &str) -> Result<Self> {
         let raw: RawBrailleFile = toml::from_str(toml_str)?;
@@ -241,10 +343,61 @@ impl BrailleTable {
         Ok(EMBEDDED[0].clone())
     }
 
-    /// ファイルからテーブルを読み込む。
+    /// ファイルから（日本語スキーマの）テーブルを読み込む。
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let toml_str = std::fs::read_to_string(path)?;
         Self::from_toml(&toml_str)
+    }
+
+    /// UEB（英語）スキーマの TOML 文字列からテーブルを構築する。
+    ///
+    /// 英語の要素は共通フィールドへ写す（letters→`latin`, digits→`digit`,
+    /// punctuation→`punct_latin`, 大文字符→`flag_capital`, 数符→`flag_digit`, contractions）。
+    /// 日本語側のフィールド（kana / punct_jp / foreign_word / transitions）は空になる。
+    pub fn from_ueb_toml(toml_str: &str) -> Result<Self> {
+        let raw: RawUeb = toml::from_str(toml_str)?;
+        let punct_latin = raw
+            .punctuation
+            .into_iter()
+            .map(|(k, braille)| {
+                (
+                    k,
+                    PunctCell {
+                        braille,
+                        path: CLASS_PUNCT_LATIN.to_owned(),
+                    },
+                )
+            })
+            .collect();
+        Ok(Self {
+            name: raw.metadata.name,
+            displayname: raw.metadata.displayname,
+            kana_compound: HashMap::new(),
+            kana_single: HashMap::new(),
+            punct_jp: HashMap::new(),
+            punct_latin,
+            digit: raw.digits,
+            latin: raw.letters,
+            flag_digit: FlagDef {
+                entry_prefix: raw.indicators.number,
+                ..FlagDef::default()
+            },
+            flag_foreign_word: FlagDef::default(),
+            flag_capital: CapitalFlagDef {
+                entry_prefix: raw.indicators.capital,
+                double_entry_prefix: raw.indicators.capital_word,
+            },
+            transitions: Vec::new(),
+            contractions: parse_contractions(raw.contractions)?,
+            shortform_words: raw.shortforms.words.into_iter().collect(),
+            shortform_plural_exceptions: raw.shortforms.plural_exceptions.into_iter().collect(),
+        })
+    }
+
+    /// UEB（英語）スキーマのファイルからテーブルを読み込む。
+    pub fn from_ueb_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let toml_str = std::fs::read_to_string(path)?;
+        Self::from_ueb_toml(&toml_str)
     }
 
     fn from_raw(raw: RawBrailleFile) -> Result<Self> {
@@ -277,6 +430,10 @@ impl BrailleTable {
             flag_foreign_word: raw.flags.foreign_word,
             flag_capital: raw.flags.capital,
             transitions,
+            // 日本語テーブルは縮約・shortform を持たない
+            contractions: HashMap::new(),
+            shortform_words: HashSet::new(),
+            shortform_plural_exceptions: HashSet::new(),
         })
     }
 
@@ -342,6 +499,61 @@ fn pattern_spec(pat: &str) -> usize {
     } else {
         pat.split('.').count()
     }
+}
+
+/// UEB `[contractions]` をパース・検証して綴り → [`Contraction`] のマップにする。
+/// 綴りは小文字 a–z、position は既知名、initial_stems も小文字 a–z のみ。
+fn parse_contractions(
+    raw: HashMap<String, RawContraction>,
+) -> Result<HashMap<String, Contraction>> {
+    let mut out = HashMap::with_capacity(raw.len());
+    for (spelling, rc) in raw {
+        if !spelling.chars().all(|c| c.is_ascii_lowercase()) {
+            return Err(Error::Validation(format!(
+                "[contractions] \"{spelling}\": 綴りは小文字 a-z のみ"
+            )));
+        }
+        if rc.positions.is_empty() {
+            return Err(Error::Validation(format!(
+                "[contractions] \"{spelling}\": positions が空です"
+            )));
+        }
+        let mut positions = Vec::with_capacity(rc.positions.len());
+        for p in &rc.positions {
+            let pos = match p.as_str() {
+                "always" => Position::Always,
+                "noninitial" => Position::NonInitial,
+                "initial" => Position::Initial,
+                "medial" => Position::Medial,
+                "wordsign" => Position::Wordsign,
+                other => {
+                    return Err(Error::Validation(format!(
+                        "[contractions] \"{spelling}\": position \"{other}\" は \
+                         always/noninitial/initial/medial/wordsign のいずれか"
+                    )));
+                }
+            };
+            positions.push(pos);
+        }
+        for stem in &rc.initial_stems {
+            if !stem.chars().all(|c| c.is_ascii_lowercase()) {
+                return Err(Error::Validation(format!(
+                    "[contractions] \"{spelling}\": initial_stems \"{stem}\" は小文字 a-z のみ"
+                )));
+            }
+        }
+        out.insert(
+            spelling,
+            Contraction {
+                cell: rc.cell,
+                positions,
+                lower: rc.lower,
+                initial_stems: rc.initial_stems,
+                shortform: rc.shortform,
+            },
+        );
+    }
+    Ok(out)
 }
 
 /// `[table.punct.{section}]` のエントリからフルパス付き [`PunctCell`] を構築する。
@@ -445,7 +657,7 @@ mod tests {
 
     #[test]
     fn embedded_table_parses() {
-        let table = BrailleTable::embedded().expect("埋め込み TOML がパースできること");
+        let table = Table::embedded().expect("埋め込み TOML がパースできること");
         assert!(!table.kana_single.is_empty(), "単音テーブルが空でない");
         assert!(!table.kana_compound.is_empty(), "複合音テーブルが空でない");
         assert!(!table.digit.is_empty(), "数字テーブルが空でない");
@@ -456,7 +668,7 @@ mod tests {
 
     #[test]
     fn embedded_table_metadata() {
-        let table = BrailleTable::embedded().unwrap();
+        let table = Table::embedded().unwrap();
         assert_eq!(table.name.as_deref(), Some("japanese_grade1"));
         assert_eq!(table.displayname.as_deref(), Some("日本語１級"));
     }
@@ -481,7 +693,7 @@ mod tests {
 
     #[test]
     fn spot_check_kana() {
-        let table = BrailleTable::embedded().unwrap();
+        let table = Table::embedded().unwrap();
         assert_eq!(table.kana_single.get("ア").map(|s| s.as_str()), Some("⠁"));
         assert_eq!(table.kana_single.get("ン").map(|s| s.as_str()), Some("⠴"));
         assert_eq!(table.kana_single.get("ガ").map(|s| s.as_str()), Some("⠐⠡"));
@@ -497,7 +709,7 @@ mod tests {
 
     #[test]
     fn spot_check_punct() {
-        let table = BrailleTable::embedded().unwrap();
+        let table = Table::embedded().unwrap();
 
         // 日本語記号（フルパス = 構造接頭辞 + 意味クラス）
         let cell = table.punct_jp.get("。").unwrap();
@@ -518,7 +730,7 @@ mod tests {
 
     #[test]
     fn punct_classes() {
-        let table = BrailleTable::embedded().unwrap();
+        let table = Table::embedded().unwrap();
         for key in ["。", "！", "？"] {
             let cell = table.punct_jp.get(key).unwrap();
             assert_eq!(cell.path.as_str(), "punct.jp.stop", "path of {key}");
@@ -564,7 +776,7 @@ classes = ["stop", "pause"]
 [table.punct.latin]
 "#,
         );
-        BrailleTable::from_toml(&toml).expect("宣言済みクラスは通る");
+        Table::from_toml(&toml).expect("宣言済みクラスは通る");
     }
 
     #[test]
@@ -578,7 +790,7 @@ classes = ["stop"]
 [table.punct.latin]
 "#,
         );
-        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        let err = Table::from_toml(&toml).unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "{err}");
         assert!(err.to_string().contains("stpo"), "{err}");
     }
@@ -595,7 +807,7 @@ classes = ["stop"]
 [table.punct.latin]
 "#,
         );
-        assert!(BrailleTable::from_toml(&toml).is_err());
+        assert!(Table::from_toml(&toml).is_err());
     }
 
     #[test]
@@ -608,7 +820,7 @@ classes = ["stop"]
 [table.punct.latin]
 "#,
         );
-        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        let err = Table::from_toml(&toml).unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "{err}");
     }
 
@@ -622,7 +834,7 @@ classes = ["stop", "none"]
 [table.punct.latin]
 "#,
         );
-        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        let err = Table::from_toml(&toml).unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "{err}");
         assert!(err.to_string().contains("予約名"), "{err}");
     }
@@ -638,7 +850,7 @@ classes = ["stop", "kana"]
 [table.punct.latin]
 "#,
         );
-        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        let err = Table::from_toml(&toml).unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "{err}");
         assert!(err.to_string().contains("予約名"), "{err}");
     }
@@ -647,7 +859,7 @@ classes = ["stop", "kana"]
 
     #[test]
     fn embedded_transitions() {
-        let table = BrailleTable::embedded().unwrap();
+        let table = Table::embedded().unwrap();
         // 文字種境界
         assert_eq!(table.transition_spaces("kana", "latin"), 1);
         assert_eq!(table.transition_spaces("latin", "kana"), 1);
@@ -705,7 +917,7 @@ classes = ["stop", "inline"]
 "* -> punct.jp.inline" = 1
 "punct.jp.stop -> punct.jp.inline" = 5
 "#;
-        let table = BrailleTable::from_toml(&toml).unwrap();
+        let table = Table::from_toml(&toml).unwrap();
         assert_eq!(
             table.transition_spaces("punct.jp.stop", "kana"),
             2,
@@ -745,7 +957,7 @@ classes = ["stop", "pause"]
 "punct.jp.* -> kana" = 1
 "punct.jp.stop -> kana" = 2
 "#;
-        let table = BrailleTable::from_toml(&toml).unwrap();
+        let table = Table::from_toml(&toml).unwrap();
         // 一般則（プレフィックス punct.jp が pause に一致）
         assert_eq!(table.transition_spaces("punct.jp.pause", "kana"), 1);
         // 深い方が勝つ（特異度 3+1 > 2+1）
@@ -768,7 +980,7 @@ classes = ["stop"]
 [transitions]
 "punct.* -> kana" = 1
 "#;
-        let table = BrailleTable::from_toml(&toml).unwrap();
+        let table = Table::from_toml(&toml).unwrap();
         assert_eq!(table.transition_spaces("punct.jp.stop", "kana"), 1);
         assert_eq!(table.transition_spaces("punct.latin", "kana"), 1);
         assert_eq!(table.transition_spaces("kana", "kana"), 0);
@@ -786,7 +998,7 @@ classes = ["stop"]
 [transitions]
 "* -> *" = 1
 "#;
-        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        let err = Table::from_toml(&toml).unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "{err}");
     }
 
@@ -804,7 +1016,7 @@ classes = ["stop"]
 "kana -> latin" = 1
 "latin -> punct.jp.stop" = 2
 "#;
-        let table = BrailleTable::from_toml(&toml).unwrap();
+        let table = Table::from_toml(&toml).unwrap();
         assert_eq!(table.transition_spaces("kana", "latin"), 1);
         assert_eq!(table.transition_spaces("latin", "punct.jp.stop"), 2);
         assert_eq!(table.transition_spaces("punct.jp.stop", "latin"), 0);
@@ -822,7 +1034,7 @@ classes = ["stop"]
 [transitions]
 "kana -> ltain" = 1
 "#;
-        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        let err = Table::from_toml(&toml).unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "{err}");
         assert!(err.to_string().contains("ltain"), "{err}");
     }
@@ -839,14 +1051,14 @@ classes = ["stop"]
 [transitions]
 "kana latin" = 1
 "#;
-        let err = BrailleTable::from_toml(&toml).unwrap_err();
+        let err = Table::from_toml(&toml).unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "{err}");
         assert!(err.to_string().contains("形式"), "{err}");
     }
 
     #[test]
     fn spot_check_digit_and_latin() {
-        let table = BrailleTable::embedded().unwrap();
+        let table = Table::embedded().unwrap();
         assert_eq!(table.digit.get("0").map(|s| s.as_str()), Some("⠚"));
         assert_eq!(table.digit.get("５").map(|s| s.as_str()), Some("⠑"));
         assert_eq!(table.latin.get("a").map(|s| s.as_str()), Some("⠁"));
@@ -855,7 +1067,7 @@ classes = ["stop"]
 
     #[test]
     fn flag_digit_defined() {
-        let table = BrailleTable::embedded().unwrap();
+        let table = Table::embedded().unwrap();
         assert_eq!(table.flag_digit.entry_prefix, "⠼");
         assert_eq!(table.flag_digit.explicit_exit, "⠤");
         assert!(table.flag_digit.exempt_chars.contains(&".".to_string()));

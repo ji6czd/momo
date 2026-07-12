@@ -1,4 +1,4 @@
-use momors_braille::BrailleConverter;
+use momors_braille::JapaneseTranslator;
 use momors_core::Predictor;
 use wasm_bindgen::prelude::*;
 
@@ -9,7 +9,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub struct MomoWasm {
     predictor: Predictor,
-    converter: BrailleConverter,
+    converter: JapaneseTranslator,
 }
 
 #[wasm_bindgen]
@@ -20,7 +20,7 @@ impl MomoWasm {
         let predictor =
             Predictor::from_model_bytes(mbm_data).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let converter =
-            BrailleConverter::from_embedded().map_err(|e| JsValue::from_str(&e.to_string()))?;
+            JapaneseTranslator::from_embedded().map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(MomoWasm {
             predictor,
             converter,
@@ -46,7 +46,7 @@ impl MomoWasm {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let braille = self
             .converter
-            .convert(result.kana_text())
+            .translate(result.kana_text())
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(braille.braille_text().to_string())
     }
@@ -70,7 +70,7 @@ impl MomoWasm {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let braille = self
             .converter
-            .convert(result.kana_text())
+            .translate(result.kana_text())
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         let json = serde_json::json!({

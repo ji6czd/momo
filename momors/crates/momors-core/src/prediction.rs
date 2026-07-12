@@ -280,13 +280,13 @@ impl PredictionResult {
 
     /// 点字のコードポイント位置 → 原文のコードポイント位置 のマッピング。
     ///
-    /// `kana_to_braille` には `BrailleResult::kana_to_braille()` を渡す。
+    /// `kana_to_braille` には `JapaneseResult::kana_to_braille()` を渡す。
     /// `braille_char_count` には点字テキストのコードポイント数を渡す。
     ///
     /// 各点字位置はそのセルを生成したかな文字を経由して原文位置に帰属する。
     /// 開始フラグ（⠼ ⠰ ⠠）はそのフラグを発動させた原文文字のインデックスに帰属し、
     /// 終了フラグ（⠤ など）とクラス遷移スペースは直前の原文文字に帰属する
-    /// （`BrailleConverter` が `brl_pos` を遷移スペースの直後・開始フラグの前で記録するため）。
+    /// （`JapaneseTranslator` が `brl_pos` を遷移スペースの直後・開始フラグの前で記録するため）。
     /// 複合音（キャ → ⠈⠡）が 2 セル占める場合、両セルとも複合音の原文位置を指す。
     pub fn braille_char_to_source(
         &self,
@@ -317,7 +317,7 @@ impl PredictionResult {
 
     /// 原文のコードポイント位置 → 点字のコードポイント位置のリスト。
     ///
-    /// `kana_to_braille` には `BrailleResult::kana_to_braille()` を渡す。
+    /// `kana_to_braille` には `JapaneseResult::kana_to_braille()` を渡す。
     /// 複合音（キャ など）は 2 つのかな文字が同一の点字位置を指すため、
     /// 重複を除いた昇順リストを返す。
     pub fn source_to_braille_char(&self, kana_to_braille: &[usize]) -> Vec<Vec<usize>> {

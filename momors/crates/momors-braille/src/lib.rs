@@ -4,7 +4,9 @@
 //!
 //! ## 構成
 //!
-//! - [`BrailleConverter`]: かな列 → 点字（[`momors_core::PredictionResult`] のかなを受け取る）。
+//! - [`BrailleTranslator`]: 点訳の入口。行の言語を判定し、日本語／英語へ振り分ける。
+//! - [`JapaneseTranslator`]: かな列 → 日本語点字。
+//! - [`EnglishTranslator`]: 英文 → UEB 点字。
 //! - [`document`]: 点字ドキュメントの**正本** [`BrailleDocument`]。MBR テキスト codec を含む。
 //! - [`reader`]: バイト列 → [`BrailleDocument`]（BES デコード）。
 //! - [`formatter`]: 正本 → 印刷イメージ [`FormattedDocument`] の導出（[`render`]）とワードラップ。
@@ -13,37 +15,39 @@
 //! ## 使い方（変換）
 //!
 //! ```no_run
-//! use momors_braille::BrailleConverter;
+//! use momors_braille::JapaneseTranslator;
 //!
 //! # fn main() -> momors_braille::Result<()> {
-//! let converter = BrailleConverter::from_embedded()?;
-//! let result = converter.convert("アイウエオ")?;
+//! let converter = JapaneseTranslator::from_embedded()?;
+//! let result = converter.translate("アイウエオ")?;
 //! println!("{}", result.braille_text());
 //! # Ok(())
 //! # }
 //! ```
 
 pub mod backtranslator;
-pub mod converter;
 pub mod document;
-pub mod english;
+pub mod english_translator;
 pub mod error;
 pub mod formatter;
-pub mod line;
+pub mod japanese_translator;
 mod nabcc;
 pub mod reader;
 pub mod table;
+pub mod translator;
 pub mod writer;
 
 pub use backtranslator::{
     BackTransResult, BackTransSegment, BackTransState, BrailleBackTranslator, StepResult,
 };
-pub use converter::{BrailleConverter, BrailleResult, UnknownCharPolicy};
 pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
-pub use english::{EnglishResult, EnglishTranslator};
+pub use english_translator::{embedded_english_displayname, EnglishResult, EnglishTranslator};
 pub use error::{Error, Result};
 pub use formatter::{render, FormattedDocument, RenderedLine};
-pub use line::{detect_language, is_japanese_char, Language, LineResult, LineTranslator};
+pub use japanese_translator::{JapaneseResult, JapaneseTranslator, UnknownCharPolicy};
 pub use reader::{read_bes, read_bet};
-pub use table::{embedded_table, embedded_tables, BrailleTable};
+pub use table::{embedded_table, embedded_tables, Table};
+pub use translator::{
+    detect_language, is_japanese_char, BrailleResult, BrailleTranslator, Language,
+};
 pub use writer::OutputFormat;

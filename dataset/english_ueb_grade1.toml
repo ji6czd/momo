@@ -1,9 +1,9 @@
-# ueb_english_grade1.toml
+# english_ueb_grade1.toml
 # UEB (Unified English Braille) grade 1（無縮約）の変換テーブル。
 # letters / 大文字符 / 数符 / 約物のみ。縮約（[contractions]）を持たない。
-# grade 2（縮約あり）は ueb_english_grade2.toml。インベントリは grade2 と共通。
+# grade 2（縮約あり）は english_ueb_grade2.toml。インベントリは grade2 と共通。
 [metadata]
-name = "ueb_english_grade1"
+name = "english_ueb_grade1"
 displayname = "UEB English (Grade 1)"
 author = "MOMO Project"
 

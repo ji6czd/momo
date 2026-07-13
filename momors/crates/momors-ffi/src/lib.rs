@@ -525,7 +525,7 @@ pub extern "C" fn momo_english_translator_new(
     }))
 }
 
-/// 名前で組み込みテーブルを指定して英語変換器を作る（例: `"ueb_english_grade2"`）。失敗時 NULL。
+/// 名前で組み込みテーブルを指定して英語変換器を作る（例: `"english_ueb_grade2"`）。失敗時 NULL。
 #[no_mangle]
 pub extern "C" fn momo_english_translator_from_embedded_name_w(
     name: *const u16,

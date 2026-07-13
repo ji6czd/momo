@@ -143,7 +143,7 @@ public partial class MainForm : Form
 
         using var translator = MomoFfi.CreateTranslator(
             MomoFfi.TableJapaneseGrade1,
-            englishGrade2 ? MomoFfi.TableUebEnglishGrade2 : MomoFfi.TableUebEnglishGrade1);
+            englishGrade2 ? MomoFfi.TableEnglishUebGrade2 : MomoFfi.TableEnglishUebGrade1);
         if (translator is null)
             return "点訳器の初期化に失敗しました";
 

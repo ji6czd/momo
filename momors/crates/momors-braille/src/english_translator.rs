@@ -218,11 +218,11 @@ impl EnglishTranslator {
 
     /// 組み込みの UEB grade 2（縮約あり）テーブルで変換器を作る。
     pub fn from_embedded() -> Result<Self> {
-        Self::from_embedded_name("ueb_english_grade2")
+        Self::from_embedded_name("english_ueb_grade2")
     }
 
     /// 名前で組み込みテーブルを指定して変換器を作る（`[metadata].name` と照合）。
-    /// 例: `"ueb_english_grade1"` / `"ueb_english_grade2"`。見つからなければエラー。
+    /// 例: `"english_ueb_grade1"` / `"english_ueb_grade2"`。見つからなければエラー。
     pub fn from_embedded_name(name: &str) -> Result<Self> {
         let table = crate::table::embedded_table(name)
             .ok_or_else(|| Error::UnknownTable(name.to_owned()))?;
@@ -250,7 +250,7 @@ impl EnglishTranslator {
         &self.table
     }
 
-    /// テーブルの識別名（`[metadata].name`。例: `"ueb_english_grade2"`）。
+    /// テーブルの識別名（`[metadata].name`。例: `"english_ueb_grade2"`）。
     pub fn name(&self) -> Option<&str> {
         self.table.name.as_deref()
     }
@@ -1187,7 +1187,7 @@ fn char_keyed(m: &HashMap<String, String>) -> HashMap<char, String> {
 /// メニュー表示用。grade を選べるようにする段階で grade 引数版へ一般化する予定。
 pub fn embedded_english_displayname() -> Option<&'static str> {
     static DISPLAYNAME: LazyLock<Option<String>> = LazyLock::new(|| {
-        crate::table::embedded_table("ueb_english_grade2").and_then(|t| t.displayname)
+        crate::table::embedded_table("english_ueb_grade2").and_then(|t| t.displayname)
     });
     DISPLAYNAME.as_deref()
 }
@@ -1209,7 +1209,7 @@ mod tests {
     }
 
     fn t1(s: &str) -> String {
-        EnglishTranslator::from_embedded_name("ueb_english_grade1")
+        EnglishTranslator::from_embedded_name("english_ueb_grade1")
             .expect("UEB 英語テーブル(grade1)をロードできること")
             .translate(s)
             .braille_text()
@@ -1242,11 +1242,11 @@ mod tests {
     #[test]
     fn table_metadata() {
         let g2 = tr();
-        assert_eq!(g2.name(), Some("ueb_english_grade2"));
+        assert_eq!(g2.name(), Some("english_ueb_grade2"));
         assert_eq!(g2.displayname(), Some("UEB English (Grade 2)"));
 
-        let g1 = EnglishTranslator::from_embedded_name("ueb_english_grade1").unwrap();
-        assert_eq!(g1.name(), Some("ueb_english_grade1"));
+        let g1 = EnglishTranslator::from_embedded_name("english_ueb_grade1").unwrap();
+        assert_eq!(g1.name(), Some("english_ueb_grade1"));
         assert_eq!(g1.displayname(), Some("UEB English (Grade 1)"));
         assert!(
             g1.table().contractions.is_empty(),

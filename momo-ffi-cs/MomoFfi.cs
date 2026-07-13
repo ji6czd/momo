@@ -31,9 +31,9 @@ public static class MomoFfi
 
     // 組み込みテーブル名（TOML の [metadata].name と一致させる）。
     public const string TableJapaneseGrade1 = "japanese_grade1";
-    public const string TableJapaneseNoConversion = "japanese_noconversion";
-    public const string TableUebEnglishGrade2 = "ueb_english_grade2";
-    public const string TableUebEnglishGrade1 = "ueb_english_grade1";
+    public const string TableJapaneseNoConversion = "japanese_no_conversion";
+    public const string TableEnglishUebGrade2 = "english_ueb_grade2";
+    public const string TableEnglishUebGrade1 = "english_ueb_grade1";
 
     // テーブル未定義文字の扱い（Rust 側 UnknownCharPolicy と一致させる）。
     public const int PolicySpace = 0;
@@ -617,7 +617,7 @@ public static class MomoFfi
     /// </summary>
     public static BrailleTranslatorHandle? CreateTranslator(
         string japaneseTable = TableJapaneseGrade1,
-        string? englishTable = TableUebEnglishGrade2)
+        string? englishTable = TableEnglishUebGrade2)
     {
         if (_dllAvailable == false) return null;
         try

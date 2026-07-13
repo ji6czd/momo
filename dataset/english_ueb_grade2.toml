@@ -1,13 +1,13 @@
-# ueb_english_grade2.toml
+# english_ueb_grade2.toml
 # UEB (Unified English Braille) grade 2（縮約あり）の変換テーブル。
 # 仕様: momors/crates/momors-braille/docs/ueb-grade2-spec.md
 #
 # インベントリ（データ）だけをここに置き、適用ロジック（セル数最小化・位置制約・standing alone）は
 # english_translator.rs のコードが持つ。拡張（lower signs / 頭字符・尾字符 / shortforms /
 # 形態素境界）は原則このデータへ追加していく（機構を増やさない方針）。
-# grade 1（無縮約）は ueb_english_grade1.toml（縮約セクションを持たない）。
+# grade 1（無縮約）は english_ueb_grade1.toml（縮約セクションを持たない）。
 [metadata]
-name = "ueb_english_grade2"
+name = "english_ueb_grade2"
 displayname = "UEB English (Grade 2)"
 author = "MOMO Project"
 

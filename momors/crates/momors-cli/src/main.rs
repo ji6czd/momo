@@ -75,10 +75,10 @@ struct Cli {
     #[arg(long)]
     braille: bool,
 
-    /// 点字変換テーブル。.toml のパス、または埋め込みテーブル名
-    /// (japanese_grade1 / japanese_noconversion / ueb_english)。
-    /// `ueb_english` を指定したときだけ、行ごとに日本語／英語を判定して
-    /// 英語行を UEB grade 2 で点訳する（省略時は日本語テーブルのみ）
+    /// 点字変換テーブル。埋め込みテーブル名（japanese_grade1 / japanese_no_conversion /
+    /// english_ueb_grade1 / english_ueb_grade2）か、.toml のパス。名前は TOML のファイル名と
+    /// 同じ。英語テーブルを指定したときだけ、行ごとに日本語／英語を判定して英語行を UEB で
+    /// 点訳する（日本語行は既定の日本語テーブル）
     #[arg(long)]
     table: Option<String>,
 
@@ -278,56 +278,66 @@ fn braille_to_source(result: &BrailleResult, pred: Option<&PredictionResult>) ->
     }
 }
 
-/// `--table` の指定で `ueb_english` を選ぶと、行ごとに日本語／英語を判定する。
-const TABLE_UEB_ENGLISH: [&str; 2] = ["ueb_english", "ueb_english_grade2"];
-
-/// `--table` の指定から、日本語点字変換器と「行単位の言語判定を行うか」を決める。
+/// `--table` から点訳器を作り、「行ごとに言語を判定するか」を返す。
 ///
-/// - `ueb_english` … 日本語行は既定テーブル、英語行は UEB grade 2（判定あり）
-/// - 既存ファイルのパス … そのテーブル（判定なし）
-/// - 埋め込みテーブル名 … そのテーブル（判定なし）
-/// - 省略 … 既定テーブル（判定なし）
-fn resolve_table(table: Option<&String>) -> Result<(JapaneseTranslator, bool), String> {
-    let Some(spec) = table else {
-        let c = JapaneseTranslator::from_embedded()
-            .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
-        return Ok((c, false));
+/// - **英語テーブル**（埋め込み名 `english_*`、または UEB スキーマの .toml）… 英語行はそれで
+///   点訳し、日本語行は既定の日本語テーブル。**行ごとの言語判定を行う**
+/// - **日本語テーブル**（埋め込み名 `japanese_*`、または日本語スキーマの .toml）… 全行それで
+///   点訳する（判定なし）
+/// - 省略 … 既定の日本語テーブル（判定なし）
+fn make_line_translator(table: Option<&String>) -> Result<(BrailleTranslator, bool), String> {
+    let default_japanese = || {
+        JapaneseTranslator::from_embedded().map_err(|e| format!("点字テーブル読み込みエラー: {e}"))
     };
 
-    if TABLE_UEB_ENGLISH.contains(&spec.as_str()) {
-        let c = JapaneseTranslator::from_embedded()
-            .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
-        return Ok((c, true));
+    let Some(spec) = table else {
+        let english = default_english()?;
+        return Ok((
+            BrailleTranslator::new(default_japanese()?, Some(english)),
+            false,
+        ));
+    };
+
+    // 英語テーブル（名前 or ファイル）なら、日本語は既定にして行ごとに判定する。
+    let english = if Path::new(spec).exists() {
+        momors_braille::EnglishTranslator::from_file(spec).ok()
+    } else {
+        momors_braille::EnglishTranslator::from_embedded_name(spec).ok()
+    };
+    if let Some(english) = english {
+        return Ok((
+            BrailleTranslator::new(default_japanese()?, Some(english)),
+            true,
+        ));
     }
 
-    if Path::new(spec).exists() {
-        let c = JapaneseTranslator::from_file(spec)
-            .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
-        return Ok((c, false));
-    }
-
-    match JapaneseTranslator::from_embedded_name(spec) {
-        Ok(c) => Ok((c, false)),
-        Err(_) => {
+    // 日本語テーブル（名前 or ファイル）。
+    let japanese = if Path::new(spec).exists() {
+        JapaneseTranslator::from_file(spec)
+            .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?
+    } else {
+        JapaneseTranslator::from_embedded_name(spec).map_err(|_| {
             let names: Vec<&str> = momors_braille::embedded_tables()
                 .iter()
                 .filter_map(|t| t.name.as_deref())
                 .collect();
-            Err(format!(
+            format!(
                 "点字テーブル \"{spec}\" が見つかりません。\
-                 ファイルパスか、埋め込みテーブル名 ({} / ueb_english) を指定してください",
+                 ファイルパスか、埋め込みテーブル名 ({}) を指定してください",
                 names.join(" / ")
-            ))
-        }
-    }
+            )
+        })?
+    };
+    Ok((
+        BrailleTranslator::new(japanese, Some(default_english()?)),
+        false,
+    ))
 }
 
-/// ルーティングの有無を問わず使える点訳器を作る。
-fn make_line_translator(table: Option<&String>) -> Result<(BrailleTranslator, bool), String> {
-    let (japanese, routing) = resolve_table(table)?;
-    let english = momors_braille::EnglishTranslator::from_embedded()
-        .map_err(|e| format!("英語点字テーブル読み込みエラー: {e}"))?;
-    Ok((BrailleTranslator::new(japanese, Some(english)), routing))
+/// 既定の英語テーブル（UEB grade 2）。日本語テーブル指定時も英語行の点訳器として持っておく。
+fn default_english() -> Result<momors_braille::EnglishTranslator, String> {
+    momors_braille::EnglishTranslator::from_embedded()
+        .map_err(|e| format!("英語点字テーブル読み込みエラー: {e}"))
 }
 
 // ============================================================
@@ -335,7 +345,8 @@ fn make_line_translator(table: Option<&String>) -> Result<(BrailleTranslator, bo
 // ============================================================
 
 fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
-    // 点字モードのみ。`--table ueb_english` のときだけ行ごとに言語を判定する。
+    // 点字モードのみ。英語テーブル（`--table english_ueb_grade2` など）のときだけ
+    // 行ごとに言語を判定する。
     let braille: Option<(BrailleTranslator, bool)> = if cli.braille {
         match make_line_translator(cli.table.as_ref()) {
             Ok(v) => Some(v),

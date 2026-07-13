@@ -183,7 +183,7 @@ impl BrailleTranslator {
     /// 英語エンジンを持たない変換器（全行を日本語テーブルで点訳）。
     ///
     /// no_conversion のように言語別処理が不要なときに使う。英語行も UEB に回さず、
-    /// 日本語テーブル（例: `japanese_noconversion`＝大小保持の計算機点字）で 1:1 変換する。
+    /// 日本語テーブル（例: `japanese_no_conversion`＝大小保持の計算機点字）で 1:1 変換する。
     pub fn japanese_only(japanese: JapaneseTranslator) -> Self {
         Self::new(japanese, None)
     }
@@ -306,7 +306,7 @@ mod tests {
         // 日本語＝１級、英語＝UEB grade 1（無縮約）を名前で選んで合成する。
         let bt = BrailleTranslator::new(
             JapaneseTranslator::from_embedded_name("japanese_grade1").unwrap(),
-            Some(EnglishTranslator::from_embedded_name("ueb_english_grade1").unwrap()),
+            Some(EnglishTranslator::from_embedded_name("english_ueb_grade1").unwrap()),
         );
         // grade 1 なので縮約されない: "and the" = a n d / t h e。
         let r = bt.translate_english("and the").unwrap();
@@ -326,7 +326,7 @@ mod tests {
 
         // english=None（日本語 no_conversion）: 同じ英語行が日本語経路へ。
         let jp_only = BrailleTranslator::japanese_only(
-            JapaneseTranslator::from_embedded_name("japanese_noconversion").unwrap(),
+            JapaneseTranslator::from_embedded_name("japanese_no_conversion").unwrap(),
         );
         let b = jp_only.translate("the").expect("点訳できること");
         assert_eq!(

@@ -823,12 +823,12 @@ mod tests {
             .any(|t| t.name.as_deref() == Some("japanese_grade1")));
         assert!(tables
             .iter()
-            .any(|t| t.name.as_deref() == Some("japanese_noconversion")));
+            .any(|t| t.name.as_deref() == Some("japanese_no_conversion")));
     }
 
     #[test]
     fn embedded_table_by_name() {
-        let t = embedded_table("japanese_noconversion").expect("noconversion テーブルが引ける");
+        let t = embedded_table("japanese_no_conversion").expect("noconversion テーブルが引ける");
         assert_eq!(t.displayname.as_deref(), Some("日本語無変換"));
     }
 
@@ -1208,7 +1208,7 @@ classes = ["stop"]
 
     #[test]
     fn ueb_grade2_has_grade1_indicator_and_morphemes() {
-        let table = embedded_table("ueb_english_grade2").expect("UEB grade2 テーブルがある");
+        let table = embedded_table("english_ueb_grade2").expect("UEB grade2 テーブルがある");
         assert_eq!(table.grade1_indicator, "⠰");
         // "mis|hap" → 語 "mishap" の境界オフセット [3]
         assert_eq!(table.division_boundaries.get("mishap"), Some(&vec![3]));

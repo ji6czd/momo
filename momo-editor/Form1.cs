@@ -565,7 +565,7 @@ public partial class Form1 : Form
 
         _translator ??= MomoFfi.CreateTranslator(
             MomoFfi.TableJapaneseGrade1,
-            _grade2Table ? MomoFfi.TableUebEnglishGrade2 : MomoFfi.TableUebEnglishGrade1);
+            _grade2Table ? MomoFfi.TableEnglishUebGrade2 : MomoFfi.TableEnglishUebGrade1);
         var translator = _translator;
         if (translator == null) return null;
 
@@ -664,8 +664,8 @@ public partial class Form1 : Form
     private void InitTableMenu()
     {
         var tables = MomoFfi.EmbeddedTables();
-        _grade1Name = TableDisplayName(tables, MomoFfi.TableUebEnglishGrade1, _grade1Name);
-        _grade2Name = TableDisplayName(tables, MomoFfi.TableUebEnglishGrade2, _grade2Name);
+        _grade1Name = TableDisplayName(tables, MomoFfi.TableEnglishUebGrade1, _grade1Name);
+        _grade2Name = TableDisplayName(tables, MomoFfi.TableEnglishUebGrade2, _grade2Name);
         // 表示名中の & はメニューのアクセラレータ記法と衝突するのでエスケープする。
         tableGrade1MenuItem.Text = $"&1 {_grade1Name.Replace("&", "&&")}";
         tableGrade2MenuItem.Text = $"&2 {_grade2Name.Replace("&", "&&")}";

@@ -2,7 +2,7 @@
 # 日本語点字変換テーブルとフラグ定義
 
 [metadata]
-name = "japanese_noconversion"
+name = "japanese_no_conversion"
 displayname = "日本語無変換"
 author = "MOMO Project"
 

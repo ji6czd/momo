@@ -178,6 +178,15 @@ pub(crate) enum Position {
     Wordsign,
 }
 
+/// Appendix 1 のリストに無い語の中でも使える shortform の範囲（§10.9.3）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FreeScope {
+    /// 語のどこに現れても使う（braille / great / children）。
+    Anywhere,
+    /// 語頭にあるときだけ使う（blind / first / friend / good / letter / little / quick）。
+    Initial,
+}
+
 /// UEB 縮約の1エントリ。[`Table::contractions`] が保持し、
 /// [`EnglishTranslator`](crate::EnglishTranslator) が適用する。
 #[derive(Debug, Clone)]
@@ -190,6 +199,18 @@ pub(crate) struct Contraction {
     pub initial_stems: Vec<String>,
     /// shortform（略字）か。
     pub shortform: bool,
+    /// Appendix 1 に無い語の中でも使える shortform（§10.9.3 の10語）。
+    pub free: Option<FreeScope>,
+    /// 母音または `y` が続くときは使わない（§10.9.3(b)(c)）。
+    pub not_before_vowel: bool,
+    /// この文字が直前にあるときは使わない（§10.7.4 の `ever` は `e` / `i` の後で使わない）。
+    pub not_after: String,
+    /// 下方約物（ハイフン・ダッシュ・引用符を含む）に接するときは使わない（§10.5.1。
+    /// be / were / his / was だけ。`enough`（§10.5.2）と `in`（§10.5.3）には効かない）。
+    pub avoid_lower_punct: bool,
+    /// その並び（空白で区切られた symbols-sequence）に上方の点を持つ記号が要る（§10.5.3 の `in`。
+    /// `in-depth` は可、`in.` は不可＝並びが下方の点だけになる）。
+    pub needs_upper_dot: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +227,26 @@ struct RawUeb {
     /// shortform（略字）の allowlist と例外。grade 1 は持たない（省略可）。
     #[serde(default)]
     shortforms: RawShortforms,
+    /// 縮約を跨がせない区切りを持つ語。省略可。
+    #[serde(default)]
+    divisions: RawDivisions,
+    /// 引用符（開き／閉じで形が違う約物）。省略可。
+    #[serde(default)]
+    quotes: HashMap<String, RawQuote>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawQuote {
+    open: String,
+    close: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawDivisions {
+    /// `mis|hap` のように `|` で語の区切り（形態素・音節）を示した語。跨ぐ縮約は使わない。
+    #[serde(default)]
+    boundaries: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -223,6 +264,18 @@ struct RawIndicators {
     capital: String,
     capital_word: String,
     number: String,
+    /// grade 1 記号符。数字の直後の a–j が数字と読まれないように前置する。
+    #[serde(default)]
+    grade1: String,
+    /// 大文字句符。3つ以上の並びが大文字のとき、終止符まで大文字モードにする。
+    #[serde(default)]
+    capital_passage: String,
+    /// 大文字終止符。大文字語符・句符の効力をここで切る。
+    #[serde(default)]
+    capital_terminator: String,
+    /// grade 1 語符。その並び全体を無縮約にする（§5.3）。
+    #[serde(default)]
+    grade1_word: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,6 +289,17 @@ struct RawContraction {
     initial_stems: Vec<String>,
     #[serde(default)]
     shortform: bool,
+    /// "anywhere" / "initial"（§10.9.3）。
+    #[serde(default)]
+    free: Option<String>,
+    #[serde(default)]
+    not_before_vowel: bool,
+    #[serde(default)]
+    not_after: String,
+    #[serde(default)]
+    avoid_lower_punct: bool,
+    #[serde(default)]
+    needs_upper_dot: bool,
 }
 
 // ============================================================
@@ -281,6 +345,19 @@ pub struct Table {
     pub(crate) shortform_words: HashSet<String>,
     /// s / 's を付けても shortform を使わない例外語。
     pub(crate) shortform_plural_exceptions: HashSet<String>,
+    /// grade 1 記号符（UEB `[indicators] grade1`）。数字直後の a–j に前置する。
+    pub(crate) grade1_indicator: String,
+    /// 大文字句符（UEB `[indicators] capital_passage`）。日本語テーブルでは空。
+    pub(crate) capital_passage: String,
+    /// 大文字終止符（UEB `[indicators] capital_terminator`）。日本語テーブルでは空。
+    pub(crate) capital_terminator: String,
+    /// grade 1 語符（UEB `[indicators] grade1_word`）。日本語テーブルでは空。
+    pub(crate) grade1_word: String,
+    /// 引用符（UEB `[quotes]`）。文字 → (開き, 閉じ) のセル。日本語テーブルでは空。
+    pub(crate) quotes: HashMap<String, (String, String)>,
+    /// 区切り（形態素・音節）を持つ語（小文字）→ 区切りの文字オフセット（昇順）。
+    /// ここを跨ぐ縮約は使わない。日本語テーブルでは空。
+    pub(crate) division_boundaries: HashMap<String, Vec<usize>>,
 }
 
 // ============================================================
@@ -391,6 +468,16 @@ impl Table {
             contractions: parse_contractions(raw.contractions)?,
             shortform_words: raw.shortforms.words.into_iter().collect(),
             shortform_plural_exceptions: raw.shortforms.plural_exceptions.into_iter().collect(),
+            grade1_indicator: raw.indicators.grade1,
+            capital_passage: raw.indicators.capital_passage,
+            capital_terminator: raw.indicators.capital_terminator,
+            grade1_word: raw.indicators.grade1_word,
+            division_boundaries: parse_divisions(raw.divisions.boundaries)?,
+            quotes: raw
+                .quotes
+                .into_iter()
+                .map(|(k, q)| (k, (q.open, q.close)))
+                .collect(),
         })
     }
 
@@ -430,10 +517,16 @@ impl Table {
             flag_foreign_word: raw.flags.foreign_word,
             flag_capital: raw.flags.capital,
             transitions,
-            // 日本語テーブルは縮約・shortform を持たない
+            // 日本語テーブルは縮約・shortform・形態素境界を持たない
             contractions: HashMap::new(),
             shortform_words: HashSet::new(),
             shortform_plural_exceptions: HashSet::new(),
+            grade1_indicator: String::new(),
+            capital_passage: String::new(),
+            capital_terminator: String::new(),
+            grade1_word: String::new(),
+            division_boundaries: HashMap::new(),
+            quotes: HashMap::new(),
         })
     }
 
@@ -542,6 +635,16 @@ fn parse_contractions(
                 )));
             }
         }
+        let free = match rc.free.as_deref() {
+            None => None,
+            Some("anywhere") => Some(FreeScope::Anywhere),
+            Some("initial") => Some(FreeScope::Initial),
+            Some(other) => {
+                return Err(Error::Validation(format!(
+                    "[contractions] \"{spelling}\": free \"{other}\" は anywhere/initial のいずれか"
+                )));
+            }
+        };
         out.insert(
             spelling,
             Contraction {
@@ -550,8 +653,46 @@ fn parse_contractions(
                 lower: rc.lower,
                 initial_stems: rc.initial_stems,
                 shortform: rc.shortform,
+                free,
+                not_before_vowel: rc.not_before_vowel,
+                not_after: rc.not_after,
+                avoid_lower_punct: rc.avoid_lower_punct,
+                needs_upper_dot: rc.needs_upper_dot,
             },
         );
+    }
+    Ok(out)
+}
+
+/// UEB `[divisions] boundaries` をパースする。`"mis|hap"` → `("mishap", [3])`。
+/// 綴りは小文字 a–z、`|` は1つ以上、語頭・語末には置けない。
+fn parse_divisions(raw: Vec<String>) -> Result<HashMap<String, Vec<usize>>> {
+    let mut out = HashMap::with_capacity(raw.len());
+    for entry in raw {
+        let mut word = String::new();
+        let mut cuts = Vec::new();
+        for c in entry.chars() {
+            match c {
+                '|' => cuts.push(word.chars().count()),
+                c if c.is_ascii_lowercase() => word.push(c),
+                other => {
+                    return Err(Error::Validation(format!(
+                        "[divisions] \"{entry}\": \"{other}\" は使えません（小文字 a-z と | のみ）"
+                    )));
+                }
+            }
+        }
+        if cuts.is_empty() {
+            return Err(Error::Validation(format!(
+                "[divisions] \"{entry}\": 境界 | がありません"
+            )));
+        }
+        if cuts.iter().any(|&b| b == 0 || b == word.chars().count()) {
+            return Err(Error::Validation(format!(
+                "[divisions] \"{entry}\": 境界 | を語頭・語末には置けません"
+            )));
+        }
+        out.insert(word, cuts);
     }
     Ok(out)
 }
@@ -1063,6 +1204,31 @@ classes = ["stop"]
         assert_eq!(table.digit.get("５").map(|s| s.as_str()), Some("⠑"));
         assert_eq!(table.latin.get("a").map(|s| s.as_str()), Some("⠁"));
         assert_eq!(table.latin.get("z").map(|s| s.as_str()), Some("⠵"));
+    }
+
+    #[test]
+    fn ueb_grade2_has_grade1_indicator_and_morphemes() {
+        let table = embedded_table("ueb_english_grade2").expect("UEB grade2 テーブルがある");
+        assert_eq!(table.grade1_indicator, "⠰");
+        // "mis|hap" → 語 "mishap" の境界オフセット [3]
+        assert_eq!(table.division_boundaries.get("mishap"), Some(&vec![3]));
+    }
+
+    #[test]
+    fn division_boundary_validation() {
+        let cut = |entries: &str| {
+            Table::from_ueb_toml(&format!(
+                "[metadata]\nname = \"t\"\n\
+                 [indicators]\ncapital = \"⠠\"\ncapital_word = \"⠠⠠\"\nnumber = \"⠼\"\n\
+                 [letters]\na = \"⠁\"\n[digits]\n\"1\" = \"⠁\"\n[punctuation]\n\
+                 [divisions]\nboundaries = [{entries}]\n"
+            ))
+        };
+        assert!(cut("\"mis|hap\"").is_ok());
+        assert!(cut("\"mishap\"").is_err()); // 境界 | が無い
+        assert!(cut("\"|mishap\"").is_err()); // 語頭には置けない
+        assert!(cut("\"mishap|\"").is_err()); // 語末には置けない
+        assert!(cut("\"Mis|hap\"").is_err()); // 小文字 a-z のみ
     }
 
     #[test]

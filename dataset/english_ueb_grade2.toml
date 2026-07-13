@@ -2,9 +2,9 @@
 # UEB (Unified English Braille) grade 2（縮約あり）の変換テーブル。
 # 仕様: momors/crates/momors-braille/docs/ueb-grade2-spec.md
 #
-# インベントリ（データ）だけをここに置き、適用ロジック（最長一致・語境界・ing 語頭例外）は
-# english_translator.rs のコードが持つ。以後の拡張（lower signs / 頭字符・尾字符 / shortforms）は
-# 原則このデータへ追加していく（機構を増やさない方針）。
+# インベントリ（データ）だけをここに置き、適用ロジック（セル数最小化・位置制約・standing alone）は
+# english_translator.rs のコードが持つ。拡張（lower signs / 頭字符・尾字符 / shortforms /
+# 形態素境界）は原則このデータへ追加していく（機構を増やさない方針）。
 # grade 1（無縮約）は ueb_english_grade1.toml（縮約セクションを持たない）。
 [metadata]
 name = "ueb_english_grade2"
@@ -13,9 +13,14 @@ author = "MOMO Project"
 
 # 指示符
 [indicators]
-capital = "⠠"        # 大文字符（1文字）
-capital_word = "⠠⠠"  # 大文字語符（語全体が大文字）
-number = "⠼"         # 数符
+capital = "⠠"            # 大文字符（次の1文字）
+capital_word = "⠠⠠"      # 大文字語符（大文字の連なり。終止符・空白・非英字まで）
+capital_passage = "⠠⠠⠠"  # 大文字句符（3つ以上の並びが大文字。終止符まで）
+capital_terminator = "⠠⠄" # 大文字終止符（語符・句符の効力をここで切る。ABCs = ⠠⠠⠁⠃⠉⠠⠄⠎）
+number = "⠼"             # 数符
+grade1 = "⠰"             # grade 1 記号符（次の1記号。"1a" = ⠼⠁⠰⠁、"b" = ⠰⠃）
+grade1_word = "⠰⠰"       # grade 1 語符（その語全体を無縮約に。"Dobrljin" = ⠰⠰⠠⠙⠕⠃⠗⠇⠚⠊⠝。
+                         # 空白で効力が切れるので終止符 ⠰⠄ は要らない＝grade 1 句符は未対応）
 
 # 基本文字（grade 1）
 [letters]
@@ -59,16 +64,72 @@ z = "⠵"
 "9" = "⠊"
 "0" = "⠚"
 
-# 基本約物（Phase 1 の最小セット。括弧・引用符などは後で追加）
+# 約物・記号（Rules of UEB 2024 §7 Punctuation / §3 General Symbols）
+# 出典: https://iceb.org/wp-content/uploads/2025/10/Rules-of-Unified-English-Braille-2024.pdf
+# 引用符は開き/閉じで形が違うので [quotes] に分ける（ここは1対1のもののみ）。
 [punctuation]
+# --- 基本約物 ---
 "." = "⠲"
 "," = "⠂"
 ";" = "⠆"
 ":" = "⠒"
 "?" = "⠦"
 "!" = "⠖"
-"'" = "⠄"
-"-" = "⠤"
+"'" = "⠄"          # アポストロフィ（無方向の一重引用符）
+"…" = "⠲⠲⠲"        # 省略記号（"..." は "." 3つで同じ列になる）
+# --- ハイフン・ダッシュ・下線 ---
+"-" = "⠤"          # ハイフン
+"–" = "⠠⠤"         # ダッシュ（en dash）
+"—" = "⠐⠠⠤"        # 長いダッシュ（em dash）
+"_" = "⠨⠤"         # 下線（low line）
+# --- 括弧 ---
+"(" = "⠐⠣"
+")" = "⠐⠜"
+"[" = "⠨⠣"
+"]" = "⠨⠜"
+"{" = "⠸⠣"
+"}" = "⠸⠜"
+"<" = "⠈⠣"         # 山括弧／小なり（§3.17 と同セル）
+">" = "⠈⠜"
+# --- スラッシュ ---
+"/" = "⠸⠌"         # solidus
+"\\" = "⠸⠡"        # reverse solidus（backslash）
+# --- 記号（§3）---
+"@" = "⠈⠁"
+"&" = "⠈⠯"
+"*" = "⠐⠔"
+"#" = "⠸⠹"
+"•" = "⠸⠲"
+"^" = "⠈⠢"
+"~" = "⠈⠔"
+"%" = "⠨⠴"
+"°" = "⠘⠚"
+"©" = "⠘⠉"
+"®" = "⠘⠗"
+"™" = "⠘⠞"
+"§" = "⠘⠎"
+"¶" = "⠘⠏"
+# --- 通貨（§3.10）---
+"$" = "⠈⠎"
+"¢" = "⠈⠉"
+"€" = "⠈⠑"
+"£" = "⠈⠇"
+"¥" = "⠈⠽"
+# --- 演算・比較（§3.17）---
+"+" = "⠐⠖"
+"=" = "⠐⠶"
+"×" = "⠐⠦"
+"÷" = "⠐⠌"
+"−" = "⠐⠤"        # 負号（U+2212。ASCII の "-" はハイフン）
+
+# 引用符。開き/閉じは文脈で決める（直前が空白・行頭・開き括弧なら開き、でなければ閉じ）。
+# 既定は1セルの非特定引用符 ⠦/⠴（§7.6 の用例が二重引用符にこれを使う）。
+[quotes]
+"\"" = { open = "⠦", close = "⠴" }
+"“"  = { open = "⠦", close = "⠴" }
+"”"  = { open = "⠦", close = "⠴" }
+"‘"  = { open = "⠠⠦", close = "⠠⠴" }
+"’"  = { open = "⠠⠦", close = "⠠⠴" }
 
 # 縮約。positions = 適用できる語中の位置（複数可・いずれか一致で適用）:
 #   always     語中どこでも
@@ -147,14 +208,19 @@ z = "⠵"
 "be" = { cell = "⠆", positions = [
     "wordsign",
     "initial",
-], lower = true, initial_stems = [
+], lower = true, avoid_lower_punct = true, initial_stems = [
+    "beatrice", "beatrix", "begotten", "bein", "belinda",
+    "bedazzle", "bedevil", "befriended", "begonia", "behemoth", "being", "beneficent", "benevolence", "benumb", "beta",
     "becom", "became", "begin", "began", "begun",
     "behav", "behold", "believ", "belief", "belong", "beloved",
     "bequeath", "bereav", "beseech", "bestow", "betray", "beware", "bewild",
+    "beatitude", "bedraggl", "benight", "benign", "berat",
     "because", "before", "behind", "below", "beneath", "beside", "between", "beyond",
 ] }
 "con" = { cell = "⠒", positions = ["initial"], lower = true, initial_stems = [
-    "conceiv", "concern", "conclud", "condition", "conduct",
+    "conestoga", "congo",
+    "concept", "congeal", "congratulate", "cont", "contradistinction",
+    "conceiv", "concern", "conclud", "condition", "conduct", "congee", "congru",
     "confer", "confirm", "conflict", "confus", "congenial", "congress",
     "connect", "conquer", "consent", "conserv", "consider", "consist",
     "constant", "construct", "consult", "consum",
@@ -163,13 +229,16 @@ z = "⠵"
     "convention", "convers", "convert", "convey", "convinc",
 ] }
 "dis" = { cell = "⠲", positions = ["initial"], lower = true, initial_stems = [
+    "discipl", "disingenuous", "dist",
+    "disaster", "disco", "disharmony", "dissect",
     "disagree", "disappear", "disappoint", "disbelief", "disconnect",
-    "discover", "discuss", "disease", "dislike", "dismal", "dismay", "dismiss",
+    "discover", "discuss", "disease", "dishonest", "dishonor", "dishonour",
+    "dislike", "dismal", "dismay", "dismiss",
     "display", "dispos", "disput", "disrupt",
     "distanc", "distant", "distinct", "district", "distribut", "distrust", "disturb",
 ] }
 "en"  = { cell = "⠢", positions = ["always"], lower = true }
-"in"  = { cell = "⠔", positions = ["wordsign", "always"], lower = true }
+"in"  = { cell = "⠔", positions = ["wordsign", "always"], lower = true, needs_upper_dot = true }
 "ea"  = { cell = "⠂", positions = ["medial"], lower = true }
 "bb"  = { cell = "⠆", positions = ["medial"], lower = true }
 "cc"  = { cell = "⠒", positions = ["medial"], lower = true }
@@ -177,9 +246,9 @@ z = "⠵"
 "gg"  = { cell = "⠶", positions = ["medial"], lower = true }
 
 # --- lower wordsign（単独で1語。下方約物接触時は縮約しない）---
-"his"    = { cell = "⠦", positions = ["wordsign"], lower = true }
-"was"    = { cell = "⠴", positions = ["wordsign"], lower = true }
-"were"   = { cell = "⠶", positions = ["wordsign"], lower = true }
+"his"    = { cell = "⠦", positions = ["wordsign"], lower = true, avoid_lower_punct = true }
+"was"    = { cell = "⠴", positions = ["wordsign"], lower = true, avoid_lower_punct = true }
+"were"   = { cell = "⠶", positions = ["wordsign"], lower = true, avoid_lower_punct = true }
 "enough" = { cell = "⠢", positions = ["wordsign"], lower = true }
 
 # ============================================================
@@ -190,7 +259,8 @@ z = "⠵"
 
 # --- 頭字符 initial-letter contraction: dot 5（⠐）。2セル目は語の先頭文字/先頭縮約 ---
 "day"       = { cell = "⠐⠙", positions = ["always"] }
-"ever"      = { cell = "⠐⠑", positions = ["always"] }
+# ever は e / i の直後では使わない（§10.7.4。believer = ⠆⠇⠊⠑⠧⠻）
+"ever"      = { cell = "⠐⠑", positions = ["always"], not_after = "ei" }
 "father"    = { cell = "⠐⠋", positions = ["always"] }
 "here"      = { cell = "⠐⠓", positions = ["always"] }
 "know"      = { cell = "⠐⠅", positions = ["always"] }
@@ -274,9 +344,9 @@ z = "⠵"
 "beside"     = { cell = "⠆⠎", positions = ["wordsign"], shortform = true }       # bes（be）
 "between"    = { cell = "⠆⠞", positions = ["wordsign"], shortform = true }       # bet（be）
 "beyond"     = { cell = "⠆⠽", positions = ["wordsign"], shortform = true }       # bey（be）
-"blind"      = { cell = "⠃⠇", positions = ["wordsign"], shortform = true }       # bl
-"braille"    = { cell = "⠃⠗⠇", positions = ["wordsign"], shortform = true }      # brl
-"children"   = { cell = "⠡⠝", positions = ["wordsign"], shortform = true }       # chn（ch）
+"blind"      = { cell = "⠃⠇", positions = ["wordsign"], shortform = true, free = "initial", not_before_vowel = true }   # bl
+"braille"    = { cell = "⠃⠗⠇", positions = ["wordsign"], shortform = true, free = "anywhere" }                          # brl
+"children"   = { cell = "⠡⠝", positions = ["wordsign"], shortform = true, free = "anywhere", not_before_vowel = true }  # chn（ch）
 "conceive"   = { cell = "⠒⠉⠧", positions = ["wordsign"], shortform = true }      # concv（con）
 "conceiving" = { cell = "⠒⠉⠧⠛", positions = ["wordsign"], shortform = true }     # concvg（con）
 "could"      = { cell = "⠉⠙", positions = ["wordsign"], shortform = true }       # cd
@@ -285,18 +355,18 @@ z = "⠵"
 "declare"    = { cell = "⠙⠉⠇", positions = ["wordsign"], shortform = true }      # dcl
 "declaring"  = { cell = "⠙⠉⠇⠛", positions = ["wordsign"], shortform = true }     # dclg
 "either"     = { cell = "⠑⠊", positions = ["wordsign"], shortform = true }       # ei
-"first"      = { cell = "⠋⠌", positions = ["wordsign"], shortform = true }       # fst（st）
-"friend"     = { cell = "⠋⠗", positions = ["wordsign"], shortform = true }       # fr
-"good"       = { cell = "⠛⠙", positions = ["wordsign"], shortform = true }       # gd
-"great"      = { cell = "⠛⠗⠞", positions = ["wordsign"], shortform = true }      # grt
+"first"      = { cell = "⠋⠌", positions = ["wordsign"], shortform = true, free = "initial", not_before_vowel = true }   # fst（st）
+"friend"     = { cell = "⠋⠗", positions = ["wordsign"], shortform = true, free = "initial", not_before_vowel = true }   # fr
+"good"       = { cell = "⠛⠙", positions = ["wordsign"], shortform = true, free = "initial", not_before_vowel = true }   # gd
+"great"      = { cell = "⠛⠗⠞", positions = ["wordsign"], shortform = true, free = "anywhere" }                          # grt
 "herself"    = { cell = "⠓⠻⠋", positions = ["wordsign"], shortform = true }      # herf（er）
 "him"        = { cell = "⠓⠍", positions = ["wordsign"], shortform = true }       # hm
 "himself"    = { cell = "⠓⠍⠋", positions = ["wordsign"], shortform = true }      # hmf
 "immediate"  = { cell = "⠊⠍⠍", positions = ["wordsign"], shortform = true }      # imm
 "its"        = { cell = "⠭⠎", positions = ["wordsign"], shortform = true }       # xs
 "itself"     = { cell = "⠭⠋", positions = ["wordsign"], shortform = true }       # xf
-"letter"     = { cell = "⠇⠗", positions = ["wordsign"], shortform = true }       # lr
-"little"     = { cell = "⠇⠇", positions = ["wordsign"], shortform = true }       # ll
+"letter"     = { cell = "⠇⠗", positions = ["wordsign"], shortform = true, free = "initial", not_before_vowel = true }   # lr
+"little"     = { cell = "⠇⠇", positions = ["wordsign"], shortform = true, free = "initial", not_before_vowel = true }   # ll
 "much"       = { cell = "⠍⠡", positions = ["wordsign"], shortform = true }       # mch（ch）
 "must"       = { cell = "⠍⠌", positions = ["wordsign"], shortform = true }       # mst（st）
 "myself"     = { cell = "⠍⠽⠋", positions = ["wordsign"], shortform = true }      # myf
@@ -308,7 +378,7 @@ z = "⠵"
 "perceive"   = { cell = "⠏⠻⠉⠧", positions = ["wordsign"], shortform = true }     # percv（er）
 "perceiving" = { cell = "⠏⠻⠉⠧⠛", positions = ["wordsign"], shortform = true }    # percvg（er）
 "perhaps"    = { cell = "⠏⠻⠓", positions = ["wordsign"], shortform = true }      # perh（er）
-"quick"      = { cell = "⠟⠅", positions = ["wordsign"], shortform = true }       # qk
+"quick"      = { cell = "⠟⠅", positions = ["wordsign"], shortform = true, free = "initial", not_before_vowel = true }   # qk
 "receive"    = { cell = "⠗⠉⠧", positions = ["wordsign"], shortform = true }      # rcv
 "receiving"  = { cell = "⠗⠉⠧⠛", positions = ["wordsign"], shortform = true }     # rcvg
 "rejoice"    = { cell = "⠗⠚⠉", positions = ["wordsign"], shortform = true }      # rjc
@@ -410,5 +480,60 @@ words = [
   "unrejoiceful", "unrejoicefully", "unrejoicefulness", "unrejoicer", "unrejoicing", "unrejoicingly", "walkabout", "wellpaid",
   "westabout", "whereabout", "whereafter", "whereagain", "whereagainst", "whereinafter", "whereinagain", "womanfriend",
   "womenfriends", "would", "woulda", "wouldest", "wouldst", "your", "yourself", "yourselves",
-  
+  # 抽出漏れ（Appendix 1 の見出し語の下に並ぶ語）
+  "unsaid", "unrepaid", "aftermentioned", "beforementioned", "aftertheater", "yourselfer",
+  # アポストロフィを含むリスト項目（Appendix 1 はこの形でも語を載せている）。
+  # 語中アポストロフィの語は語全体で1つの並びとして扱う（§2.6.4）。
+  "could've", "couldn't", "couldn't've",
+  "must've", "mustn't", "mustn't've",
+  "should've", "shouldn't", "shouldn't've",
+  "would've", "wouldn't", "wouldn't've",
+  "'twould", "'twoulda", "'twould've", "'twouldn't", "'twouldn't've",
+  "children'swear",
+]
+
+# ============================================================
+# Divisions（縮約を跨がせない区切り）
+# 仕様: momors/crates/momors-braille/docs/ueb-grade2-usage.md §3
+# `|` は語の区切り（形態素境界と音節境界の両方）。UEB は「語の構成や音節の切れ目を跨ぐ
+# 縮約は使わない」と定める（§10.4.1 / §10.6 / §10.7 / §10.11.1）。切れ目は綴りからは
+# 決まらないので、知識をデータで足す。既定（リストに無い語）は縮約する＝リストを増やす
+# ほど正しくなり、正しさは壊れない。屈折語尾（s/es/ed/ing/ly）は自動で吸収する。
+# 出典の用例（Appendix 2 Word List）から採掘した。
+# ============================================================
+[divisions]
+boundaries = [
+  # 語ごとの例（区切りとして表せるもの。Appendix 2 の用例から）
+  "bei|n", "disin|genuous", "he|rf", "h|ereford",
+  "aero|foil", "aire|dale", "alt|imeter", "anemo|ne", "anti|type", "ant|hill",
+  "apart|heid", "arc|cosine", "as|thma", "a|fterhours", "baro|net", "big|horn",
+  "bio|feedback", "biscui|ty", "bloss|omed", "boo|ne", "bottle|neck", "canto|nese",
+  "captain|ess", "cart|horse", "cent|ime", "cent|imeter", "chem|otherapy", "chieftain|ess",
+  "chiff|orobe", "chis|holm", "chl|ordane", "citizen|ess", "clemence|au", "colo|nel",
+  "commence|d", "cou|pon", "cow|herd", "co|worker", "cunnyng|ham", "dacoi|ty",
+  "des|habille", "de|activate", "dis|hearten", "dis|honest", "dis|honor", "dis|honour",
+  "dog|house", "do|negal", "dumb|bell", "du|pont", "dw|orkin", "d|ayan",
+  "egg|head", "electroen|cephalogram", "en|amel", "erro|neous", "experience|d", "e|version",
+  "fat|head", "fence|d", "filo|fax", "flea|ridden", "flound|er", "fog|horn",
+  "fore|noon", "frui|ty", "gas|ometer", "ge|anticline", "grass|hopper", "great|heart",
+  "guine|vere", "heathen|ess", "hermio|ne", "hide|away", "hot|head", "hot|house",
+  "hypothe|ses", "h|ades", "h|adrian", "india|rubber", "indo|nesia", "influence|able",
+  "infra|red", "inso|far", "in|essential", "isothe|re", "is|ometric", "is|thmus",
+  "james|town", "kettle|drum", "kilo|watt", "knight|hood", "kro|ne", "lau|ndering",
+  "light|house", "lime|ade", "long|hand", "luck|now", "mast|head", "menh|aden",
+  "micro|film", "mis|handle", "mis|hap", "mis|hear", "mis|hit", "mis|timed",
+  "mono|wheel", "monte|verdi", "moo|ngod", "mort|imer", "moth|eaten", "mo|net",
+  "mult|imedia", "new|haven", "north|east", "no|ngaseous", "no|way", "orange|ade",
+  "orn|ament", "pains|taking", "parent|hood", "penf|riend", "perse|vere", "photo|flash",
+  "pho|netic", "pig|head", "pine|apple", "pio|neer", "pi|tyard", "pot|hole",
+  "pre|amble", "pre|amplifier", "pro|union", "rabbi|ty", "rans|omed", "raw|hide",
+  "retro|flex", "re|action", "re|adjust", "re|appoint", "re|assure", "re|named",
+  "re|verberate", "re|vere", "re|verify", "ribo|flavin", "roo|ney", "sau|nders",
+  "sent|iment", "se|verity", "shang|hai", "shang|haied", "short|hand", "silence|able",
+  "silence|d", "silence|r", "smithe|reens", "sont|heim", "sont|heimer", "south|end",
+  "spath|ose", "spence|r", "stalin|grad", "state|room", "store|room", "strong|hold",
+  "styro|foam", "sub|basement", "sweet|heart", "s|omersault", "s|omerset", "tea|room",
+  "the|resa", "the|seus", "th|oseby", "toe|nail", "two|fold", "un|amended",
+  "u|nderived", "u|nderogatory", "vice|regal", "vietn|amese", "whadd|aya", "where|as",
+  "wh|erever", "wise|acre", "youngs|town",
 ]

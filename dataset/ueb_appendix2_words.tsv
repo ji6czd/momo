@@ -1,0 +1,1035 @@
+# UEB Appendix 2「Word List」— Section 10（縮約）の用例語と、その点字・適用規則。
+# 出典: The Rules of Unified English Braille, Third Edition 2024 (ICEB)
+#   https://iceb.org/wp-content/uploads/2025/10/Rules-of-Unified-English-Braille-2024.pdf
+#   ICEB により Creative Commons ライセンスで公開されている。
+# 用途: 英語点訳エンジンの回帰コーパス（tests/ueb_appendix2.rs）。
+# 列: 原文 <TAB> 期待する点字 <TAB> 規則番号
+ab initio	⠰⠁⠃ ⠔⠊⠞⠊⠕	10.9.7
+abbreviate	⠁⠆⠗⠑⠧⠊⠁⠞⠑	10.11.5
+about-face	⠁⠃⠤⠋⠁⠉⠑	10.9.1
+ABOUTface!	⠠⠠⠁⠃⠳⠞⠠⠄⠋⠁⠉⠑⠖	10.9.4
+abouts	⠁⠃⠳⠞⠎	10.9.5
+aboveground	⠁⠃⠧⠛⠗⠨⠙	10.9.2
+accent	⠁⠒⠢⠞	10.11.5
+accept	⠁⠒⠑⠏⠞	10.6.5
+account	⠁⠒⠨⠞	10.6.5
+acetone	⠁⠉⠑⠞⠐⠕	10.7.6
+acknowledge	⠁⠉⠐⠅⠇⠫⠛⠑	10.7.1
+acreage	⠁⠉⠗⠂⠛⠑	10.6.5, 10.11.7
+acrosses	⠁⠉⠗⠕⠎⠎⠑⠎	10.9.2
+adhere	⠁⠙⠐⠓	10.7.5
+adhered	⠁⠙⠓⠻⠫	10.7.5, 10.10.7
+adherent	⠁⠙⠓⠻⠢⠞	10.10.7
+adherer	⠁⠙⠓⠻⠻	10.10.7
+advanced	⠁⠙⠧⠨⠑⠙	10.10.2, 10.10.7
+aerial	⠁⠻⠊⠁⠇	10.4.1, 10.11.9
+aerobic	⠁⠻⠕⠃⠊⠉	10.11.9
+aerofoil	⠁⠻⠕⠋⠕⠊⠇	10.11.5
+affect	⠁⠖⠑⠉⠞	10.11.5
+affirm	⠁⠖⠊⠗⠍	10.6.5
+afford	⠁⠋⠿⠙	10.3.1, 10.6.5, 10.10.3
+affrighted	⠁⠖⠐⠗⠫	10.7.1
+aftercare	⠁⠋⠉⠜⠑	10.9.2
+afterdinner	⠁⠋⠙⠔⠝⠻	10.9.5
+aftereffect	⠁⠋⠞⠻⠑⠖⠑⠉⠞	10.9.2
+AfterHours	⠠⠁⠋⠞⠻⠠⠓⠳⠗⠎	10.9.4
+afterimage	⠁⠋⠞⠻⠊⠍⠁⠛⠑	10.9.2
+againe	⠁⠛⠁⠔⠑	10.9.2
+aggressive	⠁⠶⠗⠑⠎⠎⠊⠧⠑	10.6.5, 10.11.5
+aghast	⠁⠣⠁⠌	10.4.1
+agreeable	⠁⠛⠗⠑⠂⠃⠇⠑	10.6.5, 10.11.7
+air-conditioned	⠁⠊⠗⠤⠒⠙⠊⠰⠝⠫	10.6.1
+Airedale	⠠⠁⠊⠗⠑⠙⠁⠇⠑	10.11.1
+Aix-en-Provence	⠠⠁⠊⠭⠤⠑⠝⠤⠠⠏⠗⠕⠧⠰⠑	10.6.9
+Al	⠠⠁⠇	10.9.7
+Al's	⠰⠠⠁⠇⠄⠎	10.9.7
+almosts	⠁⠇⠍⠕⠌⠎	10.9.5
+alt.	⠰⠁⠇⠞⠲	10.9.7
+altimeter	⠁⠇⠞⠊⠍⠑⠞⠻	10.7.8
+amount	⠁⠍⠨⠞	10.8.1
+ancestor	⠁⠝⠉⠑⠌⠕⠗	10.8.1
+andante	⠯⠁⠝⠞⠑	10.3.1
+Andy	⠠⠯⠽	10.3.1
+anemone	⠁⠝⠑⠍⠕⠝⠑	10.7.6
+anteater	⠁⠝⠞⠂⠞⠻	10.11.6
+anteroom	⠁⠝⠞⠻⠕⠕⠍	10.4.1
+anthill	⠁⠝⠞⠓⠊⠇⠇	10.4.1
+antinode	⠁⠝⠞⠔⠕⠙⠑	10.6.8
+antitype	⠁⠝⠞⠊⠞⠽⠏⠑	10.11.5
+apartheid	⠁⠐⠏⠓⠑⠊⠙	10.3.1, 10.7.1, 10.10.8
+appear	⠁⠏⠏⠑⠜	10.6.5
+aqueduct	⠁⠟⠥⠫⠥⠉⠞	10.11.5
+arboreal	⠜⠃⠕⠗⠂⠇	10.11.7
+arccosine	⠜⠉⠉⠕⠎⠔⠑	10.6.5
+areas	⠜⠂⠎	10.6.5
+areaway	⠜⠂⠺⠁⠽	10.11.8
+arena	⠜⠢⠁	10.6.8
+argh!	⠜⠣⠖	10.4.1
+aright	⠁⠐⠗	10.7.1, 10.10.2
+arise	⠜⠊⠎⠑	10.11.5
+arpeggio	⠜⠏⠑⠶⠊⠕	10.6.5
+asseverate	⠁⠎⠎⠐⠑⠁⠞⠑	10.7.4
+asthma	⠁⠎⠹⠍⠁	10.10.8
+Athens	⠠⠁⠮⠝⠎	10.3.1, 10.6.8
+atmosphere	⠁⠞⠍⠕⠎⠏⠐⠓	10.7.5
+atonement	⠁⠞⠐⠕⠰⠞	10.7.6
+baccalaureate	⠃⠁⠒⠁⠇⠁⠥⠗⠂⠞⠑	10.6.5
+bacchanal	⠃⠁⠉⠡⠁⠝⠁⠇	10.6.5, 10.10.5
+Baedeker	⠠⠃⠁⠫⠑⠅⠻	10.11.9
+baloney	⠃⠁⠇⠐⠕⠽	10.7.6
+baroness	⠃⠜⠕⠰⠎	10.7.6, 10.8.1, 10.11.7
+baronet	⠃⠜⠕⠝⠑⠞	10.7.6
+bastion	⠃⠁⠎⠰⠝	10.8.1, 10.10.2
+bathed	⠃⠁⠮⠙	10.3.1, 10.10.3
+beach	⠃⠂⠡	10.10.4
+bear	⠃⠑⠜	10.4.1, 10.6.5, 10.10.5
+beat	⠃⠂⠞	10.6.5
+beatitude	⠆⠁⠞⠊⠞⠥⠙⠑	10.6.1, 10.6.5, 10.10.4
+Beatrice	⠠⠆⠁⠞⠗⠊⠉⠑	10.6.1, 10.6.5
+Beatrix	⠠⠆⠁⠞⠗⠊⠭	10.10.4
+beautiful	⠃⠂⠥⠞⠊⠰⠇	10.10.4
+be'ave	⠃⠑⠄⠁⠧⠑	10.6.2
+beckon	⠃⠑⠉⠅⠕⠝	10.6.1
+become	⠆⠉⠕⠍⠑	10.6.1
+BEd	⠠⠃⠠⠫	10.6.4
+bed	⠃⠫	10.10.4
+bedazzle	⠆⠙⠁⠵⠵⠇⠑	10.11.3
+bedevil	⠆⠙⠑⠧⠊⠇	10.11.3
+bedraggled	⠆⠙⠗⠁⠶⠇⠫	10.10.4
+been	⠃⠑⠢	10.6.1, 10.6.8
+Beethoven	⠠⠃⠑⠑⠹⠕⠧⠢	10.10.9
+befriended	⠆⠋⠗⠊⠢⠙⠫	10.9.2
+begging	⠃⠑⠶⠬	10.6.5
+begin	⠆⠛⠔	10.6.8
+begonia	⠆⠛⠕⠝⠊⠁	10.6.1
+behemoth	⠆⠓⠑⠍⠕⠹	10.6.1
+bein'	⠆⠊⠝⠄	10.6.10
+be'ind	⠃⠑⠄⠔⠙	10.6.8
+being	⠆⠬	10.6.1
+Belg	⠠⠃⠑⠇⠛	10.6.4
+believer	⠆⠇⠊⠑⠧⠻	10.7.4
+Belinda	⠠⠆⠇⠔⠙⠁	10.6.2
+belligerent	⠃⠑⠇⠇⠊⠛⠻⠢⠞	10.6.1
+belowdecks	⠆⠇⠙⠑⠉⠅⠎	10.9.5
+Benedict	⠠⠃⠢⠫⠊⠉⠞	10.11.5
+beneficent	⠆⠝⠑⠋⠊⠉⠢⠞	10.6.1
+benefit	⠃⠢⠑⠋⠊⠞	10.6.1, 10.6.8, 10.10.4
+benevolence	⠆⠝⠑⠧⠕⠇⠰⠑	10.10.4
+benighted	⠆⠝⠊⠣⠞⠫	10.10.4, 10.11.3
+benign	⠆⠝⠊⠛⠝	10.6.8, 10.10.4
+benumb	⠆⠝⠥⠍⠃	10.11.3
+benzene	⠃⠢⠵⠢⠑	10.10.4
+berate	⠆⠗⠁⠞⠑	10.11.3
+berated	⠆⠗⠁⠞⠫	10.10.4
+bereave	⠆⠗⠂⠧⠑	10.11.3
+berth	⠃⠻⠹	10.10.4
+best	⠃⠑⠌	10.6.1
+bet	⠃⠑⠞	10.6.4
+beta	⠆⠞⠁	10.6.1
+bethel	⠃⠑⠮⠇	10.6.1
+better	⠃⠑⠞⠞⠻	10.6.1
+Betws-y-Coed	⠠⠃⠑⠞⠺⠎⠤⠰⠽⠤⠠⠉⠕⠫	10.11.9
+Bev	⠠⠃⠑⠧	10.6.4
+beverage	⠃⠐⠑⠁⠛⠑	10.7.4
+Bighorn	⠠⠃⠊⠛⠓⠕⠗⠝	10.11.1
+binary	⠃⠔⠜⠽	10.6.8
+binomial	⠃⠔⠕⠍⠊⠁⠇	10.6.8
+biofeedback	⠃⠊⠕⠋⠑⠫⠃⠁⠉⠅	10.3.1, 10.11.5
+biscuity	⠃⠊⠎⠉⠥⠊⠞⠽	10.8.3, 10.11.7
+Bisquick	⠠⠃⠊⠎⠟⠥⠊⠉⠅	10.9.3
+Blaenau Ffestiniog	⠠⠃⠇⠁⠢⠁⠥ ⠠⠋⠋⠑⠌⠔⠊⠕⠛	10.11.9
+Blakeney	⠠⠃⠇⠁⠅⠢⠑⠽	10.6.8
+Blvd	⠰⠠⠃⠇⠧⠙	10.9.8
+blessing	⠃⠨⠎⠬	10.8.1
+Blindcraft	⠠⠃⠇⠉⠗⠁⠋⠞	10.9.3
+blinded	⠃⠇⠔⠙⠫	10.9.2
+Blindheim	⠠⠃⠇⠓⠑⠊⠍	10.9.3
+blinding	⠃⠇⠔⠙⠬	10.9.2
+Blindoc	⠠⠃⠇⠔⠙⠕⠉	10.9.3
+blithesome	⠃⠇⠊⠮⠐⠎	10.7.7
+blossomed	⠃⠇⠕⠎⠎⠕⠍⠫	10.7.7
+blowhard	⠃⠇⠪⠓⠜⠙	10.11.1
+blunder	⠃⠇⠐⠥	10.7.9
+Bonaparte	⠠⠃⠕⠝⠁⠐⠏⠑	10.7.1
+Boone	⠠⠃⠕⠕⠝⠑	10.7.6
+borealis	⠃⠕⠗⠂⠇⠊⠎	10.6.5
+boredom	⠃⠕⠗⠫⠕⠍	10.4.1, 10.11.7
+bother	⠃⠕⠮⠗	10.3.1
+bothered	⠃⠕⠮⠗⠫	10.7.2, 10.7.5
+bottleneck	⠃⠕⠞⠞⠇⠑⠝⠑⠉⠅	10.11.1
+boyfriends	⠃⠕⠽⠋⠗⠎	10.9.5
+Braillette	⠠⠃⠗⠇⠞⠞⠑	10.9.3
+brailling	⠃⠗⠁⠊⠇⠇⠬	10.9.2
+Brigham	⠠⠃⠗⠊⠣⠁⠍	10.11.2, 10.11.7
+brighten	⠃⠐⠗⠢	10.7.1
+brougham	⠃⠗⠳⠣⠁⠍	10.4.1
+bubble	⠃⠥⠆⠇⠑	10.6.5
+bureau	⠃⠥⠗⠂⠥	10.6.5
+business	⠃⠥⠎⠊⠰⠎	10.6.8, 10.8.1
+buts	⠃⠥⠞⠎	10.1.1
+bygone	⠃⠽⠛⠐⠕	10.7.6
+Caen	⠠⠉⠁⠢	10.6.8
+Caernarvon	⠠⠉⠁⠻⠝⠜⠧⠕⠝	10.11.9
+calisthenics	⠉⠁⠇⠊⠎⠮⠝⠊⠉⠎	10.10.3
+CAN Network	⠠⠠⠉ ⠠⠝⠑⠞⠐⠺	10.1.3
+can-can	⠉⠤⠉	10.1.1
+cancel	⠉⠨⠑⠇	10.8.1
+can't	⠉⠄⠞	10.1.2
+Cantonese	⠠⠉⠁⠝⠞⠕⠝⠑⠎⠑	10.7.6
+captainess	⠉⠁⠏⠞⠁⠔⠑⠎⠎	10.10.2
+carefully	⠉⠜⠑⠰⠇⠇⠽	10.8.1
+Caribbean	⠠⠉⠜⠊⠆⠂⠝	10.6.5
+carthorse	⠉⠜⠞⠓⠕⠗⠎⠑	10.11.1
+casino	⠉⠁⠎⠔⠕	10.6.8
+caveat	⠉⠁⠧⠂⠞	10.6.5
+CD	⠰⠠⠠⠉⠙	10.9.7
+cement	⠉⠑⠰⠞	10.8.1
+centime	⠉⠢⠞⠊⠍⠑	10.7.8
+centimeter	⠉⠢⠞⠊⠍⠑⠞⠻	10.7.8, 10.11.5
+Chad	⠠⠡⠁⠙	10.7.3
+changeability	⠡⠁⠝⠛⠂⠃⠊⠇⠰⠽	10.11.7
+channel-less	⠡⠁⠝⠝⠑⠇⠤⠇⠑⠎⠎	10.8.1
+characterise	⠐⠡⠊⠎⠑	10.7.1
+characteristic	⠐⠡⠊⠌⠊⠉	10.7.1
+chargeable	⠡⠜⠛⠂⠃⠇⠑	10.11.7
+Chatham	⠠⠡⠁⠹⠁⠍	10.11.2, 10.11.7
+cheddar	⠡⠫⠙⠜	10.4.1
+cheerful	⠡⠑⠻⠰⠇	10.8.1
+chemotherapy	⠡⠑⠍⠕⠮⠗⠁⠏⠽	10.7.1, 10.10.9
+cherished	⠡⠻⠊⠩⠫	10.4.1
+chieftainess	⠡⠊⠑⠋⠞⠁⠔⠑⠎⠎	10.8.4, 10.11.7
+chifforobe	⠡⠊⠖⠕⠗⠕⠃⠑	10.3.1
+childish	⠡⠊⠇⠙⠊⠩	10.2.1
+childlike	⠡⠊⠇⠙⠇⠊⠅⠑	10.1.1
+child-like	⠡⠤⠇	10.1.1
+child-proof	⠡⠤⠏⠗⠕⠷	10.2.1
+child's	⠡⠄⠎	10.2.2
+china	⠡⠔⠁	10.6.8
+Ch'ing	⠠⠡⠄⠬	10.4.3
+Chisholm	⠠⠡⠊⠎⠓⠕⠇⠍	10.11.7
+chlordane	⠡⠇⠕⠗⠙⠁⠝⠑	10.7.1, 10.10.9
+chockfull	⠡⠕⠉⠅⠰⠇⠇	10.8.1
+Chopin	⠠⠡⠕⠏⠔	10.6.8
+Chou En-lai	⠠⠡⠳ ⠠⠑⠝⠤⠇⠁⠊	10.6.9
+chromosome	⠡⠗⠕⠍⠕⠐⠎	10.7.7
+circuity	⠉⠊⠗⠉⠥⠰⠽	10.8.1
+citizeness	⠉⠊⠞⠊⠵⠢⠑⠎⠎	10.6.8, 10.8.4, 10.11.7
+Clemenceau	⠠⠉⠇⠑⠍⠰⠑⠁⠥	10.10.6
+coffee	⠉⠷⠋⠑⠑	10.3.1, 10.6.5, 10.10.3
+cofounder	⠉⠕⠋⠨⠙⠻	10.11.5
+cohere	⠉⠕⠐⠓	10.7.5
+cohered	⠉⠕⠓⠻⠫	10.10.7
+coherence	⠉⠕⠓⠻⠰⠑	10.7.5, 10.10.2
+colonel	⠉⠕⠇⠕⠝⠑⠇	10.7.6
+comfort	⠉⠕⠍⠿⠞	10.3.1
+comin'	⠉⠕⠍⠔⠄	10.6.10
+commenced	⠉⠕⠍⠍⠰⠑⠙	10.10.6
+commencement	⠉⠕⠍⠍⠰⠑⠰⠞	10.8.1
+comment	⠉⠕⠍⠰⠞	10.8.1
+component	⠉⠕⠍⠏⠕⠝⠢⠞	10.10.7
+con	⠉⠕⠝	10.6.1
+Con.	⠠⠉⠕⠝⠲	10.6.4
+concept	⠒⠉⠑⠏⠞	10.6.1
+conch	⠉⠕⠝⠡	10.6.1
+cone	⠉⠐⠕	10.6.1, 10.7.6
+Conestoga	⠠⠒⠑⠌⠕⠛⠁	10.7.6
+coneys	⠉⠐⠕⠽⠎	10.6.1
+confusion	⠒⠋⠥⠨⠝	10.8.1
+congeal	⠒⠛⠂⠇	10.11.3
+congee	⠒⠛⠑⠑	10.10.4
+congenial	⠒⠛⠢⠊⠁⠇	10.10.4
+Congo	⠠⠒⠛⠕	10.10.2
+congratulate	⠒⠛⠗⠁⠞⠥⠇⠁⠞⠑	10.10.2
+congress	⠒⠛⠗⠑⠎⠎	10.6.1
+congruent	⠒⠛⠗⠥⠢⠞	10.11.3
+congruity	⠒⠛⠗⠥⠰⠽	10.10.2
+congruous	⠒⠛⠗⠥⠳⠎	10.8.1
+Conn.	⠠⠒⠝⠲	10.6.4
+cont	⠒⠞	10.6.4
+contact	⠒⠞⠁⠉⠞	10.6.2
+contradistinction	⠒⠞⠗⠁⠙⠊⠌⠔⠉⠰⠝	10.11.6
+control	⠒⠞⠗⠕⠇	10.6.1
+cough	⠉⠳⠣	10.4.1
+could've	⠉⠙⠄⠧⠑	10.9.2
+country	⠉⠨⠞⠗⠽	10.8.1
+county	⠉⠨⠞⠽	10.8.1
+coupon	⠉⠳⠏⠕⠝	10.4.1, 10.7.2
+cowherd	⠉⠪⠓⠻⠙	10.11.1
+coworker	⠉⠕⠐⠺⠻	10.7.1
+create	⠉⠗⠂⠞⠑	10.6.5
+creation	⠉⠗⠂⠰⠝	10.6.5, 10.8.1
+cringed	⠉⠗⠬⠫	10.4.1, 10.6.8
+crooner	⠉⠗⠕⠕⠝⠻	10.7.6
+Cunnyngham	⠠⠉⠥⠝⠝⠽⠝⠛⠓⠁⠍	10.11.2
+cushioned	⠉⠥⠩⠊⠕⠝⠫	10.7.6
+dacoity	⠙⠁⠉⠕⠊⠞⠽	10.8.3
+Daedalus	⠠⠙⠁⠫⠁⠇⠥⠎	10.11.9
+dancer	⠙⠨⠑⠗	10.8.1, 10.10.2
+Dayan	⠠⠙⠁⠽⠁⠝	10.7.1
+day-by-day	⠐⠙⠤⠃⠽⠤⠐⠙	10.7.1
+daytime	⠐⠙⠐⠞	10.7.8
+Dayton	⠠⠐⠙⠞⠕⠝	10.7.1
+deactivate	⠙⠑⠁⠉⠞⠊⠧⠁⠞⠑	10.6.7
+DeafBlind	⠠⠙⠂⠋⠠⠃⠇	10.9.4
+deafen	⠙⠂⠋⠢	10.6.8
+deduce	⠙⠫⠥⠉⠑	10.11.5
+deity	⠙⠑⠰⠽	10.8.1
+delineate	⠙⠑⠇⠔⠂⠞⠑	10.11.7
+demonetise	⠙⠑⠍⠐⠕⠞⠊⠎⠑	10.7.6
+denominate	⠙⠢⠕⠍⠔⠁⠞⠑	10.11.5
+denote	⠙⠢⠕⠞⠑	10.6.8, 10.11.5
+denouement	⠙⠢⠳⠑⠰⠞	10.11.5
+denounce	⠙⠢⠳⠝⠉⠑	10.11.5
+deny	⠙⠢⠽	10.6.8
+derail	⠙⠻⠁⠊⠇	10.11.5
+derailed	⠙⠻⠁⠊⠇⠫	10.4.1
+deregister	⠙⠻⠑⠛⠊⠌⠻	10.11.5
+derivable	⠙⠻⠊⠧⠁⠃⠇⠑	10.11.5
+derogatory	⠙⠻⠕⠛⠁⠞⠕⠗⠽	10.11.5
+deshabille	⠙⠑⠎⠓⠁⠃⠊⠇⠇⠑	10.4.1
+diaeresis	⠙⠊⠁⠻⠑⠎⠊⠎	10.11.9
+dingy	⠙⠬⠽	10.4.1
+dis'armony	⠙⠊⠎⠄⠜⠍⠕⠝⠽	10.6.2
+disaster	⠲⠁⠌⠻	10.6.1
+disc	⠙⠊⠎⠉	10.6.1
+disco	⠲⠉⠕	10.6.1
+disease	⠲⠂⠎⠑	10.6.5, 10.11.6
+dish	⠙⠊⠩	10.6.1, 10.10.4
+disharmony	⠲⠓⠜⠍⠕⠝⠽	10.11.3
+dishevel	⠙⠊⠩⠑⠧⠑⠇	10.6.1
+dishevelled	⠙⠊⠩⠑⠧⠑⠇⠇⠫	10.10.4, 10.10.8
+dishonest	⠲⠓⠐⠕⠌	10.6.1, 10.11.3
+dishonesty	⠲⠓⠐⠕⠌⠽	10.7.6, 10.10.4
+disingenuous	⠲⠔⠛⠢⠥⠳⠎	10.6.8, 10.11.6
+dislikes	⠲⠇⠊⠅⠑⠎	10.1.1, 10.6.1
+dispirited	⠙⠊⠸⠎⠫	10.6.1, 10.7.1, 10.10.2
+display	⠲⠏⠇⠁⠽	10.6.2
+dissect	⠲⠎⠑⠉⠞	10.6.1
+dist.	⠲⠞⠲	10.6.4
+distance	⠲⠞⠨⠑	10.6.1, 10.10.4
+distinct	⠲⠞⠔⠉⠞	10.10.2
+district	⠲⠞⠗⠊⠉⠞	10.6.2
+disturbed	⠲⠞⠥⠗⠃⠫	10.10.2
+disulphide	⠙⠊⠎⠥⠇⠏⠓⠊⠙⠑	10.6.1, 10.11.5
+do re mi	⠙ ⠗⠑ ⠍⠊	10.1.1
+Dobrljin	⠰⠰⠠⠙⠕⠃⠗⠇⠚⠊⠝	10.9.9
+doggone	⠙⠕⠶⠐⠕	10.6.5
+do-it-yourself	⠙⠤⠭⠤⠽⠗⠋	10.1.1
+done	⠙⠐⠕	10.7.6
+Donegal	⠠⠙⠕⠝⠑⠛⠁⠇	10.7.6
+double-entendre	⠙⠳⠃⠇⠑⠤⠢⠞⠢⠙⠗⠑	10.6.8
+dough	⠙⠳⠣	10.4.1
+drought	⠙⠗⠐⠳	10.7.1
+Du Plessis	⠠⠙⠥ ⠠⠏⠨⠎⠊⠎	10.8.1
+dukedom	⠙⠥⠅⠫⠕⠍	10.11.7
+dumbbell	⠙⠥⠍⠃⠃⠑⠇⠇	10.6.5, 10.11.1
+Dupont	⠠⠙⠥⠏⠕⠝⠞	10.7.2
+Dworkin	⠠⠙⠺⠕⠗⠅⠔	10.7.1
+d'you	⠙⠄⠽⠳	10.1.1
+'ead	⠄⠑⠁⠙	10.6.5
+east	⠑⠁⠌	10.6.5
+ebb	⠑⠃⠃	10.6.5
+ebbing	⠑⠆⠬	10.11.8
+ebb-tide	⠑⠃⠃⠤⠞⠊⠙⠑	10.6.5
+ed.	⠫⠲	10.4.1
+edacious	⠫⠁⠉⠊⠳⠎	10.11.5
+edict	⠫⠊⠉⠞	10.11.5
+Edith	⠠⠫⠊⠹	10.4.1
+edition	⠫⠊⠰⠝	10.11.5
+educe	⠫⠥⠉⠑	10.11.5
+e'en	⠑⠄⠢	10.6.8
+e'er	⠑⠄⠻	10.4.1
+effaceable	⠑⠖⠁⠉⠂⠃⠇⠑	10.11.5, 10.11.7
+effect	⠑⠖⠑⠉⠞	10.11.5
+effort	⠑⠋⠿⠞	10.10.3
+effulgent	⠑⠖⠥⠇⠛⠢⠞	10.10.7
+egghead	⠑⠶⠓⠂⠙	10.10.5, 10.11.1
+eggnog	⠑⠶⠝⠕⠛	10.6.5
+eggplant	⠑⠶⠏⠇⠁⠝⠞	10.11.8
+Einstein	⠠⠑⠔⠌⠑⠔	10.6.8
+electroencephalogram	⠑⠇⠑⠉⠞⠗⠕⠢⠉⠑⠏⠓⠁⠇⠕⠛⠗⠁⠍	10.8.1, 10.11.6
+elsewhere	⠑⠇⠎⠑⠐⠱	10.7.1, 10.7.5
+en route	⠑⠝ ⠗⠳⠞⠑	10.6.9
+enamel	⠢⠁⠍⠑⠇	10.7.5
+enceinte	⠢⠉⠑⠔⠞⠑	10.6.8
+encephalitis	⠢⠉⠑⠏⠓⠁⠇⠊⠞⠊⠎	10.8.1
+encyclopaedia	⠢⠉⠽⠉⠇⠕⠏⠁⠫⠊⠁	10.11.9
+engine	⠢⠛⠔⠑	10.6.8
+England	⠠⠢⠛⠇⠯	10.3.1
+Enid	⠠⠢⠊⠙	10.6.8
+enormous	⠢⠕⠗⠍⠳⠎	10.6.8, 10.11.5
+enough's	⠢⠄⠎	10.5.2
+enounce	⠢⠳⠝⠉⠑	10.11.5
+enumerate	⠢⠥⠍⠻⠁⠞⠑	10.11.5
+epicurean	⠑⠏⠊⠉⠥⠗⠂⠝	10.6.5
+equinox	⠑⠟⠥⠔⠕⠭	10.6.8
+erase	⠻⠁⠎⠑	10.4.1, 10.11.5
+Erie	⠠⠻⠊⠑	10.4.1
+erosion	⠻⠕⠨⠝	10.11.5
+erroneous	⠻⠗⠕⠝⠑⠳⠎	10.7.6
+error	⠻⠗⠕⠗	10.4.1
+Esther	⠠⠑⠎⠮⠗	10.3.1
+et al	⠑⠞ ⠰⠁⠇	10.9.7
+ethereal	⠑⠮⠗⠂⠇	10.7.2, 10.7.5
+European	⠠⠑⠥⠗⠕⠏⠂⠝	10.11.7
+Everest	⠠⠐⠑⠑⠌	10.7.4
+evermore	⠐⠑⠍⠕⠗⠑	10.1.1
+eversion	⠑⠧⠻⠨⠝	10.7.4
+everyday	⠐⠑⠽⠐⠙	10.1.1
+everyone	⠐⠑⠽⠐⠕	10.7.6
+everything	⠐⠑⠽⠹⠬	10.7.4
+experienced	⠑⠭⠏⠻⠊⠰⠑⠙	10.8.1, 10.10.6
+expressionless	⠑⠭⠏⠗⠑⠎⠨⠝⠨⠎	10.8.1
+extramental	⠑⠭⠞⠗⠁⠰⠞⠁⠇	10.8.1, 10.11.6
+faerie	⠋⠁⠻⠊⠑	10.11.9
+faint	⠋⠁⠔⠞	10.6.8
+fathead	⠋⠁⠞⠓⠂⠙	10.11.1
+father-in-law	⠐⠋⠤⠔⠤⠇⠁⠺	10.7.1
+fatherless	⠐⠋⠨⠎	10.7.1
+fear	⠋⠑⠜	10.10.5
+fearsome	⠋⠑⠜⠐⠎	10.7.7
+Feelgreat	⠠⠋⠑⠑⠇⠛⠗⠞	10.9.3
+feminine	⠋⠑⠍⠔⠔⠑	10.6.8
+fenced	⠋⠰⠑⠙	10.6.8
+fences	⠋⠰⠑⠎	10.8.1
+fever	⠋⠐⠑	10.7.4
+filename	⠋⠊⠇⠑⠐⠝	10.6.8, 10.7.5
+filofax	⠋⠊⠇⠕⠋⠁⠭	10.11.5
+finery	⠋⠔⠻⠽	10.11.7
+finesse	⠋⠊⠰⠎⠑	10.8.1
+finger	⠋⠬⠻	10.4.3
+fireworks	⠋⠊⠗⠑⠐⠺⠎	10.7.1
+FirstAmerica	⠠⠋⠊⠗⠌⠠⠁⠍⠻⠊⠉⠁	10.9.4
+first-begotten	⠋⠌⠤⠆⠛⠕⠞⠞⠢	10.6.1
+Firstchoice	⠠⠋⠌⠡⠕⠊⠉⠑	10.9.3
+flaccid	⠋⠇⠁⠒⠊⠙	10.6.5
+flearidden	⠋⠇⠂⠗⠊⠙⠙⠢	10.11.1
+flounder	⠋⠇⠨⠙⠻	10.7.9
+foghorn	⠋⠕⠛⠓⠕⠗⠝	10.4.1
+force	⠿⠉⠑	10.3.1
+forenoon	⠿⠑⠝⠕⠕⠝	10.6.8
+foreseeably	⠿⠑⠎⠑⠂⠃⠇⠽	10.11.7
+foreword	⠿⠑⠘⠺	10.7.1
+forgo	⠿⠛⠕	10.3.1
+forthwith	⠿⠹⠾	10.3.1
+Fortran	⠠⠿⠞⠗⠁⠝	10.3.1
+fought	⠋⠐⠳	10.7.1
+found	⠋⠨⠙	10.8.1
+fractional	⠋⠗⠁⠉⠰⠝⠁⠇	10.8.1
+Francene	⠠⠋⠗⠨⠑⠝⠑	10.6.8
+Frances	⠠⠋⠗⠨⠑⠎	10.8.1
+freedom	⠋⠗⠑⠫⠕⠍	10.4.1, 10.11.7
+Friday	⠠⠋⠗⠊⠐⠙	10.7.1
+Friendly Islands	⠠⠋⠗⠇⠽ ⠠⠊⠎⠇⠯⠎	10.9.2
+friend(s)	⠋⠗⠊⠢⠙⠐⠣⠎⠐⠜	10.9.5
+friendy	⠋⠗⠊⠢⠙⠽	10.9.2
+fro-ing	⠋⠗⠕⠤⠔⠛	10.4.3
+froward	⠋⠗⠪⠜⠙	10.11.5
+fruity	⠋⠗⠥⠊⠞⠽	10.8.3, 10.11.7
+furthest	⠋⠥⠗⠮⠌	10.3.1
+Galahad	⠠⠛⠁⠇⠁⠸⠓	10.7.3
+gasometer	⠛⠁⠎⠕⠍⠑⠞⠻	10.7.7, 10.11.5
+gathered	⠛⠁⠮⠗⠫	10.10.3
+Gaylord	⠠⠛⠁⠽⠐⠇	10.7.1
+G'day	⠠⠛⠄⠐⠙	10.7.1
+geanticline	⠛⠑⠁⠝⠞⠊⠉⠇⠔⠑	10.6.7
+genealogy	⠛⠢⠂⠇⠕⠛⠽	10.6.5, 10.11.7
+Geoffrey	⠠⠛⠑⠷⠋⠗⠑⠽	10.3.1
+Germany	⠠⠛⠻⠸⠍	10.7.1
+ginger	⠛⠬⠻	10.4.1, 10.4.3
+gingham	⠛⠬⠓⠁⠍	10.4.1, 10.10.8
+GO Train	⠠⠠⠛ ⠠⠞⠗⠁⠔	10.1.3
+go-between	⠛⠤⠆⠞	10.9.1
+godchildren	⠛⠕⠙⠡⠝	10.9.2
+GodChildren's	⠠⠛⠕⠙⠠⠡⠝⠄⠎	10.9.5
+godmother	⠛⠕⠙⠐⠍	10.7.1
+Goering	⠠⠛⠕⠻⠬	10.4.1, 10.11.9
+goin'	⠛⠕⠔⠄	10.6.8
+Goodacre	⠠⠛⠕⠕⠙⠁⠉⠗⠑	10.9.3
+goodafternoon	⠛⠙⠁⠋⠝	10.9.2
+good-bye	⠛⠙⠤⠃⠽⠑	10.9.1
+Goodena	⠠⠛⠕⠕⠙⠢⠁	10.9.3
+Goodge	⠠⠛⠙⠛⠑	10.9.3
+governess	⠛⠕⠧⠻⠰⠎	10.8.1, 10.11.7
+grandad	⠛⠗⠯⠁⠙	10.3.1
+grandchild	⠛⠗⠯⠡⠊⠇⠙	10.2.1
+grandfather	⠛⠗⠯⠐⠋	10.7.1
+grandmother	⠛⠗⠯⠐⠍	10.3.1
+grasshopper	⠛⠗⠁⠎⠎⠓⠕⠏⠏⠻	10.11.1
+Greatford	⠠⠛⠗⠞⠿⠙	10.9.3
+GreatGrandChild	⠘⠂⠠⠛⠗⠂⠞⠘⠄⠠⠛⠗⠯⠠⠡⠊⠇⠙	10.9.4
+greatgreatgrandchildren	⠛⠗⠞⠛⠗⠞⠛⠗⠯⠡⠝	10.9.3
+GREATgreatGrandChildren	⠠⠠⠛⠗⠞⠠⠄⠛⠗⠞⠠⠛⠗⠯⠠⠡⠝	10.9.4
+Greatorex	⠠⠛⠗⠞⠕⠗⠑⠭	10.9.3
+Grtsamada	⠰⠠⠛⠗⠞⠎⠁⠍⠁⠙⠁	10.9.8
+Gruenfeld	⠠⠛⠗⠥⠢⠋⠑⠇⠙	10.11.9
+Guinevere	⠠⠛⠥⠔⠑⠧⠻⠑	10.7.4
+Guinness	⠠⠛⠥⠔⠰⠎	10.8.1
+haddock	⠸⠓⠙⠕⠉⠅	10.7.3
+Haddon	⠠⠸⠓⠙⠕⠝	10.7.3
+had-enough	⠸⠓⠤⠢	10.5.2
+Hades	⠠⠓⠁⠙⠑⠎	10.7.3
+hadji	⠸⠓⠚⠊	10.7.3
+Hadley	⠠⠸⠓⠇⠑⠽	10.7.3
+hadn't	⠸⠓⠝⠄⠞	10.7.3
+Hadrian	⠠⠓⠁⠙⠗⠊⠁⠝	10.7.3
+handsome	⠓⠯⠐⠎	10.7.7
+handsomer	⠓⠯⠐⠎⠗	10.7.7
+Hanseatic	⠠⠓⠁⠝⠎⠂⠞⠊⠉	10.6.5
+happiness	⠓⠁⠏⠏⠊⠰⠎	10.10.2
+have-nots	⠓⠤⠝⠕⠞⠎	10.1.1
+haven't	⠓⠁⠧⠢⠄⠞	10.6.8
+haves	⠓⠁⠧⠑⠎	10.1.1
+head	⠓⠂⠙	10.6.5
+heart	⠓⠑⠜⠞	10.10.5
+heartsease	⠓⠑⠜⠞⠎⠂⠎⠑	10.11.6
+heatheness	⠓⠂⠮⠝⠑⠎⠎	10.8.4
+henna	⠓⠢⠝⠁	10.6.8
+hereabout	⠐⠓⠁⠃	10.7.5
+hereabouts	⠐⠓⠁⠃⠎	10.9.5
+heredity	⠓⠻⠫⠰⠽	10.7.5, 10.10.7
+Hereford (city)	⠠⠓⠻⠑⠿⠙ ⠐⠣⠉⠰⠽⠐⠜	10.7.5
+hereinbefore	⠐⠓⠔⠃⠑⠿⠑	10.9.2
+hereinbelow	⠐⠓⠔⠃⠑⠇⠪	10.9.2
+hereupon	⠐⠓⠘⠥	10.7.2
+herewith	⠐⠓⠾	10.7.5
+Herf gun	⠠⠓⠑⠗⠋ ⠛⠥⠝	10.9.6
+Hermione	⠠⠓⠻⠍⠊⠕⠝⠑	10.7.6
+hideaway	⠓⠊⠙⠑⠁⠺⠁⠽	10.6.5, 10.11.1
+hierarchy	⠓⠊⠻⠜⠡⠽	10.4.1
+Higham	⠠⠓⠊⠣⠁⠍	10.11.2, 10.11.7
+Himalayas	⠠⠓⠊⠍⠁⠇⠁⠽⠁⠎	10.9.2
+hims	⠓⠊⠍⠎	10.9.5
+his-and-hers	⠓⠊⠎⠤⠯⠤⠓⠻⠎	10.5.1
+hm	⠰⠓⠍	10.9.7
+hoity-toity	⠓⠕⠊⠞⠽⠤⠞⠕⠊⠞⠽	10.8.3
+honey	⠓⠐⠕⠽	10.7.6
+Houghton	⠠⠓⠐⠳⠕⠝	10.7.1
+hypotheses	⠓⠽⠏⠕⠮⠎⠑⠎	10.7.2, 10.10.8
+ideas	⠊⠙⠂⠎	10.6.5, 10.11.8
+imagery	⠊⠍⠁⠛⠻⠽	10.11.7
+impartial	⠊⠍⠐⠏⠊⠁⠇	10.7.1
+inbetween	⠔⠃⠑⠞⠺⠑⠢	10.9.2
+Inc.	⠠⠔⠉⠲	10.6.8
+incline	⠔⠉⠇⠔⠑	10.6.8
+incongruity	⠔⠉⠰⠛⠗⠥⠰⠽	10.11.6
+incongruous	⠔⠉⠰⠛⠗⠥⠳⠎	10.8.1, 10.11.6
+inconvenient	⠔⠉⠕⠝⠧⠢⠊⠢⠞	10.6.1
+in-depth	⠔⠤⠙⠑⠏⠹	10.5.3
+indiarubber	⠔⠙⠊⠁⠗⠥⠆⠻	10.11.1
+indistinct	⠔⠙⠊⠌⠔⠉⠞	10.6.1, 10.11.6
+indistinguishable	⠔⠙⠊⠌⠬⠥⠊⠩⠁⠃⠇⠑	10.11.6
+Indonesia	⠠⠔⠙⠕⠝⠑⠎⠊⠁	10.7.6
+inessential	⠔⠑⠎⠎⠢⠞⠊⠁⠇	10.8.1, 10.11.5
+influenceable	⠔⠋⠇⠥⠰⠑⠁⠃⠇⠑	10.8.1, 10.10.6
+infrared	⠔⠋⠗⠁⠗⠫	10.11.5
+Ingoldsby	⠠⠔⠛⠕⠇⠙⠎⠃⠽	10.4.3
+ingot	⠔⠛⠕⠞	10.4.3, 10.6.8
+ingredients	⠔⠛⠗⠫⠊⠢⠞⠎	10.4.3
+ingrown	⠔⠛⠗⠪⠝	10.4.3
+in's	⠔⠄⠎	10.6.8
+insofar	⠔⠎⠕⠋⠜	10.3.1, 10.11.1
+in't	⠔⠄⠞	10.5.3
+into	⠔⠞⠕	10.6.8
+irredentist	⠊⠗⠗⠫⠢⠞⠊⠌	10.11.5
+irreverence	⠊⠗⠗⠐⠑⠰⠑	10.7.4
+isometric	⠊⠎⠕⠍⠑⠞⠗⠊⠉	10.7.7
+isothere	⠊⠎⠕⠮⠗⠑	10.7.2
+isthmus	⠊⠎⠹⠍⠥⠎	10.10.8
+IT (Information Technology)	⠠⠠⠊⠞ ⠐⠣⠠⠔⠿⠍⠁⠰⠝ ⠠⠞⠑⠡⠝⠕⠇⠕⠛⠽⠐⠜	10.1.3
+it'd	⠭⠄⠙	10.1.2
+it'll	⠭⠄⠇⠇	10.1.2
+its	⠭⠎	10.1.2
+it's	⠭⠄⠎	10.1.2
+Jamestown	⠠⠚⠁⠍⠑⠎⠞⠪⠝	10.11.1
+Jones	⠠⠚⠐⠕⠎	10.7.6
+Judaean	⠠⠚⠥⠙⠁⠂⠝	10.6.5, 10.11.9
+just's	⠚⠄⠎	10.1.2
+kettledrum	⠅⠑⠞⠞⠇⠑⠙⠗⠥⠍	10.11.1
+kilowatt	⠅⠊⠇⠕⠺⠁⠞⠞	10.4.1, 10.11.5
+knighthood	⠅⠝⠊⠣⠞⠓⠕⠕⠙	10.11.2
+knowing	⠐⠅⠬	10.7.1
+Knowles	⠠⠐⠅⠇⠑⠎	10.7.1
+krone	⠅⠗⠕⠝⠑	10.7.6
+lament	⠇⠁⠰⠞	10.6.8
+laugh	⠇⠁⠥⠣	10.4.1
+laundering	⠇⠁⠥⠝⠙⠻⠬	10.7.9
+laureate	⠇⠁⠥⠗⠂⠞⠑	10.11.7
+Leander	⠠⠇⠑⠯⠻	10.6.5, 10.10.3
+lessee	⠇⠑⠎⠎⠑⠑	10.8.1
+Letterewe	⠠⠇⠑⠞⠞⠻⠑⠺⠑	10.9.3
+Letterkenny	⠠⠇⠗⠅⠢⠝⠽	10.9.3
+Letterman	⠠⠇⠗⠍⠁⠝	10.9.2
+LetterMen	⠠⠇⠗⠠⠍⠢	10.9.2
+LetterWriter	⠠⠇⠗⠠⠺⠗⠊⠞⠻	10.9.4
+likeable	⠇⠊⠅⠂⠃⠇⠑	10.11.7
+likeness	⠇⠊⠅⠑⠰⠎	10.1.1
+likes	⠇⠊⠅⠑⠎	10.1.1
+Liliaceae	⠠⠇⠊⠇⠊⠁⠉⠂⠑	10.11.9
+limeade	⠇⠊⠍⠑⠁⠙⠑	10.6.5
+lineage	⠇⠔⠂⠛⠑	10.6.5, 10.11.7
+lineal	⠇⠔⠂⠇	10.11.7
+linen	⠇⠔⠢	10.6.10
+lingerie	⠇⠬⠻⠊⠑	10.4.1
+Linkletter	⠠⠇⠔⠅⠇⠑⠞⠞⠻	10.9.3
+lioness	⠇⠊⠕⠰⠎	10.8.1, 10.11.7
+listen-in	⠇⠊⠌⠢⠤⠔	10.5.3
+Littlearm	⠠⠇⠊⠞⠞⠇⠑⠜⠍	10.9.3
+Littleport	⠠⠇⠇⠏⠕⠗⠞	10.9.3
+Little Rock	⠠⠇⠇ ⠠⠗⠕⠉⠅	10.9.1
+Little-Smythe	⠠⠇⠇⠤⠠⠎⠍⠽⠮	10.9.1
+llama	⠇⠇⠁⠍⠁	10.9.8
+Llanelli	⠠⠇⠇⠁⠝⠑⠇⠇⠊	10.9.8
+LLC	⠰⠠⠠⠇⠇⠉	10.9.8
+lofty	⠇⠷⠞⠽	10.3.1
+lonesome	⠇⠐⠕⠐⠎	10.7.6
+lonesomest	⠇⠐⠕⠐⠎⠌	10.7.7
+longevity	⠇⠰⠛⠑⠧⠰⠽	10.8.1
+longhand	⠇⠰⠛⠓⠯	10.11.1
+lordosis	⠐⠇⠕⠎⠊⠎	10.7.1
+lordship	⠐⠇⠩⠊⠏	10.7.1
+lowdown	⠇⠪⠙⠪⠝	10.4.1
+Lucknow	⠠⠇⠥⠉⠅⠝⠪	10.7.1
+maenad	⠍⠁⠢⠁⠙	10.6.8, 10.11.9
+mah-jongg	⠍⠁⠓⠤⠚⠰⠛⠛	10.6.5
+Makegood	⠠⠍⠁⠅⠑⠛⠕⠕⠙	10.9.3
+malediction	⠍⠁⠇⠫⠊⠉⠰⠝	10.4.1, 10.11.5
+man-eater	⠍⠁⠝⠤⠑⠁⠞⠻	10.6.5
+many-sided	⠸⠍⠤⠎⠊⠙⠫	10.7.1
+Marcillat-en-Combraille	⠠⠍⠜⠉⠊⠇⠇⠁⠞⠤⠑⠝⠤⠠⠉⠕⠍⠃⠗⠇	10.9.3
+maritime	⠍⠜⠊⠐⠞	10.7.8
+Matthew	⠠⠍⠁⠞⠮⠺	10.3.1
+McConnell	⠠⠍⠉⠠⠉⠕⠝⠝⠑⠇⠇	10.6.2
+McKeever	⠠⠍⠉⠠⠅⠑⠑⠧⠻	10.7.4
+meander	⠍⠑⠯⠻	10.3.1, 10.10.2
+mecca	⠍⠑⠒⠁	10.6.5
+memento	⠍⠑⠰⠞⠕	10.8.1
+menhaden	⠍⠢⠓⠁⠙⠢	10.7.3
+meningitis	⠍⠢⠬⠊⠞⠊⠎	10.4.1
+merchandise	⠍⠻⠡⠯⠊⠎⠑	10.3.1
+merchandising	⠍⠻⠡⠯⠊⠎⠬	10.4.1
+meringue	⠍⠻⠬⠥⠑	10.4.1
+microfilm	⠍⠊⠉⠗⠕⠋⠊⠇⠍	10.3.1, 10.11.5
+midwifery	⠍⠊⠙⠺⠊⠋⠻⠽	10.11.7
+mileage	⠍⠊⠇⠂⠛⠑	10.11.7
+millwright	⠍⠊⠇⠇⠺⠐⠗	10.7.1
+Minneapolis	⠠⠍⠔⠝⠂⠏⠕⠇⠊⠎	10.6.5
+misconceived	⠍⠊⠎⠉⠕⠝⠉⠑⠊⠧⠫	10.9.2
+mishandle	⠍⠊⠎⠓⠯⠇⠑	10.11.2
+mishap	⠍⠊⠎⠓⠁⠏	10.11.2
+mishear	⠍⠊⠎⠓⠑⠜	10.11.2
+mistake	⠍⠊⠌⠁⠅⠑	10.4.1, 10.11.5
+mistimed	⠍⠊⠎⠐⠞⠙	10.7.8
+mistrust	⠍⠊⠌⠗⠥⠌	10.11.5
+misunderstand	⠍⠊⠎⠐⠥⠌⠯	10.7.9
+misworded	⠍⠊⠎⠘⠺⠫	10.7.1
+m'lord	⠍⠄⠐⠇	10.7.1
+mod cons	⠍⠕⠙ ⠒⠎	10.6.4
+Monet	⠠⠍⠕⠝⠑⠞	10.7.6
+mongoose	⠍⠰⠛⠕⠕⠎⠑	10.8.1
+monowheel	⠍⠕⠝⠕⠱⠑⠑⠇	10.4.1
+Montenegro	⠠⠍⠕⠝⠞⠢⠑⠛⠗⠕	10.6.8
+Monteverdi	⠠⠍⠕⠝⠞⠑⠧⠻⠙⠊	10.7.4
+Montreal	⠠⠍⠕⠝⠞⠗⠂⠇	10.6.5
+moongod	⠍⠕⠕⠝⠛⠕⠙	10.8.1
+more'n	⠍⠕⠗⠑⠄⠝	10.1.2
+moreover	⠍⠕⠗⠑⠕⠧⠻	10.1.1
+more's	⠍⠄⠎	10.1.2
+Mortimer	⠠⠍⠕⠗⠞⠊⠍⠻	10.7.8
+motheaten	⠍⠕⠹⠂⠞⠢	10.6.5, 10.11.6
+mother-in-law	⠐⠍⠤⠔⠤⠇⠁⠺	10.5.3
+motherly	⠐⠍⠇⠽	10.7.1
+mother-of-pearl	⠐⠍⠤⠷⠤⠏⠑⠜⠇	10.7.1
+mountain	⠍⠨⠞⠁⠔	10.8.1
+mst file	⠍⠎⠞ ⠋⠊⠇⠑	10.9.6
+Much Hadham	⠠⠍⠡ ⠠⠸⠓⠓⠁⠍	10.9.1
+muffin	⠍⠥⠖⠔	10.6.5
+Mulroney	⠠⠍⠥⠇⠗⠐⠕⠽	10.7.6
+multimedia	⠍⠥⠇⠞⠊⠍⠫⠊⠁	10.7.8
+multinomial	⠍⠥⠇⠞⠔⠕⠍⠊⠁⠇	10.11.5
+mustn't	⠍⠌⠝⠄⠞	10.9.5
+nameable	⠐⠝⠁⠃⠇⠑	10.7.5
+named	⠐⠝⠙	10.10.2
+Neapolitan	⠠⠝⠂⠏⠕⠇⠊⠞⠁⠝	10.6.5
+nearly	⠝⠑⠜⠇⠽	10.10.5
+nevertheless	⠝⠐⠑⠮⠨⠎	10.3.1, 10.7.4
+Newhaven	⠠⠝⠑⠺⠓⠁⠧⠢	10.11.2
+newsletter	⠝⠑⠺⠎⠇⠗	10.9.2
+nightingale	⠝⠊⠣⠞⠬⠁⠇⠑	10.4.1
+noblesse	⠝⠕⠃⠨⠎⠑	10.8.1
+nongaseous	⠝⠕⠝⠛⠁⠎⠑⠳⠎	10.8.1
+northeast	⠝⠕⠗⠹⠂⠌	10.3.1, 10.6.5, 10.11.1, 10.11.6
+noticeable	⠝⠕⠞⠊⠉⠂⠃⠇⠑	10.11.7
+noway	⠝⠕⠺⠁⠽	10.4.1
+nth	⠝⠹	10.4.1
+nuclear	⠝⠥⠉⠇⠑⠜	10.10.5
+occupy	⠕⠒⠥⠏⠽	10.6.5
+oceanic	⠕⠉⠂⠝⠊⠉	10.6.5
+O'Connor	⠠⠕⠄⠠⠉⠕⠝⠝⠕⠗	10.6.2
+oedema	⠕⠫⠑⠍⠁	10.4.1
+Oedipus	⠠⠕⠫⠊⠏⠥⠎	10.11.9
+offer	⠷⠋⠻	10.10.3
+office	⠷⠋⠊⠉⠑	10.10.3
+often	⠷⠞⠢	10.3.1
+oleaginous	⠕⠇⠂⠛⠔⠳⠎	10.6.5, 10.11.7
+oneness	⠐⠕⠰⠎	10.7.6, 10.10.2
+one-ness	⠐⠕⠤⠝⠑⠎⠎	10.8.1
+onerous	⠕⠝⠻⠳⠎	10.7.6, 10.10.7
+one-sided	⠐⠕⠤⠎⠊⠙⠫	10.7.6
+opponent	⠕⠏⠏⠕⠝⠢⠞	10.10.7
+orangeade	⠕⠗⠁⠝⠛⠑⠁⠙⠑	10.11.7
+orangery	⠕⠗⠁⠝⠛⠻⠽	10.11.7
+orgeat	⠕⠗⠛⠂⠞	10.6.5
+ornament	⠕⠗⠝⠁⠰⠞	10.7.5
+orthopaedic	⠕⠗⠹⠕⠏⠁⠫⠊⠉	10.11.9
+other	⠕⠮⠗	10.10.3
+oughtn't	⠐⠳⠝⠄⠞	10.7.1
+'ound	⠄⠳⠝⠙	10.4.1, 10.8.1
+outcome	⠳⠞⠉⠕⠍⠑	10.2.1
+out-of-the-way	⠳⠤⠷⠤⠮⠤⠺⠁⠽	10.2.1, 10.3.1
+ow	⠪	10.4.1
+ozbrl	⠰⠰⠕⠵⠃⠗⠇	10.9.9
+paean	⠏⠁⠂⠝	10.6.5, 10.11.9
+painstaking	⠏⠁⠔⠎⠞⠁⠅⠬	10.4.1, 10.11.1
+pancreas	⠏⠁⠝⠉⠗⠂⠎	10.6.5
+pandemic	⠏⠯⠑⠍⠊⠉	10.3.1
+pandemonium	⠏⠯⠑⠍⠕⠝⠊⠥⠍	10.11.5
+pandowdy	⠏⠯⠪⠙⠽	10.3.1
+par	⠏⠜	10.4.1
+parenthood	⠏⠜⠢⠞⠓⠕⠕⠙	10.4.1
+partake	⠐⠏⠁⠅⠑	10.7.1
+parterre	⠐⠏⠻⠗⠑	10.7.1
+Parthenon	⠠⠏⠜⠮⠝⠕⠝	10.3.1, 10.7.1, 10.10.3
+Parthian	⠠⠏⠜⠹⠊⠁⠝	10.10.7
+part-time	⠐⠏⠤⠐⠞	10.7.1
+party	⠐⠏⠽	10.7.1
+passe-partout	⠏⠁⠎⠎⠑⠤⠐⠏⠳⠞	10.7.1
+pastime	⠏⠁⠎⠐⠞	10.7.8
+peaceable	⠏⠂⠉⠂⠃⠇⠑	10.6.5, 10.11.7
+peanut	⠏⠂⠝⠥⠞	10.6.5
+PenFriend	⠠⠏⠢⠠⠋⠗⠊⠢⠙	10.9.4
+peoples	⠏⠑⠕⠏⠇⠑⠎	10.1.1
+people's	⠏⠄⠎	10.1.2
+perinatal	⠏⠻⠔⠁⠞⠁⠇	10.11.5
+permeable	⠏⠻⠍⠂⠃⠇⠑	10.11.7
+permeate	⠏⠻⠍⠂⠞⠑	10.11.7
+persevere	⠏⠻⠎⠑⠧⠻⠑	10.7.4
+persuasion	⠏⠻⠎⠥⠁⠨⠝	10.8.1
+Pforzheimer	⠠⠏⠿⠵⠓⠑⠊⠍⠻	10.3.1
+phoenix	⠏⠓⠕⠢⠊⠭	10.6.8, 10.11.9
+phone	⠏⠓⠐⠕	10.7.6
+phonetic	⠏⠓⠕⠝⠑⠞⠊⠉	10.7.6
+photoflash	⠏⠓⠕⠞⠕⠋⠇⠁⠩	10.11.1
+pianoforte	⠏⠊⠁⠝⠕⠿⠞⠑	10.3.1
+pineapple	⠏⠔⠑⠁⠏⠏⠇⠑	10.6.5, 10.11.1
+pioneer	⠏⠊⠕⠝⠑⠻	10.7.6
+pity	⠏⠰⠽	10.8.1
+pityard	⠏⠊⠞⠽⠜⠙	10.8.1
+poisoned	⠏⠕⠊⠎⠕⠝⠫	10.7.6, 10.10.7
+pongee	⠏⠰⠛⠑⠑	10.8.1
+popedom	⠏⠕⠏⠫⠕⠍	10.11.7
+Port Said	⠠⠏⠕⠗⠞ ⠠⠎⠙	10.9.1
+Portlittle	⠠⠏⠕⠗⠞⠇⠊⠞⠞⠇⠑	10.9.3
+posthumous	⠏⠕⠌⠓⠥⠍⠳⠎	10.10.8
+preamble	⠏⠗⠑⠁⠍⠃⠇⠑	10.6.7
+preamplifier	⠏⠗⠑⠁⠍⠏⠇⠊⠋⠊⠻	10.11.4
+predate	⠏⠗⠫⠁⠞⠑	10.11.5
+predated	⠏⠗⠫⠁⠞⠫	10.4.1
+predecease	⠏⠗⠫⠑⠉⠂⠎⠑	10.11.5
+predecessor	⠏⠗⠫⠑⠉⠑⠎⠎⠕⠗	10.11.5
+predestine	⠏⠗⠫⠑⠌⠔⠑	10.11.5
+predicament	⠏⠗⠫⠊⠉⠁⠰⠞	10.11.5
+prediction	⠏⠗⠫⠊⠉⠰⠝	10.11.5
+predominate	⠏⠗⠫⠕⠍⠔⠁⠞⠑	10.11.5
+prenatal	⠏⠗⠢⠁⠞⠁⠇	10.6.8
+prerequisite	⠏⠗⠻⠑⠟⠥⠊⠎⠊⠞⠑	10.11.5
+prerogative	⠏⠗⠻⠕⠛⠁⠞⠊⠧⠑	10.11.5
+prisoner	⠏⠗⠊⠎⠕⠝⠻	10.10.7
+profane	⠏⠗⠷⠁⠝⠑	10.3.1
+profanity	⠏⠗⠷⠁⠝⠰⠽	10.11.5
+professor	⠏⠗⠷⠑⠎⠎⠕⠗	10.11.5
+proffer	⠏⠗⠷⠋⠻	10.10.3
+profile	⠏⠗⠷⠊⠇⠑	10.3.1, 10.11.5
+profoundly	⠏⠗⠷⠨⠙⠇⠽	10.11.5
+profusion	⠏⠗⠷⠥⠨⠝	10.11.5
+prong	⠏⠗⠰⠛	10.8.1
+proofread	⠏⠗⠕⠷⠗⠂⠙	10.3.1
+prounion	⠏⠗⠕⠥⠝⠊⠕⠝	10.11.5
+psst	⠏⠎⠌	10.4.1
+queen	⠟⠥⠑⠢	10.6.8
+questionnaire	⠐⠟⠝⠁⠊⠗⠑	10.7.1
+Quickbraille	⠠⠟⠥⠊⠉⠅⠨⠂⠃⠗⠁⠊⠇⠇⠑	10.9.3
+quicker	⠟⠅⠻	10.9.2
+quickly	⠟⠅⠇⠽	10.9.2
+Quicksburg	⠠⠟⠅⠎⠃⠥⠗⠛	10.9.3
+QuickTime	⠠⠟⠅⠠⠐⠞	10.9.4
+quick-witted	⠟⠅⠤⠺⠊⠞⠞⠫	10.9.1
+rabbi	⠗⠁⠆⠊	10.6.5
+rabbity	⠗⠁⠆⠊⠞⠽	10.8.3, 10.11.7
+ransomed	⠗⠁⠝⠎⠕⠍⠫	10.7.7
+rateable	⠗⠁⠞⠂⠃⠇⠑	10.11.7
+rationally	⠗⠁⠰⠝⠁⠇⠇⠽	10.8.1
+rawhide	⠗⠁⠺⠓⠊⠙⠑	10.4.1, 10.11.1
+reaction	⠗⠑⠁⠉⠰⠝	10.6.7
+readjust	⠗⠑⠁⠙⠚⠥⠌	10.11.4
+really	⠗⠂⠇⠇⠽	10.6.5
+reappoint	⠗⠑⠁⠏⠏⠕⠔⠞	10.11.4
+reassure	⠗⠑⠁⠎⠎⠥⠗⠑	10.11.4
+rebrailled	⠗⠑⠃⠗⠇⠙	10.9.2
+re-connect	⠗⠑⠤⠒⠝⠑⠉⠞	10.6.1
+redact	⠗⠫⠁⠉⠞	10.11.5
+rededicate	⠗⠫⠫⠊⠉⠁⠞⠑	10.11.5
+redeemable	⠗⠫⠑⠑⠍⠁⠃⠇⠑	10.11.5
+redistribute	⠗⠫⠊⠌⠗⠊⠃⠥⠞⠑	10.4.1
+redistribution	⠗⠫⠊⠌⠗⠊⠃⠥⠰⠝	10.11.6
+redouble	⠗⠫⠳⠃⠇⠑	10.11.5
+renamed	⠗⠑⠐⠝⠙	10.7.5
+renege	⠗⠢⠑⠛⠑	10.11.5
+renegotiate	⠗⠢⠑⠛⠕⠞⠊⠁⠞⠑	10.11.5
+renew	⠗⠢⠑⠺	10.6.8
+renewable	⠗⠢⠑⠺⠁⠃⠇⠑	10.11.5
+renumber	⠗⠢⠥⠍⠃⠻	10.11.5
+repaid	⠗⠑⠏⠙	10.9.2
+reread	⠗⠻⠂⠙	10.11.5
+reroute	⠗⠻⠳⠞⠑	10.4.1
+retroflex	⠗⠑⠞⠗⠕⠋⠇⠑⠭	10.11.5
+reverberate	⠗⠑⠧⠻⠃⠻⠁⠞⠑	10.7.4
+revere	⠗⠑⠧⠻⠑	10.7.4
+reverend	⠗⠐⠑⠢⠙	10.7.4
+reverify	⠗⠑⠧⠻⠊⠋⠽	10.7.4
+riboflavin	⠗⠊⠃⠕⠋⠇⠁⠧⠔	10.11.5
+riflery	⠗⠊⠋⠇⠻⠽	10.4.1
+righteous	⠐⠗⠑⠳⠎	10.7.1
+right-handed	⠐⠗⠤⠓⠯⠫	10.7.1
+robb'd	⠗⠕⠃⠃⠄⠙	10.6.5
+roof	⠗⠕⠷	10.3.1
+Rooney	⠠⠗⠕⠕⠝⠑⠽	10.7.6
+rotation	⠗⠕⠞⠁⠰⠝	10.8.1
+Rountree	⠠⠗⠨⠞⠗⠑⠑	10.8.1
+saccharine	⠎⠁⠉⠡⠜⠔⠑	10.6.5, 10.10.5
+Sanday	⠠⠎⠯⠁⠽	10.7.1
+Saunders	⠠⠎⠁⠥⠝⠙⠻⠎	10.7.9
+savagery	⠎⠁⠧⠁⠛⠻⠽	10.11.7
+Schoenberg	⠠⠎⠡⠕⠢⠃⠻⠛	10.11.9
+scone	⠎⠉⠐⠕	10.7.6
+scythe	⠎⠉⠽⠮	10.3.1
+sea-green	⠎⠑⠁⠤⠛⠗⠑⠢	10.6.5
+seaman	⠎⠂⠍⠁⠝	10.11.8
+Seamus	⠠⠎⠂⠍⠥⠎	10.6.5
+Sean	⠠⠎⠂⠝	10.6.5
+seashore	⠎⠂⠩⠕⠗⠑	10.6.5, 10.11.8
+Seattle	⠠⠎⠂⠞⠞⠇⠑	10.6.5
+sedate	⠎⠫⠁⠞⠑	10.11.5
+self-discipline	⠎⠑⠇⠋⠤⠲⠉⠊⠏⠇⠔⠑	10.6.1
+self-induced	⠎⠑⠇⠋⠤⠔⠙⠥⠉⠫	10.6.8
+sentiment	⠎⠢⠞⠊⠰⠞	10.7.8
+several	⠎⠐⠑⠁⠇	10.7.4
+severity	⠎⠑⠧⠻⠰⠽	10.7.4
+Severn	⠠⠎⠐⠑⠝	10.7.4
+sh	⠎⠓	10.4.2
+shadow	⠩⠁⠙⠪	10.7.3, 10.10.7
+shallot	⠩⠁⠇⠇⠕⠞	10.2.1
+shallow	⠩⠁⠇⠇⠪	10.2.1
+shanghai	⠩⠁⠝⠛⠓⠁⠊	10.4.1
+shanghaied	⠩⠁⠝⠛⠓⠁⠊⠫	10.11.2
+sheer	⠩⠑⠻	10.4.1
+Sheffield	⠠⠩⠑⠖⠊⠑⠇⠙	10.6.5
+sheriffs	⠩⠻⠊⠖⠎	10.6.5
+sheriff's	⠩⠻⠊⠋⠋⠄⠎	10.6.5
+shhh	⠩⠓⠓	10.4.2
+shilly-shally	⠩⠊⠇⠇⠽⠤⠩⠁⠇⠇⠽	10.2.1
+shut-ins	⠩⠥⠞⠤⠔⠎	10.6.8
+silenceable	⠎⠊⠇⠰⠑⠁⠃⠇⠑	10.10.6
+silenced	⠎⠊⠇⠰⠑⠙	10.8.1
+silencer	⠎⠊⠇⠰⠑⠗	10.10.6
+sinfulness	⠎⠔⠰⠇⠰⠎	10.8.1
+singe	⠎⠬⠑	10.4.3
+singeing	⠎⠬⠑⠬	10.4.3
+Singh	⠠⠎⠬⠓	10.4.1
+slithered	⠎⠇⠊⠮⠗⠫	10.10.3
+smithereens	⠎⠍⠊⠮⠗⠑⠢⠎	10.7.2
+SmithInge	⠠⠎⠍⠊⠹⠠⠬⠑	10.4.3
+Smith-Inge	⠠⠎⠍⠊⠹⠤⠠⠔⠛⠑	10.4.3
+smother	⠎⠐⠍	10.7.1
+snuff	⠎⠝⠥⠋⠋	10.6.5
+so la ti	⠎ ⠇⠁ ⠞⠊	10.1.1
+so-and-so	⠎⠤⠯⠤⠎	10.1.1
+sofa	⠎⠷⠁	10.3.1
+somebody	⠐⠎⠃⠕⠙⠽	10.7.7
+somersault	⠎⠕⠍⠻⠎⠁⠥⠇⠞	10.7.7
+Somerset	⠠⠎⠕⠍⠻⠎⠑⠞	10.7.7
+Somesch River	⠠⠎⠕⠍⠑⠎⠉⠓ ⠠⠗⠊⠧⠻	10.9.6
+somesuch	⠐⠎⠎⠡	10.7.7
+sometimes	⠐⠎⠐⠞⠎	10.7.8
+somewhere	⠐⠎⠐⠱	10.7.1, 10.7.7
+Sontheim	⠠⠎⠕⠝⠞⠓⠑⠊⠍	10.11.2
+Sontheimer	⠠⠎⠕⠝⠞⠓⠑⠊⠍⠻	10.3.1
+sooner	⠎⠕⠕⠝⠻	10.7.6, 10.10.7
+so's	⠎⠄⠎	10.1.2
+sou'east	⠎⠳⠄⠑⠁⠌	10.4.1, 10.6.5
+sound	⠎⠨⠙	10.8.1
+Southend	⠠⠎⠳⠹⠢⠙	10.11.1
+Spartan	⠠⠎⠐⠏⠁⠝	10.7.1
+spathose	⠎⠏⠁⠹⠕⠎⠑	10.7.2
+speakeasy	⠎⠏⠂⠅⠂⠎⠽	10.6.5, 10.11.6
+Spencer	⠠⠎⠏⠰⠑⠗	10.8.1, 10.10.6
+sphere	⠎⠏⠐⠓	10.7.5
+spirits	⠸⠎⠎	10.7.1
+spiritual	⠸⠎⠥⠁⠇	10.7.1
+sponge	⠎⠏⠰⠛⠑	10.8.1
+spreadeagle	⠎⠏⠗⠂⠙⠂⠛⠇⠑	10.11.6
+springtime	⠎⠏⠗⠬⠐⠞	10.7.8
+St	⠠⠎⠞	10.4.2
+St.	⠠⠎⠞⠲	10.4.2
+Stalingrad	⠠⠌⠁⠇⠔⠛⠗⠁⠙	10.4.1
+standstill	⠌⠯⠌⠊⠇⠇	10.2.1
+stateroom	⠌⠁⠞⠑⠗⠕⠕⠍	10.11.1
+Ste	⠠⠌⠑	10.4.2
+stiffly	⠌⠊⠖⠇⠽	10.11.8
+still-life	⠌⠤⠇⠊⠋⠑	10.2.1
+still's	⠌⠄⠎	10.2.2
+Stillson	⠠⠌⠊⠇⠇⠎⠕⠝	10.2.1
+sting	⠌⠬	10.4.3, 10.10.5
+stinging	⠌⠬⠬	10.4.3
+stoned	⠌⠕⠝⠫	10.7.6, 10.10.7
+stonework	⠌⠐⠕⠐⠺	10.7.1, 10.7.6
+stoney	⠌⠐⠕⠽	10.7.6
+storeroom	⠌⠕⠗⠑⠗⠕⠕⠍	10.11.1
+stronghold	⠌⠗⠰⠛⠓⠕⠇⠙	10.10.8, 10.11.1, 10.11.2
+'struth	⠄⠌⠗⠥⠹	10.4.1
+styrofoam	⠌⠽⠗⠕⠋⠕⠁⠍	10.11.5
+subbasement	⠎⠥⠃⠃⠁⠎⠑⠰⠞	10.6.5, 10.11.5
+sublessee	⠎⠥⠃⠨⠎⠑⠑	10.8.1
+subpoena	⠎⠥⠃⠏⠕⠢⠁	10.11.9
+Suchet	⠠⠎⠥⠡⠑⠞	10.9.2
+suchlike	⠎⠡⠇⠊⠅⠑	10.9.2
+sudden	⠎⠥⠙⠙⠢	10.6.10
+SuperBraille	⠠⠎⠥⠏⠻⠨⠂⠠⠃⠗⠁⠊⠇⠇⠑	10.9.4
+surname	⠎⠥⠗⠐⠝	10.7.5
+sweetheart	⠎⠺⠑⠑⠞⠓⠑⠜⠞	10.3.1, 10.11.1
+Swithin	⠠⠎⠾⠔	10.3.1
+sword	⠎⠘⠺	10.7.1
+tableau	⠞⠁⠃⠇⠂⠥	10.6.5
+t'do	⠞⠄⠙⠕	10.1.1
+tea	⠞⠑⠁	10.6.5
+teach-in	⠞⠂⠡⠤⠔	10.5.3
+tearoom	⠞⠂⠗⠕⠕⠍	10.11.1
+teatime	⠞⠂⠐⠞	10.11.8
+telephoned	⠞⠑⠇⠑⠏⠓⠕⠝⠫	10.10.7
+Tennessee	⠠⠞⠢⠰⠎⠑⠑	10.8.1
+th'	⠞⠓⠄	10.4.2
+Thaddeus	⠠⠹⠁⠙⠙⠑⠥⠎	10.7.3, 10.10.7
+that'll	⠞⠄⠇⠇	10.1.2
+t'have	⠞⠄⠓⠁⠧⠑	10.1.1
+theatre	⠮⠁⠞⠗⠑	10.3.1, 10.6.5, 10.10.3
+thee	⠮⠑	10.3.1
+theirs	⠸⠮⠎	10.7.1
+Thelma	⠠⠮⠇⠍⠁	10.3.1
+then	⠮⠝	10.10.3
+thence	⠹⠰⠑	10.3.1, 10.8.1, 10.10.2, 10.10.3
+thereby	⠐⠮⠃⠽	10.7.2
+therefore	⠐⠮⠿⠑	10.7.2
+therein	⠐⠮⠔	10.7.2
+Theresa	⠠⠮⠗⠑⠎⠁	10.3.1, 10.7.2
+thereupon	⠐⠮⠘⠥	10.7.2
+Theseus	⠠⠮⠎⠑⠥⠎	10.7.2
+thievery	⠹⠊⠑⠧⠻⠽	10.7.4
+this'd	⠹⠄⠙	10.2.2
+this'n	⠹⠊⠎⠄⠝	10.2.2
+thistle	⠹⠊⠌⠇⠑	10.2.1
+th'n	⠹⠄⠝	10.4.2
+Thomas	⠠⠹⠕⠍⠁⠎	10.4.1
+thorough	⠹⠕⠗⠳⠣	10.4.1
+Thoseby	⠠⠹⠕⠎⠑⠃⠽	10.7.2
+thou	⠹⠳	10.4.1
+thoughtful	⠹⠐⠳⠰⠇	10.7.1
+throughout	⠐⠹⠳⠞	10.7.1
+thundered	⠹⠐⠥⠫	10.7.9
+timeously	⠐⠞⠳⠎⠇⠽	10.7.8
+timer	⠐⠞⠗	10.10.2
+Timex	⠠⠐⠞⠭	10.7.8
+tobacco	⠞⠕⠃⠁⠒⠕	10.6.5
+toenail	⠞⠕⠑⠝⠁⠊⠇	10.6.8, 10.11.1
+tofu	⠞⠷⠥	10.3.1
+to-ing	⠞⠕⠤⠔⠛	10.4.3, 10.6.8
+tomorrow's	⠞⠍⠄⠎	10.9.5
+toner	⠞⠕⠝⠻	10.10.7
+tongue	⠞⠰⠛⠥⠑	10.8.1
+to-night	⠞⠕⠤⠝⠊⠣⠞	10.9.1
+toreador	⠞⠕⠗⠂⠙⠕⠗	10.6.5
+toward	⠞⠪⠜⠙	10.4.1
+towhee	⠞⠪⠓⠑⠑	10.10.8
+trebled	⠞⠗⠑⠃⠇⠫	10.4.1
+twofold	⠞⠺⠕⠋⠕⠇⠙	10.3.1, 10.11.7
+twosome	⠞⠺⠕⠐⠎	10.7.7
+unamended	⠥⠝⠁⠍⠢⠙⠫	10.7.5, 10.11.5
+unbecoming	⠥⠝⠃⠑⠉⠕⠍⠬	10.6.1
+uncongenial	⠥⠝⠉⠰⠛⠢⠊⠁⠇	10.11.6
+undergo	⠐⠥⠛⠕	10.7.9
+underived	⠥⠝⠙⠻⠊⠧⠫	10.7.9, 10.11.5
+underogatory	⠥⠝⠙⠻⠕⠛⠁⠞⠕⠗⠽	10.7.9
+underpaid	⠐⠥⠏⠙	10.7.9
+underworld	⠐⠥⠸⠺	10.7.1
+undisturbed	⠥⠝⠙⠊⠌⠥⠗⠃⠫	10.11.6
+unfulfilled	⠥⠝⠰⠇⠋⠊⠇⠇⠫	10.8.1, 10.11.6
+Unilever	⠠⠥⠝⠊⠇⠐⠑	10.7.4
+unless	⠥⠝⠨⠎	10.8.1
+unlessoned	⠥⠝⠨⠎⠕⠝⠫	10.8.1, 10.11.6
+unquestionable	⠥⠝⠐⠟⠁⠃⠇⠑	10.7.1
+UNSD	⠰⠰⠠⠠⠥⠝⠎⠙	10.9.9
+untimely	⠥⠝⠐⠞⠇⠽	10.7.8
+unworkable	⠥⠝⠐⠺⠁⠃⠇⠑	10.7.1
+US (United States)	⠠⠠⠥⠎ ⠐⠣⠠⠥⠝⠊⠞⠫ ⠠⠌⠁⠞⠑⠎⠐⠜	10.1.3
+Vandyke	⠠⠧⠯⠽⠅⠑	10.3.1, 10.11.5
+venereal	⠧⠢⠻⠂⠇	10.11.7
+vengeance	⠧⠢⠛⠑⠨⠑	10.10.2
+viceregal	⠧⠊⠉⠑⠗⠑⠛⠁⠇	10.4.1
+Vietnamese	⠠⠧⠊⠑⠞⠝⠁⠍⠑⠎⠑	10.7.5
+weathered	⠺⠂⠮⠗⠫	10.10.3
+well-known	⠺⠑⠇⠇⠤⠐⠅⠝	10.7.1
+Wenceslaus	⠠⠺⠰⠑⠎⠇⠁⠥⠎	10.8.1
+whaddaya	⠱⠁⠙⠙⠁⠽⠁	10.10.9
+wharf	⠱⠜⠋	10.4.1
+whereas	⠐⠱⠁⠎	10.10.8
+whereby	⠐⠱⠃⠽	10.7.1
+where'er	⠱⠻⠑⠄⠻	10.7.1, 10.10.8
+wherein	⠐⠱⠔	10.7.1
+whereof	⠐⠱⠷	10.3.1
+whereupon	⠐⠱⠘⠥	10.7.2
+wherever	⠱⠻⠐⠑	10.7.1, 10.10.8
+whichever	⠱⠊⠡⠐⠑	10.2.1
+which'll	⠱⠄⠇⠇	10.2.2
+which've	⠱⠄⠧⠑	10.2.2
+whiskey-still	⠱⠊⠎⠅⠑⠽⠤⠌	10.2.1
+whistle	⠱⠊⠌⠇⠑	10.4.1
+whosesoever	⠘⠱⠎⠕⠐⠑	10.7.2
+will-o'-the-wisp	⠺⠤⠕⠄⠤⠮⠤⠺⠊⠎⠏	10.1.1
+wiseacre	⠺⠊⠎⠑⠁⠉⠗⠑	10.11.1
+withe	⠾⠑	10.3.1
+wither	⠾⠻	10.10.2
+withered	⠾⠻⠫	10.7.2
+within	⠾⠔	10.6.8
+without	⠾⠳⠞	10.2.1, 10.3.1
+withstand	⠾⠌⠯	10.3.1
+word-for-word	⠘⠺⠤⠿⠤⠘⠺	10.7.1
+Wordsworth	⠠⠘⠺⠎⠺⠕⠗⠹	10.7.1
+workday	⠐⠺⠐⠙	10.7.1
+working	⠐⠺⠬	10.7.1
+worldly	⠸⠺⠇⠽	10.7.1
+world-wide	⠸⠺⠤⠺⠊⠙⠑	10.7.1
+would-be	⠺⠙⠤⠃⠑	10.5.1
+wounded	⠺⠨⠙⠫	10.8.1
+wrench	⠺⠗⠢⠡	10.2.1
+Wunderhorn	⠠⠺⠐⠥⠓⠕⠗⠝	10.7.9
+Xth	⠠⠭⠹	10.4.1
+xxist	⠭⠭⠊⠌	10.4.1
+Yeats	⠠⠽⠂⠞⠎	10.6.5
+you'd	⠽⠄⠙	10.1.2
+you'll	⠽⠄⠇⠇	10.1.2
+you'm	⠽⠳⠄⠍	10.1.2
+youngest	⠐⠽⠑⠌	10.7.1
+Youngstown	⠠⠐⠽⠎⠞⠪⠝	10.7.1
+Yourcenar	⠠⠽⠳⠗⠉⠢⠜	10.9.2
+you're	⠽⠄⠗⠑	10.1.2
+you's	⠽⠄⠎	10.1.2
+you've	⠽⠄⠧⠑	10.1.2

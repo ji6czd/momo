@@ -117,6 +117,7 @@ use std::os::raw::c_int;
 use momors_braille::document::{BrailleDocument, DocumentConfig, PageBreak, PhysicalLine};
 use momors_braille::formatter::{render, wrap_line, wrap_suffix, FormattedDocument, RenderedLine};
 use momors_braille::writer::OutputFormat;
+use momors_braille::NabccCase;
 use momors_braille::{
     detect_language, embedded_table, embedded_tables, BackTransResult, BrailleBackTranslator,
     BrailleResult, BrailleTranslator, EnglishTranslator, JapaneseTranslator, Language, Table,
@@ -1200,20 +1201,36 @@ pub struct ByteBuffer {
     bytes: Vec<u8>,
 }
 
+/// 出力形式コード → [`OutputFormat`]。不正なコードは `None`。
+///
+/// 0=MBR, 1=BES, 3=BASE(.bse), 4=BrailleText 大文字 NABCC(.brf),
+/// 5=BrailleText 小文字 NABCC(.brf)。
+fn output_format_from_code(format: c_int) -> Option<OutputFormat> {
+    match format {
+        0 => Some(OutputFormat::Mbr),
+        1 => Some(OutputFormat::Bes),
+        3 => Some(OutputFormat::Base),
+        4 => Some(OutputFormat::BrailleText {
+            case: NabccCase::Upper,
+        }),
+        5 => Some(OutputFormat::BrailleText {
+            case: NabccCase::Lower,
+        }),
+        _ => None,
+    }
+}
+
 /// ドキュメントを指定形式のバイト列へ書き出す。
-/// format: 0=MBR, 1=BES, 3=BASE(.bse), 4=BrailleText(.brf)。無効/NULL なら NULL。
+/// format: [`output_format_from_code`] 参照。無効/NULL なら NULL。
 #[no_mangle]
 pub extern "C" fn momo_doc_write(h: *const BrailleDocHandle, format: c_int) -> *mut ByteBuffer {
     let h = match unsafe { h.as_ref() } {
         Some(h) => h,
         None => return std::ptr::null_mut(),
     };
-    let fmt = match format {
-        0 => OutputFormat::Mbr,
-        1 => OutputFormat::Bes,
-        3 => OutputFormat::Base,
-        4 => OutputFormat::BrailleText,
-        _ => return std::ptr::null_mut(),
+    let fmt = match output_format_from_code(format) {
+        Some(f) => f,
+        None => return std::ptr::null_mut(),
     };
     let bytes = fmt.write(&h.doc);
     Box::into_raw(Box::new(ByteBuffer { bytes }))
@@ -1521,7 +1538,7 @@ pub extern "C" fn momo_doc_render_from_paragraphs(
 }
 
 /// 論理段落（UTF-16, `\n` 区切り）を折返した上で指定形式のバイト列へ書き出す。
-/// `format`: 0=MBR, 1=BES, 3=BASE, 4=BrailleText。paragraphs が NULL／format 不正なら NULL。
+/// `format`: [`output_format_from_code`] 参照。paragraphs が NULL／format 不正なら NULL。
 #[no_mangle]
 pub extern "C" fn momo_doc_write_from_paragraphs(
     paragraphs: *const u16,
@@ -1536,12 +1553,9 @@ pub extern "C" fn momo_doc_write_from_paragraphs(
         Some(t) => t,
         None => return std::ptr::null_mut(),
     };
-    let fmt = match format {
-        0 => OutputFormat::Mbr,
-        1 => OutputFormat::Bes,
-        3 => OutputFormat::Base,
-        4 => OutputFormat::BrailleText,
-        _ => return std::ptr::null_mut(),
+    let fmt = match output_format_from_code(format) {
+        Some(f) => f,
+        None => return std::ptr::null_mut(),
     };
     let config = config_from_params(line_width, lines_per_page, page_header, number_start, title);
     let doc = BrailleDocument::from_paragraphs(&paragraphs_from_text(&text), config);

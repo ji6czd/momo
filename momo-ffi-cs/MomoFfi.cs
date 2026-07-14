@@ -22,7 +22,8 @@ public static class MomoFfi
     public const int FormatBes  = 1;   // 読み書き両対応
     public const int FormatBet  = 2;   // 読み込みのみ
     public const int FormatBase = 3;   // 書き出しのみ
-    public const int FormatBrf  = 4;   // 書き出しのみ
+    public const int FormatBrf  = 4;   // 書き出しのみ（NABCC 大文字。Braille ASCII の規格どおり）
+    public const int FormatBrfLower = 5; // 書き出しのみ（NABCC 小文字。点字ディスプレイで直接読む用）
 
     // 読み込み時の別名（可読性のため）。
     public const int ReadMbr = FormatMbr;

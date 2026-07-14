@@ -81,12 +81,9 @@ partial class MainForm
         cmbOutputFormat.DropDownStyle = ComboBoxStyle.DropDownList;
         cmbOutputFormat.Location = new Point(104, 76);
         cmbOutputFormat.Size = new Size(316, 23);
-        cmbOutputFormat.Items.AddRange(new object[]
-        {
-            "MOMO文書ファイル (.mbr)",
-            "BASEファイル (.bse)"
-        });
-        cmbOutputFormat.SelectedIndex = 1;
+        foreach (var f in OutputFormats)
+            cmbOutputFormat.Items.Add(f.DisplayName);
+        cmbOutputFormat.SelectedIndex = 1; // BASE
         cmbOutputFormat.SelectedIndexChanged += cmbOutputFormat_SelectedIndexChanged;
 
         // chkEnglishGrade2

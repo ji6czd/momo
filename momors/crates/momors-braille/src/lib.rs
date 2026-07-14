@@ -31,7 +31,7 @@ pub mod english_translator;
 pub mod error;
 pub mod formatter;
 pub mod japanese_translator;
-mod nabcc;
+pub mod nabcc;
 pub mod reader;
 pub mod table;
 pub mod translator;
@@ -50,4 +50,5 @@ pub use table::{embedded_table, embedded_tables, Table};
 pub use translator::{
     detect_language, is_japanese_char, BrailleResult, BrailleTranslator, Language,
 };
+pub use nabcc::NabccCase;
 pub use writer::OutputFormat;

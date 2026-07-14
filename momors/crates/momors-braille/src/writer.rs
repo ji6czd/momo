@@ -5,17 +5,19 @@
 
 use crate::document::BrailleDocument;
 use crate::formatter::{render, FormattedDocument};
-use crate::nabcc::braille_to_nabcc_capital;
+use crate::nabcc::{braille_to_nabcc, NabccCase};
 
 /// ドキュメントの出力形式。
 pub enum OutputFormat {
-    /// ページ間をフォームフィード (`\x0C`) で区切ったプレーンテキスト。拡張子: `.brf`
+    /// ページ間をフォームフィード (`\x0C`) で区切った NABCC ASCII テキスト。拡張子: `.brf`
     ///
+    /// 各セルは NABCC で ASCII 1 バイトに符号化する。英字のケースは [`NabccCase`] で選ぶ
+    /// （既定は規格どおりの大文字。点字ディスプレイで直接読む用途では小文字）。
     /// 各行の末尾点字スペース (`⠀` U+2800) は落とす。これにより 1 行が必ず
     /// `line_width` マス以内になり、プリンタ印刷時に行幅超過で意図しない折返しが
     /// 入るのを防ぐ。代償として、この出力からは折返し位置（行末スペース）を
     /// 厳密には再現できない（印刷専用の非可逆形式であり読み戻しもしない）。
-    BrailleText,
+    BrailleText { case: NabccCase },
     /// PC-9801 用の点字ファイル形式。ヘッダとページデータを含む。拡張子: `.bse`
     Base,
     /// IBM 点字編集システム形式。独自バイナリ。拡張子: `.bes`
@@ -29,31 +31,30 @@ impl OutputFormat {
     pub fn write(&self, doc: &BrailleDocument) -> Vec<u8> {
         match self {
             OutputFormat::Mbr => doc.to_mbr().into_bytes(),
-            OutputFormat::BrailleText => write_braille_text(&render(doc)),
+            OutputFormat::BrailleText { case } => write_braille_text(&render(doc), *case),
             OutputFormat::Base => write_base_file(&render(doc)),
             OutputFormat::Bes => write_bes_file(&render(doc)),
         }
     }
 }
 
-fn write_braille_text(doc: &FormattedDocument) -> Vec<u8> {
-    let mut out = String::new();
+fn write_braille_text(doc: &FormattedDocument, case: NabccCase) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
     for (i, page) in doc.pages().iter().enumerate() {
         if i > 0 {
-            out.push_str("\x0C\n");
+            out.extend_from_slice(b"\x0C\n");
         }
-        // 行末の点字スペースを落とす（line_width 超過と印刷時の余分な折返しを防ぐ）。
-        let lines: Vec<&str> = page
-            .iter()
-            .map(|l| l.content.as_str().trim_end_matches('⠀'))
-            .collect();
-        out.push_str(&lines.join("\n"));
-        out.push('\n');
+        for line in page.iter() {
+            // 行末の点字スペースを落とす（line_width 超過と印刷時の余分な折返しを防ぐ）。
+            let content = line.content.as_str().trim_end_matches('⠀');
+            out.extend(content.chars().map(|c| braille_to_nabcc(c, case)));
+            out.push(b'\n');
+        }
     }
-    out.into_bytes()
+    out
 }
 
-/// BASE 形式。
+/// BASE 形式。NABCC は大文字固定（JBCC 由来のため小文字の揺れはない）。
 /// ヘッダ: 512 バイト（末尾 8 バイトが "ppppccll"）+ 改行。
 /// ページデータ: 各ページ必ず `lines_per_page` 行（不足は空行で埋める）。
 fn write_base_file(doc: &FormattedDocument) -> Vec<u8> {
@@ -72,7 +73,7 @@ fn write_base_file(doc: &FormattedDocument) -> Vec<u8> {
         for i in 0..lines_per_page {
             if let Some(line) = page.get(i) {
                 for c in line.content.chars() {
-                    out.push(braille_to_nabcc_capital(c) as char);
+                    out.push(braille_to_nabcc(c, NabccCase::Upper) as char);
                 }
             }
             out.push('\n');
@@ -192,6 +193,10 @@ mod tests {
         BrailleDocument::from_paragraphs(&paras, config(page_header))
     }
 
+    fn brf(d: &BrailleDocument, case: NabccCase) -> Vec<u8> {
+        OutputFormat::BrailleText { case }.write(d)
+    }
+
     #[test]
     fn mbr_uses_document_to_mbr() {
         let d = doc(&["⠁⠃⠉", "⠙⠑⠋"], true);
@@ -253,7 +258,7 @@ mod tests {
     fn braille_text_trims_trailing_space_within_line_width() {
         // line_width=5、ヘッダなし。"⠁⠁⠁⠁⠀⠃⠃" は 4 セル + スペース + 2 セル。
         // render は 1 行目を 5 セル埋め後の行末スペースを含めて折返す（"⠁⠁⠁⠁⠀"=5+1?）。
-        // .brl 出力では行末スペースが落ちて各行が line_width 以内になる。
+        // .brf 出力では行末スペースが落ちて各行が line_width 以内になる。
         let cfg = DocumentConfig {
             line_width: 5,
             lines_per_page: 25,
@@ -262,16 +267,26 @@ mod tests {
             number_start: 1,
         };
         let d = BrailleDocument::from_paragraphs(&["⠁⠁⠁⠁⠀⠃⠃".to_string()], cfg);
-        let out = String::from_utf8(OutputFormat::BrailleText.write(&d)).unwrap();
+        let out = String::from_utf8(brf(&d, NabccCase::Upper)).unwrap();
         for line in out.split('\n') {
-            assert!(!line.ends_with('⠀'), "行末スペースが残っている: {:?}", line);
+            assert!(!line.ends_with(' '), "行末スペースが残っている: {:?}", line);
             assert!(
-                line.chars().count() <= 5,
+                line.len() <= 5,
                 "line_width を超過: {:?} ({} セル)",
                 line,
-                line.chars().count()
+                line.len()
             );
         }
+    }
+
+    #[test]
+    fn braille_text_encodes_cells_as_nabcc() {
+        // ⠁=a/A, ⠃=b/B, ⠉=c/C
+        let d = doc(&["⠁⠃⠉"], false);
+        let upper = String::from_utf8(brf(&d, NabccCase::Upper)).unwrap();
+        assert_eq!(upper.lines().next().unwrap(), "ABC");
+        let lower = String::from_utf8(brf(&d, NabccCase::Lower)).unwrap();
+        assert_eq!(lower.lines().next().unwrap(), "abc");
     }
 
     #[test]
@@ -283,7 +298,7 @@ mod tests {
             ..config(false)
         };
         let d = BrailleDocument::from_paragraphs(&["⠁".to_string(), "⠃".to_string()], cfg);
-        let out = String::from_utf8(OutputFormat::BrailleText.write(&d)).unwrap();
+        let out = String::from_utf8(brf(&d, NabccCase::Upper)).unwrap();
         assert!(out.contains('\x0C'));
     }
 }

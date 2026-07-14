@@ -2,6 +2,27 @@ namespace Momo;
 
 public partial class MainForm : Form
 {
+    /// <summary>出力形式の選択肢。表示名・拡張子・ダイアログフィルタ・FFI 形式コードを1件にまとめる。</summary>
+    /// <remarks>
+    /// .brf は大文字と小文字の2件がある（拡張子は同じ）。Braille ASCII の規格は大文字のみだが、
+    /// 大文字のまま点字ディスプレイで読むと全セルに dot7 が付くため、その用途では小文字を選ぶ。
+    /// </remarks>
+    private sealed record OutputFormatItem(string DisplayName, string Extension, string Filter, int FfiCode);
+
+    private static readonly OutputFormatItem[] OutputFormats =
+    [
+        new("MOMO文書ファイル (.mbr)", ".mbr",
+            "MOMO文書ファイル (*.mbr)|*.mbr", MomoFfi.FormatMbr),
+        new("BASEファイル (.bse)", ".bse",
+            "BASEファイル (*.bse)|*.bse", MomoFfi.FormatBase),
+        new("点字テキストファイル 大文字NABCC (.brf)", ".brf",
+            "点字テキストファイル (*.brf)|*.brf", MomoFfi.FormatBrf),
+        new("点字テキストファイル 小文字NABCC (.brf)", ".brf",
+            "点字テキストファイル (*.brf)|*.brf", MomoFfi.FormatBrfLower),
+    ];
+
+    private OutputFormatItem SelectedOutputFormat => OutputFormats[cmbOutputFormat.SelectedIndex];
+
     public MainForm()
     {
         InitializeComponent();
@@ -18,30 +39,20 @@ public partial class MainForm : Form
             txtInput.Text = dlg.FileName;
     }
 
-    private string SelectedOutputExtension => cmbOutputFormat.SelectedIndex switch
-    {
-        0 => ".mbr",
-        _ => ".bse"
-    };
-
     private void cmbOutputFormat_SelectedIndexChanged(object sender, EventArgs e)
     {
         if (!string.IsNullOrEmpty(txtOutput.Text))
-            txtOutput.Text = Path.ChangeExtension(txtOutput.Text, SelectedOutputExtension);
+            txtOutput.Text = Path.ChangeExtension(txtOutput.Text, SelectedOutputFormat.Extension);
     }
 
     private void btnBrowseOutput_Click(object sender, EventArgs e)
     {
-        var filter = cmbOutputFormat.SelectedIndex switch
-        {
-            0 => "MOMO文書ファイル (*.mbr)|*.mbr",
-            _ => "BASEファイル (*.bse)|*.bse",
-        };
+        var format = SelectedOutputFormat;
         using var dlg = new SaveFileDialog
         {
-            Filter = filter + "|すべてのファイル (*.*)|*.*",
+            Filter = format.Filter + "|すべてのファイル (*.*)|*.*",
             Title = "出力ファイルを選択",
-            DefaultExt = SelectedOutputExtension.TrimStart('.'),
+            DefaultExt = format.Extension.TrimStart('.'),
             FileName = Path.GetFileNameWithoutExtension(txtInput.Text)
         };
         if (dlg.ShowDialog() == DialogResult.OK)
@@ -80,11 +91,7 @@ public partial class MainForm : Form
         try
         {
             string input = txtInput.Text, output = txtOutput.Text;
-            int format = cmbOutputFormat.SelectedIndex switch
-            {
-                0 => MomoFfi.FormatMbr,
-                _ => MomoFfi.FormatBase,
-            };
+            int format = SelectedOutputFormat.FfiCode;
             var config = new FormatterConfig
             {
                 LineWidth = (int)numLineWidth.Value,

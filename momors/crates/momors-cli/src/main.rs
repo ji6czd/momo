@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use clap::{Parser, ValueEnum};
 use momors_braille::{
     detect_language, BrailleDocument, BrailleResult, BrailleTranslator, DocumentConfig,
-    JapaneseTranslator, Language, OutputFormat,
+    JapaneseTranslator, Language, NabccCase, OutputFormat,
 };
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
@@ -106,6 +106,27 @@ struct Cli {
     /// ページヘッダのタイトル（日本語テキスト、ファイル整形モード）
     #[arg(long)]
     title: Option<String>,
+
+    /// .brf の NABCC 英字ケース（upper: 規格どおり／lower: 点字ディスプレイで直接読む用）。
+    /// .brf 以外の出力形式に指定するとエラー
+    #[arg(long, default_value = "upper")]
+    nabcc_case: NabccCaseArg,
+}
+
+/// `--nabcc-case` の選択肢。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum NabccCaseArg {
+    Upper,
+    Lower,
+}
+
+impl From<NabccCaseArg> for NabccCase {
+    fn from(a: NabccCaseArg) -> Self {
+        match a {
+            NabccCaseArg::Upper => NabccCase::Upper,
+            NabccCaseArg::Lower => NabccCase::Lower,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -161,12 +182,21 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
         .and_then(|p| p.extension())
         .and_then(|e| e.to_str());
     let braille_format = match ext {
-        Some("brf") => Some(OutputFormat::BrailleText),
+        Some("brf") => Some(OutputFormat::BrailleText {
+            case: cli.nabcc_case.into(),
+        }),
         Some("bse") => Some(OutputFormat::Base),
         Some("bes") => Some(OutputFormat::Bes),
         Some("mbr") => Some(OutputFormat::Mbr),
         _ => None,
     };
+
+    // 効かない指定を黙って無視すると「指定したつもり」の事故になるので弾く。
+    if cli.nabcc_case != NabccCaseArg::Upper
+        && !matches!(braille_format, Some(OutputFormat::BrailleText { .. }))
+    {
+        return Err("--nabcc-case は .brf 出力にのみ指定できます".to_string());
+    }
 
     let text = std::fs::read_to_string(cli.input.as_ref().unwrap())
         .map_err(|e| format!("ファイル読み込みエラー: {e}"))?;

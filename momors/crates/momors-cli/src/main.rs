@@ -9,8 +9,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
 use momors_braille::{
-    detect_language, BrailleDocument, BrailleResult, BrailleTranslator, DocumentConfig,
-    JapaneseTranslator, Language, NabccCase, OutputFormat,
+    BrailleDocument, BrailleResult, BrailleTranslator, DocumentConfig, EnglishTranslator,
+    JapaneseTranslator, NabccCase, OutputFormat,
 };
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
@@ -75,10 +75,10 @@ struct Cli {
     #[arg(long)]
     braille: bool,
 
-    /// 点字変換テーブル。埋め込みテーブル名（japanese_grade1 / japanese_no_conversion /
-    /// english_ueb_grade1 / english_ueb_grade2）か、.toml のパス。名前は TOML のファイル名と
-    /// 同じ。英語テーブルを指定したときだけ、行ごとに日本語／英語を判定して英語行を UEB で
-    /// 点訳する（日本語行は既定の日本語テーブル）
+    /// 英語（UEB）点字テーブル。埋め込みテーブル名（english_ueb_grade1 / english_ueb_grade2）か、
+    /// UEB スキーマの .toml のパス。指定すると行ごとに日本語／英語を判定し、英語行はこのテーブルで
+    /// UEB 点訳、日本語行は既定の日本語テーブル（japanese_grade1）で点訳する。省略時は全行を
+    /// 既定の日本語テーブルで点訳する（言語判定なし）
     #[arg(long)]
     table: Option<String>,
 
@@ -172,6 +172,82 @@ fn main() -> ExitCode {
 }
 
 // ============================================================
+// 変換パイプライン（ファイル整形モード・標準入力モード共通）
+// ============================================================
+//
+// 経路は常に2段: to_kana() → to_braille()。
+// - to_kana(): 漢字かな交じり文 → かな（Predictor）。ASCII 文字はそのまま通る。
+// - to_braille(): かな → 点字（BrailleTranslator）。行に日本語文字が含まれるかを
+//   内部で判定し、日本語／英語テーブルへ振り分ける（`BrailleTranslator::translate`）。
+// 呼び出し側は言語判定やテーブルの出し分けを行わない。
+
+/// テキストを仮名に変換する（漢字かな交じり文 → かな）。空文字列も含め Predictor に委ねる。
+fn to_kana(text: &str, predictor: &Predictor) -> Result<PredictionResult, String> {
+    predictor
+        .predict(text)
+        .map_err(|e| format!("仮名変換エラー: {e}"))
+}
+
+/// 仮名変換結果を点訳する。日本語／英語の振り分けは `BrailleTranslator` が内部で行う。
+fn to_braille(pred: &PredictionResult, lt: &BrailleTranslator) -> Result<BrailleResult, String> {
+    lt.translate(pred.kana_text())
+        .map_err(|e| format!("点訳エラー: {e}"))
+}
+
+/// 点字文字 → 原文文字の対応。
+fn braille_to_source(result: &BrailleResult, pred: &PredictionResult) -> Vec<usize> {
+    pred.braille_char_to_source(result.text_to_braille(), result.braille_char_count())
+}
+
+/// `--table` から点訳器を作る。
+///
+/// `--table` の役割は「英語（UEB）テーブルの指定」。指定すれば埋め込み名
+/// （`english_ueb_grade1` / `english_ueb_grade2`）または UEB スキーマの .toml として読み込み、
+/// `BrailleTranslator` に英語エンジンとして渡す（行ごとの言語判定・振り分けは
+/// `BrailleTranslator::translate` が内部で行う）。省略時は英語エンジンを持たせない
+/// （`None`）ため、全行が既定の日本語テーブルへ流れる。
+///
+/// 埋め込みカタログは日本語・英語のテーブルを名前だけで共有しているため、
+/// `japanese_no_conversion` のような日本語テーブル名を渡してもエラーにはならず、
+/// 全行がそのテーブル（英語行も無縮約でそのまま）で点訳される。これは未文書化の
+/// 副作用だが実用上そのまま使えるため許容する。
+fn make_line_translator(table: Option<&String>) -> Result<BrailleTranslator, String> {
+    let japanese = JapaneseTranslator::from_embedded()
+        .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?;
+
+    let Some(spec) = table else {
+        return Ok(BrailleTranslator::new(japanese, None));
+    };
+
+    let english = if Path::new(spec).exists() {
+        EnglishTranslator::from_file(spec)
+    } else {
+        EnglishTranslator::from_embedded_name(spec)
+    }
+    .map_err(|_| {
+        let names: Vec<&str> = momors_braille::embedded_tables()
+            .iter()
+            .filter_map(|t| t.name.as_deref())
+            .collect();
+        format!(
+            "点字テーブル \"{spec}\" が見つかりません。\
+             ファイルパスか、埋め込みテーブル名 ({}) を指定してください",
+            names.join(" / ")
+        )
+    })?;
+
+    Ok(BrailleTranslator::new(japanese, Some(english)))
+}
+
+/// 自信度スコアを1行に出力する。
+fn write_confidences(out: &mut impl Write, confidences: &[f32]) {
+    for &c in confidences {
+        write!(out, "{c} ").ok();
+    }
+    writeln!(out).ok();
+}
+
+// ============================================================
 // ファイル整形モード
 // ============================================================
 
@@ -204,16 +280,16 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
 
     let out = match braille_format {
         Some(format) => {
-            let (lt, routing) = make_line_translator(cli.table.as_ref())?;
+            let lt = make_line_translator(cli.table.as_ref())?;
+            let to_braille_text = |p: &str| -> Result<String, String> {
+                let pred = to_kana(p, predictor)?;
+                to_braille(&pred, &lt).map(|r| r.braille_text().to_owned())
+            };
             let braille_list: Vec<String> = paragraphs
                 .iter()
-                .map(|p| to_braille(p, predictor, &lt, routing))
+                .map(|p| to_braille_text(p))
                 .collect::<Result<_, _>>()?;
-            let title_braille = cli
-                .title
-                .as_ref()
-                .map(|t| to_braille(t, predictor, &lt, routing))
-                .transpose()?;
+            let title_braille = cli.title.as_ref().map(|t| to_braille_text(t)).transpose()?;
             let config = DocumentConfig {
                 line_width: cli.line_width,
                 lines_per_page: cli.lines_per_page,
@@ -227,7 +303,7 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
         None => {
             let kana_lines: Vec<String> = paragraphs
                 .iter()
-                .map(|p| to_kana(p, predictor))
+                .map(|p| to_kana(p, predictor).map(|r| r.kana_text().to_owned()))
                 .collect::<Result<_, _>>()?;
             (kana_lines.join("\n") + "\n").into_bytes()
         }
@@ -246,138 +322,12 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
     }
 }
 
-/// テキストを仮名に変換する。空文字列は空文字列のまま返す。
-fn to_kana(text: &str, predictor: &Predictor) -> Result<String, String> {
-    if text.is_empty() {
-        return Ok(String::new());
-    }
-    predictor
-        .predict(text)
-        .map(|r| r.kana_text().to_owned())
-        .map_err(|e| format!("仮名変換エラー: {e}"))
-}
-
-/// 1行を点訳する。予測（漢字かな交じり → かな）は CLI 側で行い、点訳器にはかなを渡す
-/// （momors-braille は漢字列を扱わない）。日本語行なら予測結果も一緒に返す。
-///
-/// `routing` が true のときだけ言語を判定し、日本語文字を含まない行を **予測を通さずに**
-/// UEB で点訳する。false のときは従来どおり必ず日本語として点訳する
-/// （英字は外字符 `⠰` ＋無縮約）。
-fn translate_line(
-    text: &str,
-    predictor: &Predictor,
-    lt: &BrailleTranslator,
-    routing: bool,
-) -> Result<(BrailleResult, Option<PredictionResult>), String> {
-    if routing && detect_language(text) == Language::English {
-        // 英語エンジンを持たない点訳器（no_conversion など）では日本語経路へ落ちる。
-        if let Some(result) = lt.translate_english(text) {
-            return Ok((result, None));
-        }
-    }
-    let pred = predictor
-        .predict(text)
-        .map_err(|e| format!("仮名変換エラー: {e}"))?;
-    let result = lt
-        .translate_japanese(pred.kana_text())
-        .map_err(|e| format!("点訳エラー: {e}"))?;
-    Ok((result, Some(pred)))
-}
-
-/// 1行を点訳して点字だけ返す。空文字列は空文字列のまま返す。
-fn to_braille(
-    text: &str,
-    predictor: &Predictor,
-    lt: &BrailleTranslator,
-    routing: bool,
-) -> Result<String, String> {
-    if text.is_empty() {
-        return Ok(String::new());
-    }
-    translate_line(text, predictor, lt, routing).map(|(r, _)| r.braille_text().to_owned())
-}
-
-/// 点字文字 → 原文文字の対応。日本語行は 点字→かな→原文 を合成し、
-/// 英語行は読み層が原文と同一なので 点字→テキスト をそのまま使う。
-fn braille_to_source(result: &BrailleResult, pred: Option<&PredictionResult>) -> Vec<usize> {
-    match pred {
-        Some(pred) => {
-            pred.braille_char_to_source(result.text_to_braille(), result.braille_char_count())
-        }
-        None => result.braille_to_text().to_vec(),
-    }
-}
-
-/// `--table` から点訳器を作り、「行ごとに言語を判定するか」を返す。
-///
-/// - **英語テーブル**（埋め込み名 `english_*`、または UEB スキーマの .toml）… 英語行はそれで
-///   点訳し、日本語行は既定の日本語テーブル。**行ごとの言語判定を行う**
-/// - **日本語テーブル**（埋め込み名 `japanese_*`、または日本語スキーマの .toml）… 全行それで
-///   点訳する（判定なし）
-/// - 省略 … 既定の日本語テーブル（判定なし）
-fn make_line_translator(table: Option<&String>) -> Result<(BrailleTranslator, bool), String> {
-    let default_japanese = || {
-        JapaneseTranslator::from_embedded().map_err(|e| format!("点字テーブル読み込みエラー: {e}"))
-    };
-
-    let Some(spec) = table else {
-        let english = default_english()?;
-        return Ok((
-            BrailleTranslator::new(default_japanese()?, Some(english)),
-            false,
-        ));
-    };
-
-    // 英語テーブル（名前 or ファイル）なら、日本語は既定にして行ごとに判定する。
-    let english = if Path::new(spec).exists() {
-        momors_braille::EnglishTranslator::from_file(spec).ok()
-    } else {
-        momors_braille::EnglishTranslator::from_embedded_name(spec).ok()
-    };
-    if let Some(english) = english {
-        return Ok((
-            BrailleTranslator::new(default_japanese()?, Some(english)),
-            true,
-        ));
-    }
-
-    // 日本語テーブル（名前 or ファイル）。
-    let japanese = if Path::new(spec).exists() {
-        JapaneseTranslator::from_file(spec)
-            .map_err(|e| format!("点字テーブル読み込みエラー: {e}"))?
-    } else {
-        JapaneseTranslator::from_embedded_name(spec).map_err(|_| {
-            let names: Vec<&str> = momors_braille::embedded_tables()
-                .iter()
-                .filter_map(|t| t.name.as_deref())
-                .collect();
-            format!(
-                "点字テーブル \"{spec}\" が見つかりません。\
-                 ファイルパスか、埋め込みテーブル名 ({}) を指定してください",
-                names.join(" / ")
-            )
-        })?
-    };
-    Ok((
-        BrailleTranslator::new(japanese, Some(default_english()?)),
-        false,
-    ))
-}
-
-/// 既定の英語テーブル（UEB grade 2）。日本語テーブル指定時も英語行の点訳器として持っておく。
-fn default_english() -> Result<momors_braille::EnglishTranslator, String> {
-    momors_braille::EnglishTranslator::from_embedded()
-        .map_err(|e| format!("英語点字テーブル読み込みエラー: {e}"))
-}
-
 // ============================================================
 // 標準入力モード
 // ============================================================
 
 fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
-    // 点字モードのみ。英語テーブル（`--table english_ueb_grade2` など）のときだけ
-    // 行ごとに言語を判定する。
-    let braille: Option<(BrailleTranslator, bool)> = if cli.braille {
+    let lt: Option<BrailleTranslator> = if cli.braille {
         match make_line_translator(cli.table.as_ref()) {
             Ok(v) => Some(v),
             Err(e) => {
@@ -412,11 +362,19 @@ fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
             continue;
         }
 
-        // 点字モード: routing が有効なら、日本語を含まない行を UEB で点訳する（予測を通さない）。
-        if let Some((ref lt, routing)) = braille {
-            let start = std::time::Instant::now();
-            match translate_line(&line, predictor, lt, routing) {
-                Ok((result, pred)) => {
+        let start = std::time::Instant::now();
+        let pred = match to_kana(&line, predictor) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{e}");
+                had_error = true;
+                continue;
+            }
+        };
+
+        if let Some(lt) = &lt {
+            match to_braille(&pred, lt) {
+                Ok(result) => {
                     if cli.profile {
                         writeln!(
                             out,
@@ -428,50 +386,33 @@ fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
                     }
                     writeln!(out, "{}", result.braille_text()).ok();
                     if cli.brl_src_index {
-                        for i in braille_to_source(&result, pred.as_ref()) {
+                        for i in braille_to_source(&result, &pred) {
                             write!(out, "{i} ").ok();
                         }
                         writeln!(out).ok();
                     }
-                    // 確信度は日本語行（予測を通った行）だけ出せる
-                    if let (true, Some(pred)) = (cli.confidence, &pred) {
-                        for &c in pred.confidences() {
-                            write!(out, "{c} ").ok();
-                        }
-                        writeln!(out).ok();
+                    if cli.confidence {
+                        write_confidences(&mut out, pred.confidences());
                     }
                 }
                 Err(e) => {
-                    eprintln!("点訳エラー: {e}");
+                    eprintln!("{e}");
                     had_error = true;
                 }
             }
             continue;
         }
 
-        let start = std::time::Instant::now();
-        match predictor.predict(&line) {
-            Ok(result) => {
-                let elapsed = start.elapsed();
-                if cli.profile {
-                    writeln!(out, "予測時間: {:?}", elapsed).ok();
-                }
-                if cli.segment {
-                    writeln!(out, "{}", result.format_segmented()).ok();
-                } else {
-                    writeln!(out, "{}", result.kana_text()).ok();
-                }
-
-                if cli.confidence {
-                    for &c in result.confidences() {
-                        write!(out, "{c} ").ok();
-                    }
-                    writeln!(out).ok();
-                }
-            }
-            Err(e) => {
-                eprintln!("予測エラー: {e}");
-            }
+        if cli.profile {
+            writeln!(out, "予測時間: {:?}", start.elapsed()).ok();
+        }
+        if cli.segment {
+            writeln!(out, "{}", pred.format_segmented()).ok();
+        } else {
+            writeln!(out, "{}", pred.kana_text()).ok();
+        }
+        if cli.confidence {
+            write_confidences(&mut out, pred.confidences());
         }
     }
 

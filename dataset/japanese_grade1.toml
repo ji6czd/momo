@@ -50,9 +50,14 @@ double_entry_prefix = "⠠⠠" # 次の文字も大文字のとき（全大文�
 
 [transitions]
 # 文字種境界
-"kana -> latin" = 1        # かな→英字: 外字符（⠰）の前を一マスあける
-"latin -> kana" = 1        # 英字→かな: 語の切れ目を一マスあける
-"punct.latin -> kana" = 1  # 英文の句読点→かな: 「Hello.こんにちは」を分割する
+"kana -> latin" = 1 # かな→英字: 外字符（⠰）の前を一マスあける
+"latin -> kana" = 1 # 英字→かな: 語の切れ目を一マスあける
+# 半角記号と全角の繊維
+"punct.latin.stop -> kana" = 1
+"punct.latin.pause -> kana" = 1
+"punct.latin.inline -> kana" = 1
+"punct.latin.open -> kana" = 0
+"punct.latin.close -> kana" = 0
 # 句点類（。！？）: あとを二マスあける。連続・閉じ括弧の前は除く
 "punct.jp.stop -> *" = 2
 "punct.jp.stop -> punct.jp.stop" = 0
@@ -65,6 +70,7 @@ double_entry_prefix = "⠠⠠" # 次の文字も大文字のとき（全大文�
 # 前後一マスの記号（… → ←）
 "* -> punct.jp.inline" = 1
 "punct.jp.inline -> *" = 1
+# →など、句読点の前は続ける
 "punct.jp.inline -> punct.jp.stop" = 0
 "punct.jp.inline -> punct.jp.pause" = 0
 "punct.jp.inline -> punct.jp.close" = 0

@@ -1,6 +1,6 @@
 namespace MomoEditor;
 
-partial class Form1
+partial class MainForm
 {
     private System.ComponentModel.IContainer components = null;
 
@@ -145,7 +145,7 @@ partial class Form1
         brailleInputMenuItem.Click += BrailleInputMenuItem_Click;
 
         // 英語点字: 英字だけの行に使う UEB のグレードを切り替える（日本語行は常に日本語１級）。
-        // 表示名（ラベル）は実行時に FFI から取得して設定する（Form1 コンストラクタ）。
+        // 表示名（ラベル）は実行時に FFI から取得して設定する（MainForm コンストラクタ）。
         tableMenu.Text = "英語点字(&E)";
         tableMenu.DropDownItems.AddRange(new ToolStripItem[] {
             tableGrade1MenuItem,
@@ -194,7 +194,7 @@ partial class Form1
         // richTextBox
         richTextBox.Dock = DockStyle.Fill;
         // 点字グリフ（U+2800〜）をネイティブに持つ等幅フォント（Windows 11 標準搭載）。
-        // 無い環境（Windows 10 等）へのフォールバックは Form1 コンストラクタで行う。
+        // 無い環境（Windows 10 等）へのフォールバックは MainForm コンストラクタで行う。
         richTextBox.Font = new Font("Cascadia Mono", 28F, FontStyle.Regular, GraphicsUnit.Point);
         richTextBox.ScrollBars = RichTextBoxScrollBars.Both;
         richTextBox.WordWrap = false;
@@ -225,7 +225,7 @@ partial class Form1
         Controls.Add(menuStrip);
         MainMenuStrip = menuStrip;
         Text = "MomoEditor";
-        FormClosing += Form1_FormClosing;
+        FormClosing += MainForm_FormClosing;
 
         menuStrip.ResumeLayout(false);
         menuStrip.PerformLayout();

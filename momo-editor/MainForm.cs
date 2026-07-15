@@ -5,7 +5,7 @@ using Momo;
 
 namespace MomoEditor;
 
-public partial class Form1 : Form
+public partial class MainForm : Form
 {
     private string? _filePath;
     private bool _isModified;
@@ -38,7 +38,7 @@ public partial class Form1 : Form
         [Keys.L] = 5, // 点6 (右薬指)
     };
 
-    public Form1()
+    public MainForm(string? initialPath = null)
     {
         InitializeComponent();
         // Cascadia Mono が無い環境（Windows 10 等）では、同じく点字グリフを
@@ -65,6 +65,12 @@ public partial class Form1 : Form
         UpdateTitle();
         UpdateStatus();
         AdjustStartupSize();
+
+        // コマンドライン引数（Explorer の「プログラムから開く」を含む）でファイルが
+        // 指定されていれば、新規ドキュメントの代わりにそれを開く。起動直後で未編集の
+        // ため破棄確認は不要。存在しないパスは黙って無視して空ドキュメントのままにする。
+        if (initialPath != null && File.Exists(initialPath))
+            OpenPath(initialPath);
     }
 
     /// <summary>
@@ -425,17 +431,27 @@ public partial class Form1 : Form
             Filter = "Momo点字ファイル (*.mbr)|*.mbr|テキストファイル (*.txt)|*.txt|すべてのファイル (*.*)|*.*",
         };
         if (dialog.ShowDialog() != DialogResult.OK) return;
+        OpenPath(dialog.FileName);
+    }
+
+    /// <summary>
+    /// 指定パスのファイルを開いてエディタに取り込む。ダイアログを介さないコア処理で、
+    /// メニューの「開く」とコマンドライン引数起動の双方から呼ばれる。
+    /// 呼び出し前の破棄確認（ConfirmDiscard）は呼び出し側の責務。
+    /// </summary>
+    private void OpenPath(string path)
+    {
         try
         {
             // 取り込み後のファイル名と変更フラグ。点字以外（テキスト）を取り込んだ場合は
             // 拡張子を .mbr に付け替え、未保存（要保存）として扱う。
-            string filePath = dialog.FileName;
+            string filePath = path;
             bool modified = false;
 
-            if (FormatForPath(dialog.FileName) is int fmt)
+            if (FormatForPath(path) is int fmt)
             {
                 // 点字ファイル（MBR / BES / BET）は Rust の reader で正本ドキュメントへ復元する。
-                var doc = MomoFfi.ReadDocument(File.ReadAllBytes(dialog.FileName), fmt);
+                var doc = MomoFfi.ReadDocument(File.ReadAllBytes(path), fmt);
                 if (doc == null)
                 {
                     MessageBox.Show("対応していないファイル形式です。", "エラー",
@@ -447,7 +463,7 @@ public partial class Form1 : Form
             else
             {
                 // 点字ファイル以外は漢字かな交じり文とみなし、1論理行ずつ点字に変換して取り込む。
-                var text = File.ReadAllText(dialog.FileName, Encoding.UTF8);
+                var text = File.ReadAllText(path, Encoding.UTF8);
                 var doc = TextToBrailleDocument(text);
                 if (doc == null)
                 {
@@ -457,8 +473,8 @@ public partial class Form1 : Form
                     return;
                 }
                 _document = doc;
-                filePath = Path.ChangeExtension(dialog.FileName, ".mbr"); // 編集中のファイル名は .mbr
-                modified = true;                                       // .mbr はまだ保存されていない
+                filePath = Path.ChangeExtension(path, ".mbr"); // 編集中のファイル名は .mbr
+                modified = true;                               // .mbr はまだ保存されていない
             }
             if (_document.Segments.Count == 0)
                 _document.Segments.Add(new Segment("", true));
@@ -626,7 +642,7 @@ public partial class Form1 : Form
             MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private void Form1_FormClosing(object? sender, FormClosingEventArgs e)
+    private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
     {
         if (!ConfirmDiscard()) e.Cancel = true;
     }

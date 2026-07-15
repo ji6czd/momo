@@ -4,7 +4,7 @@ namespace MomoEditor;
 
 // RichTextBox の行間制御。RichTextBox には行間プロパティが無いため、
 // EM_SETPARAFORMAT (PARAFORMAT2) を直接送って段落の行間を設定する。
-public partial class Form1
+public partial class MainForm
 {
     // 行間の倍率（1.0 = 標準の1行）。後でユーザー設定できるようにする予定。
     private double _lineSpacing = 1.3;

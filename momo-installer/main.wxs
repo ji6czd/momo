@@ -142,6 +142,32 @@
                                   DiskId='1'
                                   Source='$(var.StageDir)\bin\momo-gui.runtimeconfig.json'/>
                         </Component>
+                        <!-- .mbr ファイルの関連付け（任意機能）。
+                             ダブルクリックや「プログラムから開く」で MomoEditor.exe が
+                             起動するようにする。レジストリのみの独立コンポーネントなので、
+                             Feature 単位でインストール可否を選べる。アンインストール時は
+                             登録も一緒に削除される。[#MomoEditorExe] は同梱される
+                             MomoEditor.exe のフルパスに解決される。 -->
+                        <Component Id='FileAssociationMbr'
+                                   Guid='7C4E1A93-2B6D-4F80-9E3A-15C8D0B2A6F4'>
+                            <!-- 拡張子 .mbr → ProgId（既定で開くアプリ） -->
+                            <RegistryValue Root='HKLM' Key='Software\Classes\.mbr'
+                                           Value='Momo.BrailleDocument' Type='string' KeyPath='yes'/>
+                            <RegistryValue Root='HKLM' Key='Software\Classes\.mbr\OpenWithProgids'
+                                           Name='Momo.BrailleDocument' Value='' Type='string'/>
+                            <!-- ProgId 本体（表示名・アイコン・開くコマンド） -->
+                            <RegistryValue Root='HKLM' Key='Software\Classes\Momo.BrailleDocument'
+                                           Value='Momo 点字ドキュメント' Type='string'/>
+                            <RegistryValue Root='HKLM' Key='Software\Classes\Momo.BrailleDocument\DefaultIcon'
+                                           Value='[#MomoEditorExe],0' Type='string'/>
+                            <RegistryValue Root='HKLM' Key='Software\Classes\Momo.BrailleDocument\shell\open\command'
+                                           Value='"[#MomoEditorExe]" "%1"' Type='string'/>
+                            <!-- 「プログラムから開く」の一覧へ常に MomoEditor を出すための登録 -->
+                            <RegistryValue Root='HKLM' Key='Software\Classes\Applications\MomoEditor.exe\shell\open\command'
+                                           Value='"[#MomoEditorExe]" "%1"' Type='string'/>
+                            <RegistryValue Root='HKLM' Key='Software\Classes\Applications\MomoEditor.exe\SupportedTypes'
+                                           Name='.mbr' Value='' Type='string'/>
+                        </Component>
                     </Directory>
 
                     <Directory Id='Data' Name='data'>
@@ -199,6 +225,15 @@
                 Level='1'
                 Absent='allow'>
                 <ComponentRef Id='Path'/>
+            </Feature>
+
+            <Feature
+                Id='FileAssociation'
+                Title='.mbr ファイルの関連付け'
+                Description='.mbr（Momo 点字ドキュメント）をダブルクリックや「プログラムから開く」で Momo エディタで開けるようにします。'
+                Level='1'
+                Absent='allow'>
+                <ComponentRef Id='FileAssociationMbr'/>
             </Feature>
 
         </Feature>

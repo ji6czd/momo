@@ -20,6 +20,7 @@ use crate::model::MomoModel;
 use crate::numeric::{
     convert_japanese_numeric, is_digit_label, is_kun_counter_signal, NumericFallback,
 };
+use crate::weight_model::WeightModel;
 use crate::Result;
 
 // ============================================================
@@ -344,27 +345,33 @@ impl PredictionResult {
 /// [`PredictorConfig`] を渡して [`load`] するとモデルを読み込んだ
 /// 状態のインスタンスが得られる。読み込み済みなので即 [`predict`] できる。
 ///
+/// 重みの持ち方は型パラメータ `M` で切り替える。既定の [`MomoModel`]
+/// （`.mbm`、int8 量子化）を使う場合は `Predictor` とだけ書けば良い。
+/// 量子化前の float32 (`.mbmf`) を使いたい場合は [`crate::FloatPredictor`]
+/// （`Predictor<FloatMomoModel>` の別名）を使う。両者は同じ `predict()` API を
+/// 持つため、量子化前後でテキスト推論の結果を直接比較できる。
+///
 /// [`load`]: Predictor::load
 /// [`predict`]: Predictor::predict
 #[derive(Debug)]
-pub struct Predictor {
+pub struct Predictor<M: WeightModel = MomoModel> {
     config: PredictorConfig,
-    model: MomoModel,
+    model: M,
     /// ソート済み漢字辞書。binary_search でルックアップする。
     kanji_dict: Vec<(char, Vec<String>)>,
 }
 
-impl Predictor {
+impl<M: WeightModel> Predictor<M> {
     /// 設定からモデルを読み込んで予測器を構築する。
     ///
     /// 単一漢字辞書は `kanji_dict_path` の明示指定があればそれを使い、
-    /// なければ `.mbm` に同梱された辞書（学習時と同一）を使う。
+    /// なければモデルファイルに同梱された辞書（学習時と同一）を使う。
     pub fn load(config: PredictorConfig) -> Result<Self> {
-        let mut model = crate::loader::load(config.model_path())?;
+        let mut model = M::load(config.model_path())?;
         let kanji_dict = if let Some(ref path) = config.kanji_dict_path {
             load_kanji_dict(path)?
         } else {
-            std::mem::take(&mut model.kanji_dict)
+            model.take_kanji_dict()
         };
         Ok(Self {
             config,
@@ -376,15 +383,15 @@ impl Predictor {
     /// バイト列からモデルを読み込んで予測器を構築する (WASM / インメモリ用)。
     ///
     /// デフォルト設定 (numeric_confidence_threshold=0.5) を使用する。
-    /// 単一漢字辞書は `.mbm` に同梱されたものを使う。
+    /// 単一漢字辞書はモデルファイルに同梱されたものを使う。
     pub fn from_model_bytes(bytes: &[u8]) -> Result<Self> {
-        let mut model = crate::loader::load_from_bytes(bytes)?;
+        let mut model = M::load_from_bytes(bytes)?;
         let config = PredictorConfig {
             model_path: PathBuf::from("<memory>"),
             numeric_confidence_threshold: 0.5,
             kanji_dict_path: None,
         };
-        let kanji_dict = std::mem::take(&mut model.kanji_dict);
+        let kanji_dict = model.take_kanji_dict();
         Ok(Self {
             config,
             model,
@@ -457,7 +464,7 @@ impl Predictor {
         // 人名辞書マッチ (B/I フラグ + ユニット別固定読み)。辞書なしモデルでは
         // 全て O で、NameFlag* 特徴量は発火しない。
         let (name_flags, name_readings) =
-            crate::name_dict::compute_name_matches(&source_seq, &self.model.name_dict);
+            crate::name_dict::compute_name_matches(&source_seq, self.model.name_dict());
         let all_feat_keys = compute_source_features(&source_seq, &name_flags);
         let all_feat_ids: Vec<Vec<u32>> = all_feat_keys
             .iter()
@@ -465,7 +472,7 @@ impl Predictor {
             .collect();
 
         let n_cls = self.model.n_classes() as usize;
-        let mut int_scores = vec![0i32; n_cls];
+        let mut read_scratch = self.model.new_scratch();
         let mut scores = vec![0f32; n_cls];
 
         // --- 状態変数 ---
@@ -535,7 +542,7 @@ impl Predictor {
             // スコア計算 + argmax（漢字辞書制約付き）
             // ============================================================
             let (best_cls, best_score) =
-                self.read_argmax(entry, &all_feat_ids[i], &mut int_scores, &mut scores);
+                self.read_argmax(entry, &all_feat_ids[i], &mut read_scratch, &mut scores);
 
             let conf = sigmoid(best_score);
             let label = self.model.read_class(best_cls as u32).unwrap_or("");
@@ -555,7 +562,7 @@ impl Predictor {
                 let (next_cls, _) = self.read_argmax(
                     &source_seq[i + 1],
                     &all_feat_ids[i + 1],
-                    &mut int_scores,
+                    &mut read_scratch,
                     &mut scores,
                 );
                 let next_label = self.model.read_class(next_cls as u32).unwrap_or("");
@@ -620,7 +627,7 @@ impl Predictor {
                         let (next_cls, _) = self.read_argmax(
                             &source_seq[i + 1],
                             &all_feat_ids[i + 1],
-                            &mut int_scores,
+                            &mut read_scratch,
                             &mut scores,
                         );
                         let next_label = self.model.read_class(next_cls as u32).unwrap_or("");
@@ -789,22 +796,15 @@ impl Predictor {
     // ============================================================
 
     /// 1文字分の読みスコアを計算し、（漢字辞書制約付き）argmax のクラスとスコアを返す。
-    /// `int_scores` / `scores` はスクラッチバッファ（呼び出しごとに上書きされる）。
+    /// `scratch` / `scores` はスクラッチバッファ（呼び出しごとに上書きされる）。
     fn read_argmax(
         &self,
         entry: &SourceEntry,
         feat_ids: &[u32],
-        int_scores: &mut [i32],
+        scratch: &mut M::Scratch,
         scores: &mut [f32],
     ) -> (usize, f32) {
-        let n_cls = scores.len();
-        int_scores.fill(0);
-        self.compute_read_scores(feat_ids, int_scores);
-
-        for cls in 0..n_cls {
-            scores[cls] = self.model.intercept_read[cls]
-                + (int_scores[cls] as f32) * self.model.read_scale[cls];
-        }
+        self.model.compute_read_scores(feat_ids, scratch, scores);
 
         // 漢字辞書制約付き argmax
         if entry.ctype == CharType::Kanji && !self.kanji_dict.is_empty() {
@@ -813,7 +813,7 @@ impl Predictor {
                     // 辞書の読みが1つもモデルのクラスに存在しない場合は None。
                     // その場合は制約なし argmax にフォールバックする。
                     if let Some(result) =
-                        constrained_argmax(scores, &self.model.read_classes, readings)
+                        constrained_argmax(scores, self.model.read_classes(), readings)
                     {
                         return result;
                     }
@@ -823,31 +823,9 @@ impl Predictor {
         unconstrained_argmax(scores)
     }
 
-    /// 整数スコアに対して CSC 行列の特徴量列を加算する。
-    fn compute_read_scores(&self, feat_ids: &[u32], int_scores: &mut [i32]) {
-        for &feat_id in feat_ids {
-            if feat_id >= self.model.n_features() {
-                continue;
-            }
-            let col_start = self.model.csc_colptr[feat_id as usize] as usize;
-            let col_end = self.model.csc_colptr[feat_id as usize + 1] as usize;
-            for j in col_start..col_end {
-                let cls = self.model.csc_rowind[j] as usize;
-                int_scores[cls] += self.model.csc_data[j] as i32;
-            }
-        }
-    }
-
     /// 境界モデルの生スコア (sigmoid 前) を計算する。
     fn compute_boundary_score(&self, feat_ids: &[u32]) -> f32 {
-        let mut score = self.model.boundary_intercept[1];
-        let scale = self.model.boundary_scale;
-        for &feat_id in feat_ids {
-            if feat_id < self.model.n_features() {
-                score += (self.model.boundary_data[feat_id as usize] as f32) * scale;
-            }
-        }
-        score
+        self.model.compute_boundary_score(feat_ids)
     }
 
     /// 原文の `entry.cp` をそのまま結果に書き出す (bypass / 救済共通)。
@@ -1027,7 +1005,7 @@ fn sigmoid(x: f32) -> f32 {
 }
 
 /// 特徴量キー列をモデルの語彙テーブルで引いて feature_id 列に変換する。
-fn lookup_feature_ids(keys: &[FeatureKey], model: &MomoModel) -> Vec<u32> {
+fn lookup_feature_ids<M: WeightModel>(keys: &[FeatureKey], model: &M) -> Vec<u32> {
     let mut ids = Vec::with_capacity(keys.len());
     for k in keys {
         if let Some(id) = model.vocab_find(k) {
@@ -1274,7 +1252,7 @@ mod tests {
         std::fs::write(&dict_path, "漢\tケ\tコ\n").unwrap();
 
         let config = PredictorConfig::new(fixture_model_path()).with_kanji_dict_path(&dict_path);
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("漢").unwrap();
         std::fs::remove_file(&dict_path).ok();
@@ -1319,10 +1297,17 @@ mod tests {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture.mbm")
     }
 
+    /// `fixture_model_path()` の量子化前 (`.mbmf`) 版。
+    /// `gen_fixture_mbmf.py` が `int8_val * scale` を機械的に導出しているため、
+    /// `fixture.mbm` と厳密に同じ重みを持つ。
+    fn fixture_model_path_float() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture.mbmf")
+    }
+
     #[test]
     fn predict_empty_string() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).expect("fixture.mbm が読めること");
+        let predictor: Predictor = Predictor::load(config).expect("fixture.mbm が読めること");
 
         let result = predictor.predict("").unwrap();
         assert_eq!(result.source_text(), "");
@@ -1333,7 +1318,7 @@ mod tests {
     #[test]
     fn predict_bypass_symbol() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("、").unwrap();
         assert_eq!(result.kana_text(), "、");
@@ -1344,7 +1329,7 @@ mod tests {
     #[test]
     fn predict_bypass_alpha() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("abc").unwrap();
         assert_eq!(result.kana_text(), "abc");
@@ -1353,7 +1338,7 @@ mod tests {
     #[test]
     fn predict_mixed_bypass() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("a、b").unwrap();
         assert_eq!(result.kana_text(), "a、b");
@@ -1362,7 +1347,7 @@ mod tests {
     #[test]
     fn predict_keeps_original_source_text_for_compat_ideographs() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // ⺟ (U+2E9F, CJK部首補助) は内部で「母」(U+6BCD) に畳み込んで推論するが、
         // 結果の source_text とインデックスは原文（入力そのまま）基準で返す。
@@ -1374,7 +1359,7 @@ mod tests {
     #[test]
     fn predict_expands_latin_ligature() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // ﬃ (U+FB03) は "ffi" に展開され ALPHA としてバイパスされる。
         // source_text とインデックスは原文基準。
@@ -1405,7 +1390,7 @@ mod tests {
     #[test]
     fn predict_source_to_kana_indices() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("a").unwrap();
         assert_eq!(result.kana_to_source(), &[0usize]);
@@ -1416,12 +1401,37 @@ mod tests {
     fn predict_does_not_crash_on_complex_input() {
         // fixture.mbm では意味のあるカナは出ないが、ロジックが落ちないことを確認
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // 小書き仮名、々、漢数字、句読点 - 全ロジックパスを通す
         let inputs = ["きょう", "学校々", "三百二十一円。", "abc、漢字!"];
         for text in &inputs {
             let _ = predictor.predict(text).expect("crash しないこと");
+        }
+    }
+
+    #[test]
+    fn quantized_and_float_predictors_agree_on_fixture() {
+        // fixture.mbm (量子化) と fixture.mbmf (量子化前) は
+        // gen_fixture_mbmf.py が int8_val * scale を機械的に導出しているため
+        // 厳密に同じ重みを持つ。よって predict() の結果も完全一致するはず
+        // （WeightModel トレイトによる一般化が量子化パスの挙動を変えていないことの
+        // クロスチェック）。
+        let config = PredictorConfig::new(fixture_model_path());
+        let quantized: Predictor = Predictor::load(config).unwrap();
+
+        let float_config = PredictorConfig::new(fixture_model_path_float());
+        let float_predictor: crate::FloatPredictor =
+            crate::FloatPredictor::load(float_config).unwrap();
+
+        assert_eq!(quantized.n_classes(), float_predictor.n_classes());
+        assert_eq!(quantized.n_features(), float_predictor.n_features());
+
+        let inputs = ["きょう", "学校々", "三百二十一円。", "abc、漢字!", "漢字"];
+        for text in &inputs {
+            let q = quantized.predict(text).unwrap();
+            let f = float_predictor.predict(text).unwrap();
+            assert_eq!(q.kana_text(), f.kana_text(), "text={text}");
         }
     }
 
@@ -1432,7 +1442,7 @@ mod tests {
     #[test]
     fn get_source_segments_no_boundary() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパスのみ → 境界スペースなし → 全体が 1 セグメント
         let result = predictor.predict("abc").unwrap();
@@ -1442,7 +1452,7 @@ mod tests {
     #[test]
     fn get_source_segments_empty() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("").unwrap();
         assert!(result.get_source_segments().is_empty());
@@ -1451,7 +1461,7 @@ mod tests {
     #[test]
     fn format_source_segmented_no_boundary() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("abc").unwrap();
         assert_eq!(result.format_source_segmented(), "abc");
@@ -1460,7 +1470,7 @@ mod tests {
     #[test]
     fn format_segmented_ascii() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパス: 各文字が 1:1 でかなに対応
         let result = predictor.predict("abc").unwrap();
@@ -1470,7 +1480,7 @@ mod tests {
     #[test]
     fn format_segmented_symbol() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("、").unwrap();
         assert_eq!(result.format_segmented(), "、");
@@ -1483,7 +1493,7 @@ mod tests {
     #[test]
     fn kana_to_source_char_ascii() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("abc").unwrap();
         // a→0, b→1, c→2 のコードポイントインデックス
@@ -1493,7 +1503,7 @@ mod tests {
     #[test]
     fn source_to_kana_char_ascii() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("abc").unwrap();
         // 原文 a(0)→かな 0, b(1)→1, c(2)→2
@@ -1506,7 +1516,7 @@ mod tests {
     #[test]
     fn kana_to_source_char_and_source_to_kana_char_roundtrip() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // 記号 (マルチバイト) でも整合性が取れること
         let result = predictor.predict("a、b").unwrap();
@@ -1533,7 +1543,7 @@ mod tests {
     #[test]
     fn source_to_braille_char_one_to_one() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパス: a→kana[0], b→kana[1], c→kana[2]
         // kana_to_braille が 1:1 のとき、source_to_braille も 1:1 になる
@@ -1550,7 +1560,7 @@ mod tests {
     #[test]
     fn source_to_braille_char_dedup_compound() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパス: a→kana[0], b→kana[1]
         // kana[0] と kana[1] が同じ点字位置 (複合音を模倣) → dedup されること
@@ -1566,7 +1576,7 @@ mod tests {
     #[test]
     fn source_to_braille_char_empty() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("").unwrap();
         let s2b = result.source_to_braille_char(&[]);
@@ -1580,7 +1590,7 @@ mod tests {
     #[test]
     fn braille_char_to_source_empty() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("").unwrap();
         assert!(result.braille_char_to_source(&[], 0).is_empty());
@@ -1589,7 +1599,7 @@ mod tests {
     #[test]
     fn braille_char_to_source_one_to_one() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // ASCII バイパス: a→kana[0]→braille[0], b→kana[1]→braille[1], c→kana[2]→braille[2]
         let result = predictor.predict("abc").unwrap();
@@ -1600,7 +1610,7 @@ mod tests {
     #[test]
     fn braille_char_to_source_with_flag_cells() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // フラグセルを模倣: kana[0](a→src0) が braille [0,2) を占有（フラグ込み）
         //                   kana[1](b→src1) が braille [2,4) を占有
@@ -1612,7 +1622,7 @@ mod tests {
     #[test]
     fn braille_char_to_source_compound() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // 複合音を模倣: kana[0](a→src0) と kana[1](b→src1) が同じ braille pos 0 を指す。
         // kana[0] の範囲 [0,0) は空になり、kana[1] の範囲 [0,2) が両セルを引き継ぐ。
@@ -1628,7 +1638,7 @@ mod tests {
     #[test]
     fn braille_char_to_source_roundtrip_consistency() {
         let config = PredictorConfig::new(fixture_model_path());
-        let predictor = Predictor::load(config).unwrap();
+        let predictor: Predictor = Predictor::load(config).unwrap();
 
         // source_to_braille_char と braille_char_to_source の整合性:
         // s2b[s] に bi が含まれるなら b2s[bi] == s でなければならない

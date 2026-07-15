@@ -8,6 +8,8 @@
 
 use crate::feature::FeatureKey;
 use crate::name_dict::NameIndex;
+use crate::weight_model::WeightModel;
+use crate::Result;
 
 // ============================================================
 // 語彙テーブル
@@ -170,6 +172,85 @@ impl Default for MomoModel {
             n_classes: 0,
             n_features: 0,
         }
+    }
+}
+
+// ============================================================
+// WeightModel
+// ============================================================
+
+impl WeightModel for MomoModel {
+    /// int32 で加算してから、最後にクラスごとの scale を掛ける
+    /// （量子化前の挙動・性能を変えないため、既存のロジックをそのまま維持する）。
+    type Scratch = Vec<i32>;
+
+    fn load(path: &std::path::Path) -> Result<Self> {
+        crate::loader::load(path)
+    }
+
+    fn load_from_bytes(bytes: &[u8]) -> Result<Self> {
+        crate::loader::load_from_bytes(bytes)
+    }
+
+    fn new_scratch(&self) -> Vec<i32> {
+        vec![0i32; self.n_classes as usize]
+    }
+
+    fn n_classes(&self) -> u32 {
+        self.n_classes()
+    }
+
+    fn n_features(&self) -> u32 {
+        self.n_features()
+    }
+
+    fn read_class(&self, class_id: u32) -> Option<&str> {
+        self.read_class(class_id)
+    }
+
+    fn read_classes(&self) -> &[String] {
+        &self.read_classes
+    }
+
+    fn vocab_find(&self, key: &FeatureKey) -> Option<u32> {
+        self.vocab_find(key)
+    }
+
+    fn name_dict(&self) -> &NameIndex {
+        &self.name_dict
+    }
+
+    fn take_kanji_dict(&mut self) -> Vec<(char, Vec<String>)> {
+        std::mem::take(&mut self.kanji_dict)
+    }
+
+    fn compute_read_scores(&self, feat_ids: &[u32], int_scores: &mut Vec<i32>, scores: &mut [f32]) {
+        int_scores.fill(0);
+        for &feat_id in feat_ids {
+            if feat_id >= self.n_features {
+                continue;
+            }
+            let col_start = self.csc_colptr[feat_id as usize] as usize;
+            let col_end = self.csc_colptr[feat_id as usize + 1] as usize;
+            for j in col_start..col_end {
+                let cls = self.csc_rowind[j] as usize;
+                int_scores[cls] += self.csc_data[j] as i32;
+            }
+        }
+        for cls in 0..scores.len() {
+            scores[cls] = self.intercept_read[cls] + (int_scores[cls] as f32) * self.read_scale[cls];
+        }
+    }
+
+    fn compute_boundary_score(&self, feat_ids: &[u32]) -> f32 {
+        let mut score = self.boundary_intercept[1];
+        let scale = self.boundary_scale;
+        for &feat_id in feat_ids {
+            if feat_id < self.n_features {
+                score += (self.boundary_data[feat_id as usize] as f32) * scale;
+            }
+        }
+        score
     }
 }
 

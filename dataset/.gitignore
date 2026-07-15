@@ -1,4 +1,5 @@
 *.zip
 *.mbm
+*.mbmf
 *.txt
 basic_data.tsv

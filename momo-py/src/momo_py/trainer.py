@@ -43,7 +43,7 @@ from .name_dict import (
     parse_name_marks,
 )
 from .predictor import LRModelBundle, SINGLE_KANJI_DICT_FILENAME
-from .exporter import export
+from .exporter import export, export_float
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])
 
@@ -581,6 +581,8 @@ def train(
     出力ファイル:
         basename_bundle.pkl  - モデル一式（joblib）
         basename.zip         - 上記をまとめたパッケージ
+        basename.mbm         - C++/Rust 向け量子化バイナリ（推論用）
+        basename.mbmf        - 量子化前 float32 バイナリ（.mbm との比較用サイドカー）
     """
     name_index: dict = {}
     name_dict_entries = 0
@@ -722,6 +724,7 @@ def train(
     bundle_name = os.path.basename(base) + "_bundle.pkl"
     zip_path = base + f"_{window}.zip"
     mbm_path = base + f"_{window}.mbm"
+    mbmf_path = base + f"_{window}.mbmf"
 
     out_dir = os.path.dirname(zip_path)
     if out_dir:
@@ -782,3 +785,7 @@ def train(
     print(f"   └ version_info.json")
     export(zip_path, mbm_path)
     print(f"量子化モデル (MBM) エクスポート完了: {mbm_path}")
+
+    # 量子化前の float32 サイドカーも一緒に書き出す（.mbm との比較用）。
+    export_float(zip_path, mbmf_path)
+    print(f"非量子化モデル (MBMF) エクスポート完了: {mbmf_path}")

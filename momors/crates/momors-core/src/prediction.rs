@@ -13,6 +13,7 @@
 use crate::Error;
 use std::path::{Path, PathBuf};
 
+use crate::bracket::{self, Outer, Role};
 use crate::char_type::CharType;
 use crate::feature::FeatureKey;
 use crate::featurize::{compute_source_features, to_source_seq, SourceEntry};
@@ -423,10 +424,32 @@ impl Predictor {
         // 行う。Python 版 predict() の normalize_input() 呼び出しと対応。
         // パイプラインは正規化後テキスト基準で動かし、最後に原文基準へ戻す。
         let normalized = crate::normalize::normalize_input(text);
-        let mut result = self.predict_normalized(&normalized.text)?;
+        let mut result = self.predict_with_brackets(&normalized.text)?;
         if let Some(byte_map) = &normalized.byte_map {
             remap_result_to_source(&mut result, text, byte_map);
         }
+        Ok(result)
+    }
+
+    /// 括弧類を除去して推論し、結果へルールで書き戻す。
+    ///
+    /// 括弧は本文の分かち書きをほぼ変えない「オーバーレイ」なので、bypass として
+    /// モデルに流すと (1) 特徴量ウィンドウを分断し (2) 周囲のマスあけを境界モデル
+    /// 任せにしてしまう。そこで [`strip_brackets`] で本文から抜いて素の文として
+    /// 推論し、[`reinsert_brackets`] で開き=後続に密着 / 閉じ=前接に密着させて戻す。
+    /// マスあけは括弧種の外エッジ規則（[`crate::bracket::Outer`]）で決める。
+    ///
+    /// 入出力の座標系は引数 `text`（正規化後テキスト）基準。括弧が無ければ
+    /// [`predict_normalized`] をそのまま呼ぶ（オーバーヘッドゼロ）。
+    ///
+    /// [`predict_normalized`]: Predictor::predict_normalized
+    fn predict_with_brackets(&self, text: &str) -> Result<PredictionResult> {
+        let stripped = strip_brackets(text);
+        if stripped.brackets.is_empty() {
+            return self.predict_normalized(text);
+        }
+        let mut result = self.predict_normalized(&stripped.text)?;
+        reinsert_brackets(&mut result, text, &stripped);
         Ok(result)
     }
 
@@ -948,6 +971,247 @@ fn remap_result_to_source(result: &mut PredictionResult, source_text: &str, byte
     result.source_text = source_text.to_string();
 }
 
+// ============================================================
+// 括弧の除去 / 再挿入
+// ============================================================
+
+/// 除去した括弧1つ分の記録。
+struct BracketMark {
+    /// 括弧文字。
+    ch: char,
+    role: Role,
+    outer: Outer,
+    /// 除去前テキスト（norm 基準）での **UTF-8 バイト位置**。
+    norm_byte: usize,
+}
+
+/// [`strip_brackets`] の結果。
+struct Stripped {
+    /// 括弧を除いたテキスト。
+    text: String,
+    /// stripped の各バイト → 由来する norm 文字の先頭バイト位置。
+    /// `kana_to_src_index`（= stripped の文字先頭バイト）を norm 座標へ戻すのに使う。
+    strip_to_norm: Vec<usize>,
+    /// 除去した括弧（norm のバイト昇順）。
+    brackets: Vec<BracketMark>,
+    /// 除去前テキスト（norm）の総バイト数。
+    norm_len: usize,
+}
+
+/// テキストから括弧類を除去し、位置と分類を記録する。
+///
+/// `norm_text` は正規化後テキスト。括弧は [`bracket::lookup`] で判定する。
+fn strip_brackets(norm_text: &str) -> Stripped {
+    let mut text = String::with_capacity(norm_text.len());
+    let mut strip_to_norm = Vec::with_capacity(norm_text.len());
+    let mut brackets = Vec::new();
+    for (b, c) in norm_text.char_indices() {
+        if let Some((role, outer)) = bracket::lookup(c) {
+            brackets.push(BracketMark {
+                ch: c,
+                role,
+                outer,
+                norm_byte: b,
+            });
+        } else {
+            text.push(c);
+            for _ in 0..c.len_utf8() {
+                strip_to_norm.push(b);
+            }
+        }
+    }
+    Stripped {
+        text,
+        strip_to_norm,
+        brackets,
+        norm_len: norm_text.len(),
+    }
+}
+
+/// 外エッジ規則と現状のスペース有無から、その境界にスペースを置くか決める。
+fn outer_wants_space(outer: Outer, had_space: bool) -> bool {
+    match outer {
+        Outer::Attach => false,
+        Outer::Space => true,
+        Outer::Defer => had_space,
+    }
+}
+
+/// 除去した括弧を推論結果へ書き戻す。
+///
+/// `result` は stripped テキストに対する推論結果（座標系は stripped）。
+/// 本関数は結果を **norm 座標＋括弧入り** に作り替える:
+///
+/// - 開き括弧は「直後に食いつく内容ユニット」の直前に、閉じ括弧は「直前に食いつく
+///   内容ユニット」の直後に挿入する。
+/// - 括弧まわりのマスあけは外エッジ規則で決める。閉じ→開きが隣接する境界は
+///   必ずあける（点字表記法のカッコ連続規則に合わせる）。
+/// - 括弧なしの境界（内容ユニット同士）は境界モデルの判定をそのまま使う。
+fn reinsert_brackets(result: &mut PredictionResult, norm_text: &str, stripped: &Stripped) {
+    // --- 1. かな→原文インデックスを stripped 座標から norm 座標へ写す ---
+    for v in &mut result.kana_to_src_index {
+        *v = stripped.strip_to_norm[*v];
+    }
+
+    // --- 2. かな列をセル（1かな文字＝1セル）へ分解 ---
+    struct Cell {
+        ch: char,
+        src: usize,
+        conf: f32,
+        space: bool,
+    }
+    let mut cells: Vec<Cell> = Vec::with_capacity(result.kana_text.len());
+    for (kb, ch) in result.kana_text.char_indices() {
+        cells.push(Cell {
+            ch,
+            src: result.kana_to_src_index[kb],
+            conf: result.confidences[kb],
+            space: ch == ' ',
+        });
+    }
+    // 内容セル（非スペース）の index。src は左→右で非減少。
+    let content: Vec<usize> = cells
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.space)
+        .map(|(i, _)| i)
+        .collect();
+
+    // --- 3. 括弧を内容セルの前(open)／後(close)へ割り付ける ---
+    use std::collections::HashMap;
+    let mut prefix: HashMap<usize, Vec<&BracketMark>> = HashMap::new();
+    let mut suffix: HashMap<usize, Vec<&BracketMark>> = HashMap::new();
+    // 内容セルが片側に無い退化ケース（文頭の閉じ・文末の開き）。
+    let mut leading: Vec<&BracketMark> = Vec::new();
+    let mut trailing: Vec<&BracketMark> = Vec::new();
+    for bm in &stripped.brackets {
+        match bm.role {
+            Role::Open => match content.iter().find(|&&ci| cells[ci].src > bm.norm_byte) {
+                Some(&ci) => prefix.entry(ci).or_default().push(bm),
+                None => trailing.push(bm),
+            },
+            Role::Close => match content
+                .iter()
+                .rev()
+                .find(|&&ci| cells[ci].src < bm.norm_byte)
+            {
+                Some(&ci) => suffix.entry(ci).or_default().push(bm),
+                None => leading.push(bm),
+            },
+        }
+    }
+
+    // --- 4. 再構築 ---
+    let mut kana = String::new();
+    let mut k2s: Vec<usize> = Vec::new();
+    let mut conf: Vec<f32> = Vec::new();
+
+    let push_text = |kana: &mut String,
+                     k2s: &mut Vec<usize>,
+                     conf: &mut Vec<f32>,
+                     s: &str,
+                     src: usize,
+                     c: f32| {
+        kana.push_str(s);
+        for _ in 0..s.len() {
+            k2s.push(src);
+            conf.push(c);
+        }
+    };
+    let push_bracket =
+        |kana: &mut String, k2s: &mut Vec<usize>, conf: &mut Vec<f32>, bm: &BracketMark| {
+            let mut buf = [0u8; 4];
+            push_text(
+                kana,
+                k2s,
+                conf,
+                bm.ch.encode_utf8(&mut buf),
+                bm.norm_byte,
+                1.0,
+            );
+        };
+
+    // 内容セルが無い場合は括弧を norm 順に並べるだけ。
+    if content.is_empty() {
+        for bm in &stripped.brackets {
+            push_bracket(&mut kana, &mut k2s, &mut conf, bm);
+        }
+    } else {
+        // 文頭側の退化した閉じ括弧。
+        for bm in &leading {
+            push_bracket(&mut kana, &mut k2s, &mut conf, bm);
+        }
+
+        for j in 0..content.len() {
+            let ci = content[j];
+
+            // このセルに前置する開き括弧。
+            if let Some(opens) = prefix.get(&ci) {
+                for bm in opens {
+                    push_bracket(&mut kana, &mut k2s, &mut conf, bm);
+                }
+            }
+            // 内容セル本体。
+            let mut buf = [0u8; 4];
+            push_text(
+                &mut kana,
+                &mut k2s,
+                &mut conf,
+                cells[ci].ch.encode_utf8(&mut buf),
+                cells[ci].src,
+                cells[ci].conf,
+            );
+            // このセルに後置する閉じ括弧。
+            if let Some(closes) = suffix.get(&ci) {
+                for bm in closes {
+                    push_bracket(&mut kana, &mut k2s, &mut conf, bm);
+                }
+            }
+
+            // 次の内容セルとの境界のマスあけ。
+            if j + 1 < content.len() {
+                let next_ci = content[j + 1];
+                let had_space = cells[ci + 1..next_ci].iter().any(|c| c.space);
+                // この境界に面する括弧の外エッジ:
+                //   左＝直前セルの後置閉じの最後 / 右＝次セルの前置開きの最初
+                let close_edge = suffix.get(&ci).and_then(|v| v.last()).map(|bm| bm.outer);
+                let open_edge = prefix
+                    .get(&next_ci)
+                    .and_then(|v| v.first())
+                    .map(|bm| bm.outer);
+                let want_space = match (close_edge, open_edge) {
+                    // 閉じ→開きの隣接は必ずあける。
+                    (Some(_), Some(_)) => true,
+                    (Some(o), None) | (None, Some(o)) => outer_wants_space(o, had_space),
+                    // 括弧の無い境界はモデル判定のまま。
+                    (None, None) => had_space,
+                };
+                if want_space {
+                    push_text(&mut kana, &mut k2s, &mut conf, " ", cells[ci].src, 1.0);
+                }
+            }
+        }
+
+        // 文末側の退化した開き括弧。
+        for bm in &trailing {
+            push_bracket(&mut kana, &mut k2s, &mut conf, bm);
+        }
+    }
+
+    // --- 5. 結果を norm 座標で確定し、逆引きを作り直す ---
+    result.kana_text = kana;
+    result.kana_to_src_index = k2s;
+    result.confidences = conf;
+    result.source_text = norm_text.to_string();
+    let mut src_to_kana: Vec<Vec<usize>> = vec![Vec::new(); stripped.norm_len];
+    for (j, &src) in result.kana_to_src_index.iter().enumerate() {
+        if src < stripped.norm_len {
+            src_to_kana[src].push(j);
+        }
+    }
+    result.src_to_kana_index = src_to_kana;
+}
+
 /// スコア配列の argmax を返す。
 ///
 /// `n_classes >= 1` は loader (`MomoModel` 読み込み時) が保証する不変条件。
@@ -1223,6 +1487,116 @@ fn small_kana_to_kana(cp: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ============================================================
+    // strip_brackets / reinsert_brackets
+    // ============================================================
+
+    /// stripped 上の推論結果を手で組み立てるヘルパ。
+    /// `kana` の各文字が `srcs[i]`（stripped バイト位置）に対応するとみなす。
+    fn make_result(stripped_text: &str, kana: &str, srcs: &[usize]) -> PredictionResult {
+        let chars: Vec<char> = kana.chars().collect();
+        assert_eq!(
+            chars.len(),
+            srcs.len(),
+            "kana 文字数と srcs 長が一致すること"
+        );
+        let mut kana_to_src = Vec::new();
+        for (ch, &s) in chars.iter().zip(srcs) {
+            for _ in 0..ch.len_utf8() {
+                kana_to_src.push(s);
+            }
+        }
+        PredictionResult {
+            source_text: stripped_text.to_string(),
+            kana_text: kana.to_string(),
+            confidences: vec![0.9; kana_to_src.len()],
+            kana_to_src_index: kana_to_src,
+            src_to_kana_index: vec![Vec::new(); stripped_text.len()],
+        }
+    }
+
+    #[test]
+    fn strip_brackets_records_positions() {
+        // a「b」c : a=0 「=1(3B) b=4 」=5(3B) c=8
+        let s = strip_brackets("a「b」c");
+        assert_eq!(s.text, "abc");
+        assert_eq!(s.strip_to_norm, vec![0, 4, 8]);
+        assert_eq!(s.brackets.len(), 2);
+        assert_eq!(s.brackets[0].ch, '「');
+        assert_eq!(s.brackets[0].norm_byte, 1);
+        assert_eq!(s.brackets[1].ch, '」');
+        assert_eq!(s.brackets[1].norm_byte, 5);
+        assert_eq!(s.norm_len, "a「b」c".len());
+    }
+
+    #[test]
+    fn strip_brackets_none_when_absent() {
+        let s = strip_brackets("あいう");
+        assert!(s.brackets.is_empty());
+        assert_eq!(s.text, "あいう");
+    }
+
+    #[test]
+    fn reinsert_quote_attaches_inner_no_extra_space() {
+        // norm "a「b」c" / モデルは空白なしで "abc" と分割 → 括弧が b に食いつく
+        let stripped = strip_brackets("a「b」c");
+        let mut r = make_result(&stripped.text, "abc", &[0, 1, 2]);
+        reinsert_brackets(&mut r, "a「b」c", &stripped);
+        assert_eq!(r.kana_text, "a「b」c");
+        assert_eq!(r.source_text, "a「b」c");
+        // インデックス長の整合
+        assert_eq!(r.kana_to_src_index.len(), r.kana_text.len());
+        assert_eq!(r.confidences.len(), r.kana_text.len());
+        assert_eq!(r.src_to_kana_index.len(), "a「b」c".len());
+    }
+
+    #[test]
+    fn reinsert_quote_defer_keeps_model_spaces() {
+        // 「」= Defer: モデルが "a b c" と空けたら外側の空きは温存される
+        let stripped = strip_brackets("a「b」c");
+        let mut r = make_result(&stripped.text, "a b c", &[0, 0, 1, 1, 2]);
+        reinsert_brackets(&mut r, "a「b」c", &stripped);
+        // a␣「b」␣c : 開きの左・閉じの右の空きはモデル判定のまま
+        assert_eq!(r.kana_text, "a 「b」 c");
+    }
+
+    #[test]
+    fn reinsert_paren_attach_removes_seam_space() {
+        // オケ（オーケストラ）型の縮約: （）= Attach → 継ぎ目の空きを詰める
+        // norm "a（b）c" : a=0 （=1(3B) b=4 ）=5(3B) c=8
+        let stripped = strip_brackets("a（b）c");
+        assert_eq!(stripped.text, "abc");
+        // モデルは "a b c" と3分割したと仮定
+        let mut r = make_result(&stripped.text, "a b c", &[0, 0, 1, 1, 2]);
+        reinsert_brackets(&mut r, "a（b）c", &stripped);
+        // 外エッジ Attach で両側の境界スペースが消える
+        assert_eq!(r.kana_text, "a（b）c");
+    }
+
+    #[test]
+    fn reinsert_close_open_adjacent_forces_space() {
+        // ）（ の隣接は必ずあける（Attach 同士でも）
+        // norm "a）（b" : a=0 ）=1(3B) （=4(3B) b=7
+        let stripped = strip_brackets("a）（b");
+        assert_eq!(stripped.text, "ab");
+        let mut r = make_result(&stripped.text, "ab", &[0, 1]);
+        reinsert_brackets(&mut r, "a）（b", &stripped);
+        assert_eq!(r.kana_text, "a）（b".replace("）（", "） （"));
+    }
+
+    #[test]
+    fn reinsert_indices_roundtrip() {
+        let stripped = strip_brackets("a「b」c");
+        let mut r = make_result(&stripped.text, "abc", &[0, 1, 2]);
+        reinsert_brackets(&mut r, "a「b」c", &stripped);
+        // s2k[s] に j が含まれるなら kana_to_src[j] == s
+        for (s, kana_positions) in r.src_to_kana_index.iter().enumerate() {
+            for &j in kana_positions {
+                assert_eq!(r.kana_to_src_index[j], s);
+            }
+        }
+    }
 
     #[test]
     fn config_builder_chains() {

@@ -12,7 +12,7 @@ use momors_braille::{
     BrailleDocument, BrailleResult, BrailleTranslator, DocumentConfig, EnglishTranslator,
     JapaneseTranslator, NabccCase, OutputFormat,
 };
-use momors_core::{PredictionResult, Predictor, PredictorConfig};
+use momors_core::{FloatPredictor, PredictionResult, Predictor, PredictorConfig};
 
 fn data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("MOMO_DATASET_DIR") {
@@ -46,7 +46,7 @@ impl ModelSize {
 #[derive(Debug, Parser)]
 #[command(name = "momo", version, about, long_about = None)]
 struct Cli {
-    /// モデルファイル (.mbm) のパス
+    /// モデルファイル (.mbm または量子化前 .mbmf) のパス
     #[arg(long)]
     model_file: Option<String>,
 
@@ -129,6 +129,38 @@ impl From<NabccCaseArg> for NabccCase {
     }
 }
 
+/// `.mbm`（量子化済み）と `.mbmf`（量子化前）のどちらでも読み込めるようにする薄いラッパー。
+///
+/// `momo` コマンドが使うのは `predict()` のみなので、そこだけ手動でディスパッチする。
+/// モデルファイルの拡張子が `.mbmf` なら [`FloatPredictor`]、それ以外は既定の
+/// [`Predictor`]（`.mbm`）として読み込む。
+enum AnyPredictor {
+    Quantized(Predictor),
+    Float(FloatPredictor),
+}
+
+impl AnyPredictor {
+    fn load(config: PredictorConfig) -> momors_core::Result<Self> {
+        let is_float = config
+            .model_path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("mbmf"));
+        if is_float {
+            FloatPredictor::load(config).map(AnyPredictor::Float)
+        } else {
+            Predictor::load(config).map(AnyPredictor::Quantized)
+        }
+    }
+
+    fn predict(&self, text: &str) -> momors_core::Result<PredictionResult> {
+        match self {
+            AnyPredictor::Quantized(p) => p.predict(text),
+            AnyPredictor::Float(p) => p.predict(text),
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -150,7 +182,7 @@ fn main() -> ExitCode {
         config = config.with_kanji_dict_path(&p);
     }
 
-    let predictor = match Predictor::load(config) {
+    let predictor = match AnyPredictor::load(config) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("モデル読み込みエラー: {e}");
@@ -182,7 +214,7 @@ fn main() -> ExitCode {
 // 呼び出し側は言語判定やテーブルの出し分けを行わない。
 
 /// テキストを仮名に変換する（漢字かな交じり文 → かな）。空文字列も含め Predictor に委ねる。
-fn to_kana(text: &str, predictor: &Predictor) -> Result<PredictionResult, String> {
+fn to_kana(text: &str, predictor: &AnyPredictor) -> Result<PredictionResult, String> {
     predictor
         .predict(text)
         .map_err(|e| format!("仮名変換エラー: {e}"))
@@ -251,7 +283,7 @@ fn write_confidences(out: &mut impl Write, confidences: &[f32]) {
 // ファイル整形モード
 // ============================================================
 
-fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
+fn run_format(cli: &Cli, predictor: &AnyPredictor) -> Result<(), String> {
     let ext = cli
         .output
         .as_ref()
@@ -326,7 +358,7 @@ fn run_format(cli: &Cli, predictor: &Predictor) -> Result<(), String> {
 // 標準入力モード
 // ============================================================
 
-fn run_stdin(cli: &Cli, predictor: &Predictor) -> ExitCode {
+fn run_stdin(cli: &Cli, predictor: &AnyPredictor) -> ExitCode {
     let lt: Option<BrailleTranslator> = if cli.braille {
         match make_line_translator(cli.table.as_ref()) {
             Ok(v) => Some(v),

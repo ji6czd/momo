@@ -860,6 +860,28 @@ impl<M: WeightModel> Predictor<M> {
             }
         }
 
+        // --- 末尾のマスあけを落とす ---
+        // 末尾の空白には性質の違う2つが混ざる:
+        //   - 境界スペース: 境界モデルが最終文字に付けた「判断」。後ろに続く語が
+        //     ない以上、区切りとして意味を持たないので索引・自信度ごと落とす。
+        //   - 原文の空白: bypass で素通しされた「内容」。書き手が書いたものなので
+        //     残す。ここで止めるので、その手前の境界スペースには手を出さない。
+        // 見分けは splice_atoms と同じく、src が自分自身（＝原文で空白）を指すか
+        // どうかで行う。境界スペースの src は直前の内容文字を指す。
+        while result.kana_text.ends_with(' ') {
+            let src = result.kana_to_src_index[result.kana_text.len() - 1];
+            let from_source = text[src..]
+                .chars()
+                .next()
+                .is_some_and(|c| get_char_type(c) == CharType::Space);
+            if from_source {
+                break;
+            }
+            result.kana_text.pop();
+            result.kana_to_src_index.pop();
+            result.confidences.pop();
+        }
+
         // --- src_to_kana_index 構築 (kana_to_src_index から逆引き) ---
         let src_size = text.len();
         for (j, &src_pos) in result.kana_to_src_index.iter().enumerate() {

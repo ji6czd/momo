@@ -10,7 +10,7 @@
 //! # fn main() -> momors_core::Result<()> {
 //! let config = PredictorConfig::new("basic_data.mbm");
 //!
-//! let predictor = Predictor::load(config)?;
+//! let predictor: Predictor = Predictor::load(config)?;
 //!
 //! let result = predictor.predict("漢字混じりの文章")?;
 //! println!("{}", result.kana_text());
@@ -36,11 +36,14 @@ mod bracket;
 mod char_type;
 mod feature;
 mod featurize;
+mod float_loader;
+mod float_model;
 mod loader;
 mod model;
 mod name_dict;
 mod normalize;
 mod numeric;
+mod weight_model;
 
 // ============================================================
 // 公開 API の再エクスポート
@@ -48,3 +51,10 @@ mod numeric;
 
 pub use error::{Error, Result};
 pub use prediction::{PredictionResult, Predictor, PredictorConfig};
+
+/// 量子化前 (`.mbmf`) の重みで推論する `Predictor`。
+///
+/// `.mbm`（int8 量子化）を読む既定の [`Predictor`] と同じ `predict()` API を
+/// 持つため、量子化前後でテキスト推論の結果を直接比較できる
+/// （`momo-compare-quant` CLI の用途）。
+pub type FloatPredictor = Predictor<float_model::FloatMomoModel>;

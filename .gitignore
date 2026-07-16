@@ -5,3 +5,8 @@ momo-installer/*.wixpdb
 bin/
 obj/
 
+# 上の bin/ は .NET のビルド出力用だが、Cargo の追加バイナリ規約である
+# src/bin/ とパス名が衝突するため、momors-cli の src/bin/ だけ除外を解除する。
+!momors/crates/momors-cli/src/bin/
+!momors/crates/momors-cli/src/bin/**
+

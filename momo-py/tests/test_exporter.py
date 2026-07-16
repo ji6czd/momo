@@ -15,7 +15,15 @@ from scipy.sparse import csr_matrix
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import SGDClassifier
 
-from momo_py.exporter import export, parse_feature_key, FT
+from momo_py.exporter import (
+    FT,
+    char32_count,
+    chartype_count,
+    export,
+    export_float,
+    is_uint8_payload,
+    parse_feature_key,
+)
 from momo_py.predictor import LRModelBundle
 
 
@@ -141,3 +149,118 @@ class TestExportNameDict:
         assert data[4] == 0x04
         # 辞書なしモデルは n_names = 0、続けて単一漢字辞書テーブル
         assert data.endswith(struct.pack("<I", 0) + _expected_kanji_section())
+
+
+# ------------------------------------------------------------------ #
+# export_float（.mbmf: 量子化前 float32 サイドカー）
+# ------------------------------------------------------------------ #
+def _skip_vocab(buf: bytes, offset: int, n_features: int) -> int:
+    """語彙テーブルを読み飛ばして直後のオフセットを返す。"""
+    for _ in range(n_features):
+        ft = buf[offset]
+        offset += 1
+        offset += chartype_count(ft)
+        offset += char32_count(ft) * 4
+        if is_uint8_payload(ft):
+            offset += 1
+        offset += 4  # feature_id (u32)
+    return offset
+
+
+def _skip_labels(buf: bytes, offset: int, n_classes: int) -> int:
+    """読みラベルテーブルを読み飛ばして直後のオフセットを返す。"""
+    for _ in range(n_classes):
+        length = buf[offset]
+        offset += 1 + length
+    return offset
+
+
+class TestExportFloat:
+    def test_header_magic_and_version(self, tmp_path):
+        zip_path = _make_model_zip(tmp_path, None)
+        out = tmp_path / "model.mbmf"
+        export_float(str(zip_path), str(out))
+
+        data = out.read_bytes()
+        assert data[:4] == b"MBMF"
+        assert data[4] == 0x01  # version
+
+    def test_read_weights_are_plain_float32(self, tmp_path):
+        zip_path = _make_model_zip(tmp_path, None)
+        out = tmp_path / "model.mbmf"
+        export_float(str(zip_path), str(out))
+
+        data = out.read_bytes()
+        n_classes, n_features = struct.unpack_from("<II", data, 8)
+
+        offset = _skip_vocab(data, 16, n_features)
+        offset = _skip_labels(data, offset, n_classes)
+
+        (n_nonzero,) = struct.unpack_from("<I", data, offset)
+        offset += 4
+        offset += 4 * (n_classes + 1)  # indptr
+        offset += 4 * n_nonzero  # indices
+        read_data = struct.unpack_from(f"<{n_nonzero}f", data, offset)
+
+        # _make_model_zip の coef は全要素が非ゼロ（0.5 / -0.25 の密行列）
+        assert n_nonzero == n_classes * n_features
+        row0 = read_data[:n_features]
+        row1 = read_data[n_features:]
+        assert all(abs(v - 0.5) < 1e-6 for v in row0)
+        assert all(abs(v - (-0.25)) < 1e-6 for v in row1)
+
+    def test_matches_quantized_export_within_tolerance(self, tmp_path):
+        """.mbm（量子化）と .mbmf（非量子化）が同じ .zip から生成されたとき、
+        int8 * scale ≈ float32 の関係が読みモデル・境界モデル双方で成り立つこと。"""
+        zip_path = _make_model_zip(tmp_path, None)
+        mbm_path = tmp_path / "model.mbm"
+        mbmf_path = tmp_path / "model.mbmf"
+        export(str(zip_path), str(mbm_path))
+        export_float(str(zip_path), str(mbmf_path))
+
+        mbm = mbm_path.read_bytes()
+        mbmf = mbmf_path.read_bytes()
+
+        n_classes, n_features = struct.unpack_from("<II", mbmf, 8)
+        assert struct.unpack_from("<II", mbm, 8) == (n_classes, n_features)
+
+        # --- .mbmf: 読みモデル重み + 境界モデル重み ---
+        off_f = _skip_vocab(mbmf, 16, n_features)
+        off_f = _skip_labels(mbmf, off_f, n_classes)
+        (n_nonzero_f,) = struct.unpack_from("<I", mbmf, off_f)
+        off_f += 4
+        off_f += 4 * (n_classes + 1)  # indptr
+        off_f += 4 * n_nonzero_f  # indices
+        read_data_f = struct.unpack_from(f"<{n_nonzero_f}f", mbmf, off_f)
+        off_f += 4 * n_nonzero_f
+        off_f += 4 * n_classes  # intercept_read
+        boundary_data_f = struct.unpack_from(f"<{n_features}f", mbmf, off_f)
+
+        # --- .mbm: 読みモデル重み（量子化）+ 境界モデル重み（量子化）---
+        off_q = _skip_vocab(mbm, 16, n_features)
+        off_q = _skip_labels(mbm, off_q, n_classes)
+        scales_r = struct.unpack_from(f"<{n_classes}f", mbm, off_q)
+        off_q += 4 * n_classes
+        (n_nonzero_q,) = struct.unpack_from("<I", mbm, off_q)
+        off_q += 4
+        indptr_q = struct.unpack_from(f"<{n_classes + 1}I", mbm, off_q)
+        off_q += 4 * (n_classes + 1)
+        off_q += 4 * n_nonzero_q  # indices
+        data_q = struct.unpack_from(f"<{n_nonzero_q}b", mbm, off_q)
+        off_q += n_nonzero_q
+        off_q += 4 * n_classes  # intercept_read
+        (scale_b,) = struct.unpack_from("<f", mbm, off_q)
+        off_q += 4
+        boundary_data_q = struct.unpack_from(f"<{n_features}b", mbm, off_q)
+
+        assert n_nonzero_f == n_nonzero_q
+
+        for row in range(n_classes):
+            start, end = indptr_q[row], indptr_q[row + 1]
+            for j in range(start, end):
+                dequantized = data_q[j] * scales_r[row]
+                assert abs(dequantized - read_data_f[j]) < abs(scales_r[row]) + 1e-6
+
+        for q, f in zip(boundary_data_q, boundary_data_f):
+            dequantized = q * scale_b
+            assert abs(dequantized - f) < abs(scale_b) + 1e-6

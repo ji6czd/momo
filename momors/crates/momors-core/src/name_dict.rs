@@ -35,7 +35,7 @@ pub(crate) const NAME_FLAG_INSIDE: u8 = 2;
 /// [`SourceEntry`] と同じユニット分割（拗音複合対応）で、照合は
 /// cp/cp2/cp3 の完全一致で行う（ctype は Python 版同様、比較しない）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NameUnit {
+pub struct NameUnit {
     pub cp: u32,
     pub cp2: u32,
     pub cp3: u32,
@@ -50,7 +50,7 @@ impl NameUnit {
 
 /// 人名辞書の1エントリ（照合用に前処理済み）。
 #[derive(Debug, Clone)]
-pub(crate) struct NameDictEntry {
+pub struct NameDictEntry {
     /// ユニット列（拗音複合対応、cp/cp2/cp3 の完全一致で照合）
     pub units: Vec<NameUnit>,
     /// ユニット別の固定読み（カタカナ）。`units` と同じ長さ。
@@ -62,7 +62,7 @@ pub(crate) struct NameDictEntry {
 ///
 /// キーは先頭ユニットの先頭コードポイント、値はエントリのリスト
 /// （ユニット数の降順ソート済み = 最長一致用）。
-pub(crate) type NameIndex = HashMap<u32, Vec<NameDictEntry>>;
+pub type NameIndex = HashMap<u32, Vec<NameDictEntry>>;
 
 /// 人名エントリ（表層形, ユニット別読み）のリストから照合用インデックスを構築する。
 ///

@@ -212,7 +212,10 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 // ============================================================
 
 /// 語彙テーブルを読む。
-fn read_vocab<R: Read>(
+///
+/// `.mbm` (`loader.rs`) と `.mbmf` (`float_loader.rs`) で語彙テーブルのバイト列は
+/// 完全に同一のため、`pub(crate)` にして両方から呼べるようにしている。
+pub(crate) fn read_vocab<R: Read>(
     reader: &mut R,
     n_features: u32,
     path: &Path,
@@ -252,7 +255,9 @@ fn read_vocab<R: Read>(
 }
 
 /// 読みラベルテーブルを読む。
-fn read_labels<R: Read>(reader: &mut R, n_classes: u32, path: &Path) -> Result<Vec<String>> {
+///
+/// `.mbm` / `.mbmf` 共通のセクション読み込みヘルパー。
+pub(crate) fn read_labels<R: Read>(reader: &mut R, n_classes: u32, path: &Path) -> Result<Vec<String>> {
     let mut labels = Vec::with_capacity(n_classes as usize);
     let mut buf = Vec::new();
     for _ in 0..n_classes {
@@ -343,7 +348,9 @@ fn read_csr_weights<R: Read>(
 /// （[`normalize_compat_ideographs`]）と確実に揃えるためここでも適用する。
 ///
 /// [`normalize_compat_ideographs`]: crate::normalize::normalize_compat_ideographs
-fn read_name_dict<R: Read>(
+///
+/// `.mbm` / `.mbmf` 共通のセクション読み込みヘルパー。
+pub(crate) fn read_name_dict<R: Read>(
     reader: &mut R,
     path: &Path,
 ) -> Result<Vec<(String, Option<Vec<String>>)>> {
@@ -385,7 +392,9 @@ fn read_name_dict<R: Read>(
 ///
 /// 読みモデルの候補制約に使う必須データ。旧 0x04 ファイル（テーブル追加前）は
 /// ここで EOF になるため、再エクスポートを促すエラーメッセージに変換する。
-fn read_kanji_dict<R: Read>(reader: &mut R, path: &Path) -> Result<Vec<(char, Vec<String>)>> {
+///
+/// `.mbm` / `.mbmf` 共通のセクション読み込みヘルパー。
+pub(crate) fn read_kanji_dict<R: Read>(reader: &mut R, path: &Path) -> Result<Vec<(char, Vec<String>)>> {
     let n_entries = reader.read_u32::<LittleEndian>().map_err(|e| {
         if e.kind() == std::io::ErrorKind::UnexpectedEof {
             Error::CorruptModel {
@@ -436,7 +445,9 @@ fn read_kanji_dict<R: Read>(reader: &mut R, path: &Path) -> Result<Vec<(char, Ve
 }
 
 /// f32 ベクタを読む。
-fn read_f32_vec<R: Read>(reader: &mut R, len: usize, path: &Path) -> Result<Vec<f32>> {
+///
+/// `.mbm` / `.mbmf` 共通のセクション読み込みヘルパー。
+pub(crate) fn read_f32_vec<R: Read>(reader: &mut R, len: usize, path: &Path) -> Result<Vec<f32>> {
     let mut v = vec![0f32; len];
     for slot in &mut v {
         *slot = reader.read_f32::<LittleEndian>().map_err(io_err(path))?;
@@ -464,13 +475,16 @@ fn read_i8_vec<R: Read>(reader: &mut R, len: usize, path: &Path) -> Result<Vec<i
 ///
 /// CSR は `(indptr[n_classes+1], indices[n_nonzero], data[n_nonzero])` で、
 /// 行 (クラス) ごとの非ゼロエントリを表す。CSC は列 (特徴量) ごとに整理する。
-fn csr_to_csc(
+///
+/// 非ゼロ値の型 `T` はジェネリックにしてある。`.mbm` (量子化済み `i8`) と
+/// `.mbmf` (量子化前の `f32`、`float_loader.rs`) の両方から共通で呼べるようにするため。
+pub(crate) fn csr_to_csc<T: Copy + Default>(
     n_classes: usize,
     n_features: usize,
     indptr: &[u32],
     indices: &[u32],
-    data: &[i8],
-) -> (Vec<u32>, Vec<u32>, Vec<i8>) {
+    data: &[T],
+) -> (Vec<u32>, Vec<u32>, Vec<T>) {
     let n_nonzero = data.len();
 
     // --- Step 1: 各列の非ゼロエントリ数をカウント ---
@@ -487,7 +501,7 @@ fn csr_to_csc(
 
     // --- Step 3: 各エントリを CSC の正しい位置に書き込む ---
     let mut rowind = vec![0u32; n_nonzero];
-    let mut data_csc = vec![0i8; n_nonzero];
+    let mut data_csc = vec![T::default(); n_nonzero];
     // 次の挿入位置を追跡 (colptr のコピーを使い回す)
     let mut next_pos: Vec<u32> = colptr[..n_features].to_vec();
 
@@ -513,7 +527,8 @@ fn csr_to_csc(
 /// `std::io::Error` を `Error::ModelIo` に変換するクロージャを作る。
 ///
 /// `?` 演算子と `map_err` で簡潔にエラー変換するために使用する。
-fn io_err(path: &Path) -> impl Fn(std::io::Error) -> Error + '_ {
+/// `.mbm` / `.mbmf` 共通のヘルパー。
+pub(crate) fn io_err(path: &Path) -> impl Fn(std::io::Error) -> Error + '_ {
     move |e| Error::ModelIo {
         path: path.to_path_buf(),
         source: e,

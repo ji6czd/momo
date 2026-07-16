@@ -14,7 +14,7 @@ use crate::Error;
 use std::path::{Path, PathBuf};
 
 use crate::bracket::{self, Outer, Role};
-use crate::char_type::CharType;
+use crate::char_type::{get_char_type, CharType};
 use crate::feature::FeatureKey;
 use crate::featurize::{compute_source_features, to_source_seq, SourceEntry};
 use crate::model::MomoModel;
@@ -1038,16 +1038,31 @@ fn reinsert_brackets(result: &mut PredictionResult, norm_text: &str, stripped: &
         conf: f32,
         space: bool,
     }
+    // かな列の空白には性質の違う2つが混ざっている:
+    //   - 境界スペース: 境界モデルが挿入した分かち書きの「判断」。src は直前の
+    //     内容文字を指す。外エッジ規則（Attach 等）が触ってよいのはこれだけ。
+    //   - 原文の空白: バイパスで素通しされた原文の「内容」。src は自分自身を
+    //     指す。書き手が書いたデータなので決して消さず、内容セルとして扱う。
+    // 空白判定は 0x20 の直接比較ではなく char_type に委ねる。get_char_type は
+    // Unicode の空白全体（タブ・NBSP・全角スペース等）を Space = バイパス対象と
+    // するので、「原文由来か＝バイパスされたか」をその基準で見分けられる。
+    let is_bypassed_space = |src: usize| {
+        norm_text[src..]
+            .chars()
+            .next()
+            .is_some_and(|c| get_char_type(c) == CharType::Space)
+    };
     let mut cells: Vec<Cell> = Vec::with_capacity(result.kana_text.len());
     for (kb, ch) in result.kana_text.char_indices() {
+        let src = result.kana_to_src_index[kb];
         cells.push(Cell {
             ch,
-            src: result.kana_to_src_index[kb],
+            src,
             conf: result.confidences[kb],
-            space: ch == ' ',
+            space: get_char_type(ch) == CharType::Space && !is_bypassed_space(src),
         });
     }
-    // 内容セル（非スペース）の index。src は左→右で非減少。
+    // 内容セル（境界スペース以外）の index。src は左→右で非減少。
     let content: Vec<usize> = cells
         .iter()
         .enumerate()
@@ -1165,7 +1180,15 @@ fn reinsert_brackets(result: &mut PredictionResult, norm_text: &str, stripped: &
                     (None, None) => had_space,
                 };
                 if want_space {
-                    push_text(&mut kana, &mut k2s, &mut conf, " ", cells[ci].src, 1.0);
+                    // 境界スペースは「直前に出したもの」へ帰属させる。閉じ括弧を
+                    // 出した直後ならその括弧側にする。かなの並び順と原文位置の順序を
+                    // 一致させておかないと、src_to_kana 経由で原文順に組み立て直す
+                    // format_segmented がスペースを閉じ括弧より前に出してしまう。
+                    let space_src = suffix
+                        .get(&ci)
+                        .and_then(|v| v.last())
+                        .map_or(cells[ci].src, |bm| bm.norm_byte);
+                    push_text(&mut kana, &mut k2s, &mut conf, " ", space_src, 1.0);
                 }
             }
         }
@@ -1540,16 +1563,80 @@ mod tests {
     }
 
     #[test]
-    fn reinsert_paren_attach_removes_seam_space() {
-        // オケ（オーケストラ）型の縮約: （）= Attach → 継ぎ目の空きを詰める
+    fn reinsert_open_attaches_but_close_keeps_model_space() {
+        // 週末（３連休）カラオケ 型: 開きは前の語へ詰め、閉じの右はモデルが当てた
+        // 語境界の空きを温存する。
         // norm "a（b）c" : a=0 （=1(3B) b=4 ）=5(3B) c=8
         let stripped = strip_brackets("a（b）c");
         assert_eq!(stripped.text, "abc");
         // モデルは "a b c" と3分割したと仮定
         let mut r = make_result(&stripped.text, "a b c", &[0, 0, 1, 1, 2]);
         reinsert_brackets(&mut r, "a（b）c", &stripped);
-        // 外エッジ Attach で両側の境界スペースが消える
-        assert_eq!(r.kana_text, "a（b）c");
+        // 開きの左は Attach で詰まり、閉じの右は Defer で残る
+        assert_eq!(r.kana_text, "a（b） c");
+    }
+
+    #[test]
+    fn reinsert_attach_keeps_source_space() {
+        // 原文のスペースは「内容」であって分かち書きの判断ではないので、
+        // Attach な括弧（(）が隣接しても消してはいけない。
+        // norm "a (b)" : a=0 ' '=1 (=2 b=3 )=4
+        let stripped = strip_brackets("a (b)");
+        assert_eq!(stripped.text, "a b");
+        // bypass なのでモデルは原文のスペースをそのまま出す（境界スペースは無い）
+        let mut r = make_result(&stripped.text, "a b", &[0, 1, 2]);
+        reinsert_brackets(&mut r, "a (b)", &stripped);
+        assert_eq!(r.kana_text, "a (b)");
+    }
+
+    #[test]
+    fn reinsert_attach_removes_boundary_space_but_keeps_source_space() {
+        // 境界スペース（判断）は Attach で消え、原文スペース（内容）は残る。
+        // norm "a b(c)" : a=0 ' '=1 b=2 (=3 c=4 )=5
+        let stripped = strip_brackets("a b(c)");
+        assert_eq!(stripped.text, "a bc");
+        // stripped "a bc" に対し、モデルが b と c の間に境界スペースを入れたと仮定。
+        // 原文スペース(src=1) と 境界スペース(src=2 → 直前の b を指す) が混在する。
+        let mut r = make_result(&stripped.text, "a b c", &[0, 1, 2, 2, 3]);
+        reinsert_brackets(&mut r, "a b(c)", &stripped);
+        // ( の Attach は境界スペースだけを消し、a の後ろの原文スペースは残る
+        assert_eq!(r.kana_text, "a b(c)");
+    }
+
+    #[test]
+    fn reinsert_attach_keeps_non_ascii_source_whitespace() {
+        // 空白判定は char_type 基準なので、0x20 以外の原文空白（全角スペース・
+        // NBSP・タブ）もバイパスされた「内容」として同じ規則で保存される。
+        for ws in ['\u{3000}', '\u{00A0}', '\t'] {
+            let norm: String = format!("a{ws}(b)");
+            let stripped = strip_brackets(&norm);
+            assert_eq!(stripped.text, format!("a{ws}b"));
+            // バイパスなので原文の空白はそのままかなに出る（境界スペースは無い）
+            let kana: String = format!("a{ws}b");
+            let srcs = [0, 1, 1 + ws.len_utf8()];
+            let mut r = make_result(&stripped.text, &kana, &srcs);
+            reinsert_brackets(&mut r, &norm, &stripped);
+            assert_eq!(r.kana_text, norm, "原文空白 {ws:?} が保存されること");
+        }
+    }
+
+    #[test]
+    fn reinsert_boundary_space_after_close_belongs_to_bracket() {
+        // 閉じ括弧の直後に出す境界スペースは、その括弧へ帰属させる。原文位置の
+        // 順序とかなの並び順が食い違うと、src_to_kana から原文順に組み立て直す
+        // format_segmented がスペースを閉じ括弧より前に見せてしまう。
+        let stripped = strip_brackets("a（b）c");
+        let mut r = make_result(&stripped.text, "a b c", &[0, 0, 1, 1, 2]);
+        reinsert_brackets(&mut r, "a（b）c", &stripped);
+        assert_eq!(r.kana_text, "a（b） c");
+        // スペースは ） (norm 5) に帰属し、b (norm 4) ではない
+        assert_eq!(r.format_segmented(), "a/（/b/）/ /c");
+        // かな位置 → 原文位置 は非減少（並び順が原文順と一致する）
+        let mut prev = 0usize;
+        for &s in &r.kana_to_src_index {
+            assert!(s >= prev, "kana_to_src が非減少であること");
+            prev = s;
+        }
     }
 
     #[test]

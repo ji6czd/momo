@@ -860,27 +860,8 @@ impl<M: WeightModel> Predictor<M> {
             }
         }
 
-        // --- 末尾のマスあけを落とす ---
-        // 末尾の空白には性質の違う2つが混ざる:
-        //   - 境界スペース: 境界モデルが最終文字に付けた「判断」。後ろに続く語が
-        //     ない以上、区切りとして意味を持たないので索引・自信度ごと落とす。
-        //   - 原文の空白: bypass で素通しされた「内容」。書き手が書いたものなので
-        //     残す。ここで止めるので、その手前の境界スペースには手を出さない。
-        // 見分けは splice_atoms と同じく、src が自分自身（＝原文で空白）を指すか
-        // どうかで行う。境界スペースの src は直前の内容文字を指す。
-        while result.kana_text.ends_with(' ') {
-            let src = result.kana_to_src_index[result.kana_text.len() - 1];
-            let from_source = text[src..]
-                .chars()
-                .next()
-                .is_some_and(|c| get_char_type(c) == CharType::Space);
-            if from_source {
-                break;
-            }
-            result.kana_text.pop();
-            result.kana_to_src_index.pop();
-            result.confidences.pop();
-        }
+        // --- 末尾の境界スペースを落とす（src_to_kana_index を組む前に） ---
+        trim_trailing_boundary_spaces(&mut result, text);
 
         // --- src_to_kana_index 構築 (kana_to_src_index から逆引き) ---
         let src_size = text.len();
@@ -1191,6 +1172,58 @@ fn strip_bracket_chars(text: &str) -> (Removed, Vec<Atom>) {
 /// 書き換えないからで、Aside span は本文から抜いてあるため本文側の境界判断は
 /// 括弧が無かったときのまま正しい（`週末カラオケ` の語境界がそのまま
 /// `週末（3連休）␣カラオケ` の空きになる）。
+/// かな列の空白のうち、`src` が指すものが原文由来（バイパスで素通しされた
+/// 「内容」）かどうか。
+///
+/// かな列の空白には性質の違う2つが混ざっている:
+///
+/// - **境界スペース**: 境界モデルが挿入した分かち書きの「判断」。src は直前の
+///   内容文字を指すので false になる。
+/// - **原文の空白**: 書き手が書いた「内容」。src は自分自身を指すので true。
+///
+/// 空白判定は 0x20 の直接比較ではなく char_type に委ねる。get_char_type は
+/// Unicode の空白全体（タブ・NBSP・全角スペース等）を Space = バイパス対象と
+/// するので、「原文由来か＝バイパスされたか」をその基準で見分けられる。
+fn is_source_space(text: &str, src: usize) -> bool {
+    text[src..]
+        .chars()
+        .next()
+        .is_some_and(|c| get_char_type(c) == CharType::Space)
+}
+
+/// かな列の末尾から境界スペースを落とす。原文の空白（[`is_source_space`]）は残す。
+///
+/// 境界スペースの役割は前の語と「次の語」を分けること。後ろに残るのが空白だけなら
+/// 次の語は存在しないので、その境界スペースは区切りとして意味を持たない。一方で
+/// 原文の空白は書き手が書いた内容なので、何マスあっても、境界スペースの手前でも
+/// 後ろでも、そのまま残す。
+///
+/// 結果として行末の空白は常に「原文が持つぶんちょうど」に落ち着き、境界モデルが
+/// 最終文字に何を返しても増減しない。エディタは編集行末の空白にキャレットを置く
+/// ので、この安定性がそのまま行末キャレット表示の安定性になる。
+///
+/// `text` は `result` のインデックスが基準にしている原文。
+fn trim_trailing_boundary_spaces(result: &mut PredictionResult, text: &str) {
+    // bypass 分岐は境界スペースを出さないので、末尾の空白列に境界スペースは実際には
+    // 高々1個（列の先頭）しか現れないが、位置に依存しない形で書いておく。
+    let mut cuts: Vec<usize> = Vec::new();
+    for (kb, ch) in result.kana_text.char_indices().rev() {
+        if get_char_type(ch) != CharType::Space {
+            break;
+        }
+        if !is_source_space(text, result.kana_to_src_index[kb]) {
+            cuts.push(kb);
+        }
+    }
+    // 末尾側から積んだので cuts は降順。この順に消せば残りの添字がずれない。
+    // 境界スペースは必ず1バイトの ' ' なので、3列とも同じ位置を1つずつ消す。
+    for kb in cuts {
+        result.kana_text.remove(kb);
+        result.kana_to_src_index.remove(kb);
+        result.confidences.remove(kb);
+    }
+}
+
 fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>) {
     if atoms.is_empty() {
         return;
@@ -1204,20 +1237,6 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
         conf: f32,
         space: bool,
     }
-    // かな列の空白には性質の違う2つが混ざっている:
-    //   - 境界スペース: 境界モデルが挿入した分かち書きの「判断」。src は直前の
-    //     内容文字を指す。
-    //   - 原文の空白: バイパスで素通しされた原文の「内容」。src は自分自身を
-    //     指す。書き手が書いたデータなので内容セルとして扱う。
-    // 空白判定は 0x20 の直接比較ではなく char_type に委ねる。get_char_type は
-    // Unicode の空白全体（タブ・NBSP・全角スペース等）を Space = バイパス対象と
-    // するので、「原文由来か＝バイパスされたか」をその基準で見分けられる。
-    let is_bypassed_space = |src: usize| {
-        text[src..]
-            .chars()
-            .next()
-            .is_some_and(|c| get_char_type(c) == CharType::Space)
-    };
     let mut cells: Vec<Cell> = Vec::with_capacity(result.kana_text.len());
     for (kb, ch) in result.kana_text.char_indices() {
         let src = result.kana_to_src_index[kb];
@@ -1225,7 +1244,8 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
             ch,
             src,
             conf: result.confidences[kb],
-            space: get_char_type(ch) == CharType::Space && !is_bypassed_space(src),
+            // 原文の空白は書き手が書いたデータなので内容セルとして扱う。
+            space: get_char_type(ch) == CharType::Space && !is_source_space(text, src),
         });
     }
     // 内容セル（境界スペース以外）の index。src は左→右で非減少。
@@ -1920,6 +1940,74 @@ mod tests {
         assert_eq!(small_kana_to_kana(0x30A1), 0x30A1);
         // 範囲外もそのまま
         assert_eq!(small_kana_to_kana('A' as u32), 'A' as u32);
+    }
+
+    // --- 末尾の境界スペース削除 ---
+
+    #[test]
+    fn trim_drops_boundary_space_at_end() {
+        // 境界スペース (src = 直前の内容文字) は、後ろに語が無いので落とす
+        let mut r = make_result("あ", "ア ", &[0, 0]);
+        trim_trailing_boundary_spaces(&mut r, "あ");
+        assert_eq!(r.kana_text, "ア");
+        // 3列が揃ったまま縮むこと (ずれると後段の逆引きが壊れる)
+        assert_eq!(r.kana_to_src_index.len(), r.kana_text.len());
+        assert_eq!(r.confidences.len(), r.kana_text.len());
+    }
+
+    #[test]
+    fn trim_keeps_source_space_at_end() {
+        // 原文の空白 (src = 自分自身) は書き手が書いた内容なので残す。
+        // 消すとエディタの行末キャレット表示が消える。
+        let mut r = make_result("あ ", "ア ", &[0, 3]);
+        trim_trailing_boundary_spaces(&mut r, "あ ");
+        assert_eq!(r.kana_text, "ア ");
+    }
+
+    #[test]
+    fn trim_drops_boundary_space_before_source_space() {
+        // 原文の空白より手前にある境界スペースも「次の語」が無いので落とす。
+        // 行末の空白は原文が持つぶんちょうどに落ち着き、モデルの判断でぶれない。
+        let mut r = make_result("あ ", "ア  ", &[0, 0, 3]);
+        trim_trailing_boundary_spaces(&mut r, "あ ");
+        assert_eq!(r.kana_text, "ア ");
+        // 残った空白は原文由来のもの (src が自分自身を指す) そのもの
+        assert_eq!(r.kana_to_src_index, vec![0, 0, 0, 3]);
+    }
+
+    #[test]
+    fn trim_keeps_multiple_source_spaces() {
+        let mut r = make_result("あ  ", "ア   ", &[0, 0, 3, 4]);
+        trim_trailing_boundary_spaces(&mut r, "あ  ");
+        assert_eq!(r.kana_text, "ア  ");
+    }
+
+    #[test]
+    fn trim_keeps_non_ascii_source_space() {
+        // 空白判定は char_type 基準なので 0x20 以外の原文空白でも、
+        // その手前の境界スペースだけを落とせる
+        for ws in ['\u{3000}', '\u{00A0}', '\t'] {
+            let text = format!("あ{ws}");
+            let kana = format!("ア {ws}");
+            let mut r = make_result(&text, &kana, &[0, 0, 3]);
+            trim_trailing_boundary_spaces(&mut r, &text);
+            assert_eq!(r.kana_text, format!("ア{ws}"), "原文空白 {ws:?} が残ること");
+        }
+    }
+
+    #[test]
+    fn trim_keeps_boundary_space_in_the_middle() {
+        // 後ろに語が続く境界スペースは分かち書きの判断そのものなので触らない
+        let mut r = make_result("あい", "ア イ", &[0, 0, 3]);
+        trim_trailing_boundary_spaces(&mut r, "あい");
+        assert_eq!(r.kana_text, "ア イ");
+    }
+
+    #[test]
+    fn trim_noop_without_trailing_space() {
+        let mut r = make_result("あい", "アイ", &[0, 3]);
+        trim_trailing_boundary_spaces(&mut r, "あい");
+        assert_eq!(r.kana_text, "アイ");
     }
 
     // --- predict() の動作確認テスト (テスト用モデルで) ---

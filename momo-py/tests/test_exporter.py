@@ -24,7 +24,7 @@ from momo_py.exporter import (
     is_uint8_payload,
     parse_feature_key,
 )
-from momo_py.predictor import LRModelBundle
+from momo_py.bundle import LRModelBundle
 
 
 # ------------------------------------------------------------------ #

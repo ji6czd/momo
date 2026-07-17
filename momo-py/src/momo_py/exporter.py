@@ -6,7 +6,7 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 
 [ファイルヘッダ]          16 bytes
   magic        : uint8[4]   "MOMO"
-  version      : uint8      0x04
+  version      : uint8      0x05
   _reserved    : uint8[3]   0x00 x3
   n_classes    : uint32     読みラベル数
   n_features   : uint32     特徴量次元数（語彙サイズ）
@@ -22,11 +22,11 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
   len          : uint8      UTF-8バイト長
   utf8         : uint8[len] ラベル文字列（UTF-8）
 
-[読みモデル重み（CSR・int8量子化・クラスごとscale）]
+[読みモデル重み（CSC・int8量子化・クラスごとscale）]
   quant_scale  : float32 × n_classes   クラス(行)ごとの量子化スケール係数
   n_nonzero    : uint32     非ゼロ要素数
-  indptr       : uint32 × (n_classes + 1)
-  indices      : uint32 × n_nonzero
+  colptr       : uint32 × (n_features + 1)
+  rowind       : uint16 × n_nonzero    行インデックス = クラスID
   data         : int8  × n_nonzero
 
 [読みモデル intercept]
@@ -72,6 +72,15 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
   0x04: 人名辞書テーブルにユニット別読みを追加（低自信度フォールバック用）。
         アルファ期間中に単一漢字辞書テーブルも追加（バージョン番号は据え置き。
         追加前の 0x04 ファイルは読み込み時にエラーになるため再エクスポートすること）
+  0x05: 読みモデル重みを CSR から CSC に変更し、行インデックスを uint16 に縮小。
+        推論側は特徴量(列)で走査するため CSC が最終形であり、CSR で保存すると
+        ローダーが変換のために CSR と CSC を同時に確保してピークメモリが跳ねる。
+        CSC で保存すれば読んだ先がそのまま最終形になる。行インデックスは
+        クラスID（< n_classes）なので uint16 に収まり、非ゼロあたり 4→2 バイト。
+        ただし列ポインタが n_classes+1 個から n_features+1 個に増えるため、
+        ファイルサイズの利得は nnz/n_features の比に依存する（2 が損益分岐）。
+        同時に `.mbmf` のバージョン番号をこの `.mbm` の採番に合流させた
+        （それまでは 0x01 から独立採番していた）。
 
 .mbmf フォーマット（量子化前の float32 サイドカー）
 ====================================================
@@ -80,19 +89,23 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 `.mbm` と完全に同一だが、以下の2セクションだけ量子化せず float32 のまま格納する
 （`quant_scale` は書かない）:
 
-  [読みモデル重み（CSR・float32・量子化なし）]
+  [読みモデル重み（CSC・float32・量子化なし）]
     n_nonzero    : uint32     非ゼロ要素数
-    indptr       : uint32 × (n_classes + 1)
-    indices      : uint32 × n_nonzero
+    colptr       : uint32 × (n_features + 1)
+    rowind       : uint16 × n_nonzero     行インデックス = クラスID
     data         : float32 × n_nonzero
 
   [境界モデル重み（float32・量子化なし）]
     data         : float32 × n_features   （クラス1の重みベクトル）
     intercept    : float32 × 2            （クラス0, クラス1）
 
-ファイルヘッダの magic は `MBMF`、version は `0x01` から独立に採番する
-（`.mbm` のバージョン番号とは無関係）。語彙テーブル・読みラベルテーブル・
-人名辞書テーブル・単一漢字辞書テーブルは `.mbm` と全く同じバイト列。
+ファイルヘッダの magic は `MBMF`。**version は `.mbm` と同じ番号を共有する**
+（両者はセクション構成を共通に保つ設計なので、採番を分けると「どちらの 0x02 か」
+を常に意識する羽目になる）。区別は magic だけで行う。語彙テーブル・読みラベル
+テーブル・人名辞書テーブル・単一漢字辞書テーブルは `.mbm` と全く同じバイト列。
+
+なお `.mbmf` は 0x01 → 0x02 と独立採番していた時期があるが、0x05 で `.mbm` に
+合流した（0x03/0x04 の `.mbmf` は存在しない）。
 """
 
 import re
@@ -105,6 +118,7 @@ from typing import Any, Tuple
 
 import joblib
 import numpy as np
+from scipy import sparse
 
 from .name_dict import NAME_DICT_FILENAME, parse_name_dict_text
 from .predictor import SINGLE_KANJI_DICT_FILENAME, _parse_kanji_dict_tsv
@@ -113,11 +127,17 @@ from .predictor import SINGLE_KANJI_DICT_FILENAME, _parse_kanji_dict_tsv
 # =====================================================================
 # ファイルヘッダ定数
 # =====================================================================
-MAGIC_MBM = b'MOMO'
-VERSION_MBM = 0x04
+# `.mbm` と `.mbmf` はセクション構成を共通に保つ設計なので、バージョン番号も
+# 共有する（採番を分けると「どちらの 0x02 か」を常に意識する羽目になる）。
+# 区別は magic だけで行う。
+VERSION = 0x05
 
+MAGIC_MBM = b'MOMO'
 MAGIC_MBMF = b'MBMF'
-VERSION_MBMF = 0x01
+
+# 行インデックス (rowind) を uint16 で書くため、n_classes はこれを超えられない。
+# Rust 側 loader.rs の MAX_CLASSES と同じ値。
+MAX_CLASSES = 0xFFFF + 1
 
 
 # =====================================================================
@@ -459,6 +479,41 @@ def quantize_csr_per_row_to_int8(
     return scales, quantized
 
 
+def _build_csc_weight_bytes(csr, data, n_classes: int, n_features: int) -> bytearray:
+    """
+    読みモデル重みを CSC 形式のバイト列にする（`.mbm` / `.mbmf` 共通）。
+
+    `csr` の疎構造 (indptr/indices) と、それに整列した値配列 `data` を受け取り、
+    列 (特徴量) 方向に転置して colptr/rowind/data を書き出す。`data` の dtype が
+    そのまま書き出す値の型になる（`.mbm` は int8、`.mbmf` は float32）。
+
+    量子化 scale はクラス (行) ごとなので、量子化は行が連続する CSR で済ませて
+    から、転置だけをここで行う。
+
+    レイアウト:
+      n_nonzero : uint32
+      colptr    : uint32 × (n_features + 1)
+      rowind    : uint16 × n_nonzero   （行インデックス = クラスID）
+      data      : dtype(data) × n_nonzero
+    """
+    if n_classes > MAX_CLASSES:
+        raise ValueError(
+            f"n_classes={n_classes} が上限 {MAX_CLASSES} を超えています"
+            f"（CSC の行インデックスを uint16 で書くため）"
+        )
+
+    csc = sparse.csr_matrix(
+        (data, csr.indices, csr.indptr), shape=(n_classes, n_features)
+    ).tocsc()
+
+    out = bytearray()
+    out += struct.pack('<I', csc.nnz)
+    out += csc.indptr.astype('<u4').tobytes()      # colptr
+    out += csc.indices.astype('<u2').tobytes()     # rowind = クラスID
+    out += csc.data.tobytes()
+    return out
+
+
 # =====================================================================
 # .zip バンドルの読み込み（.mbm / .mbmf 共通）
 # =====================================================================
@@ -640,17 +695,14 @@ def export(zip_path: str, out_path: str) -> None:
     print("🔨 読みラベルテーブル変換中...")
     label_bytes = _build_label_bytes(read_classes)
 
-    # --- 読みモデル重み（CSR → int8量子化・クラスごとscale）---
+    # --- 読みモデル重み（CSR で行ごとに int8 量子化 → CSC に転置して書き出す）---
     print("🔨 読みモデル重み量子化中...")
     csr = coef_sparse.tocsr()
     scales_r, data_int8 = quantize_csr_per_row_to_int8(csr)
 
     read_weight_bytes = bytearray()
     read_weight_bytes += struct.pack(f'<{n_classes}f', *scales_r.tolist())
-    read_weight_bytes += struct.pack('<I', len(data_int8))
-    read_weight_bytes += struct.pack('<' + 'I' * (n_classes + 1), *csr.indptr.tolist())
-    read_weight_bytes += struct.pack('<' + 'I' * len(csr.indices), *csr.indices.tolist())
-    read_weight_bytes += bytes(data_int8.tobytes())
+    read_weight_bytes += _build_csc_weight_bytes(csr, data_int8, n_classes, n_features)
 
     # --- 読みモデル intercept ---
     intercept_r_f32 = intercept_r.astype(np.float32)
@@ -686,7 +738,7 @@ def export(zip_path: str, out_path: str) -> None:
     header = struct.pack(
         '<4sBBBBII',
         MAGIC_MBM,
-        VERSION_MBM,
+        VERSION,
         0x00, 0x00, 0x00, # reserved
         n_classes,
         n_features,
@@ -737,16 +789,12 @@ def export_float(zip_path: str, out_path: str) -> None:
     print("🔨 読みラベルテーブル変換中...")
     label_bytes = _build_label_bytes(read_classes)
 
-    # --- 読みモデル重み（CSR・float32・量子化なし）---
+    # --- 読みモデル重み（CSC・float32・量子化なし）---
     print("🔨 読みモデル重み変換中 (float32、量子化なし)...")
     csr = coef_sparse.tocsr()
-    data_f32 = csr.data.astype(np.float32, copy=False)
+    data_f32 = csr.data.astype('<f4', copy=False)
 
-    read_weight_bytes = bytearray()
-    read_weight_bytes += struct.pack('<I', len(data_f32))
-    read_weight_bytes += struct.pack('<' + 'I' * (n_classes + 1), *csr.indptr.tolist())
-    read_weight_bytes += struct.pack('<' + 'I' * len(csr.indices), *csr.indices.tolist())
-    read_weight_bytes += bytes(data_f32.tobytes())
+    read_weight_bytes = _build_csc_weight_bytes(csr, data_f32, n_classes, n_features)
 
     # --- 読みモデル intercept ---
     intercept_r_f32 = intercept_r.astype(np.float32)
@@ -775,7 +823,7 @@ def export_float(zip_path: str, out_path: str) -> None:
     header = struct.pack(
         '<4sBBBBII',
         MAGIC_MBMF,
-        VERSION_MBMF,
+        VERSION,
         0x00, 0x00, 0x00, # reserved
         n_classes,
         n_features,

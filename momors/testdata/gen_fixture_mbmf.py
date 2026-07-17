@@ -22,7 +22,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import gen_fixture_mbm as base  # noqa: E402
 
 MAGIC = b'MBMF'
-VERSION = 0x01
+# バージョン番号は `.mbm` と共有する（magic だけで区別する）
+VERSION = base.VERSION
 
 OUT_PATH = Path(__file__).parent.parent / "testdata" / "fixture.mbmf"
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -37,26 +38,24 @@ def build_header() -> bytes:
 
 
 def build_read_weights_float() -> bytes:
-    """CSR フォーマット（量子化なし）: n_nonzero + indptr + indices + data(f32)
+    """CSC フォーマット（量子化なし）: n_nonzero + colptr + rowind + data(f32)
 
     値は `gen_fixture_mbm.py` の CSR_ROWS（int8）を対応する
     QUANT_SCALES_READ（クラスごと）で dequantize した実値そのもの。
+    転置は `.mbm` と同じ `base.to_csc()` を使うので、両フィクスチャの
+    colptr / rowind は必ず一致する。
     """
-    indptr = [0]
-    indices = []
-    data = []
-    for row_idx, row in enumerate(base.CSR_ROWS):
-        scale = base.QUANT_SCALES_READ[row_idx]
-        for col, int8_val in row:
-            indices.append(col)
-            data.append(int8_val * scale)
-        indptr.append(len(indices))
+    dequantized = [
+        [(col, int8_val * base.QUANT_SCALES_READ[row_idx]) for col, int8_val in row]
+        for row_idx, row in enumerate(base.CSR_ROWS)
+    ]
+    colptr, rowind, data = base.to_csc(dequantized)
 
     n_nonzero = len(data)
     buf = bytearray()
     buf += struct.pack('<I', n_nonzero)
-    buf += struct.pack(f'<{len(indptr)}I', *indptr)
-    buf += struct.pack(f'<{n_nonzero}I', *indices)
+    buf += struct.pack(f'<{len(colptr)}I', *colptr)
+    buf += struct.pack(f'<{n_nonzero}H', *rowind)
     buf += struct.pack(f'<{n_nonzero}f', *data)
     return bytes(buf)
 

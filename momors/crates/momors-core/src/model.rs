@@ -67,7 +67,12 @@ pub struct MomoModel {
     /// CSC 列ポインタ (size: `n_features + 1`)
     pub(crate) csc_colptr: Vec<u32>,
     /// CSC 行インデックス = クラスID (size: `n_nonzero`)
-    pub(crate) csc_rowind: Vec<u32>,
+    ///
+    /// クラスID は `u16` で持つ。非ゼロ要素1個あたり `csc_data` (1 byte) と対で
+    /// 常駐するため、ここが `u32` だと行インデックスだけで重み値の4倍を占め、
+    /// int8 量子化の効果を打ち消してしまう。`n_classes <= MAX_CLASSES` は
+    /// loader がヘッダ検証時に保証する。
+    pub(crate) csc_rowind: Vec<u16>,
     /// CSC 非ゼロ値 (size: `n_nonzero`)
     pub(crate) csc_data: Vec<i8>,
 
@@ -238,7 +243,8 @@ impl WeightModel for MomoModel {
             }
         }
         for cls in 0..scores.len() {
-            scores[cls] = self.intercept_read[cls] + (int_scores[cls] as f32) * self.read_scale[cls];
+            scores[cls] =
+                self.intercept_read[cls] + (int_scores[cls] as f32) * self.read_scale[cls];
         }
     }
 

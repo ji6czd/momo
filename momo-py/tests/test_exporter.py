@@ -119,7 +119,7 @@ class TestExportNameDict:
 
         data = out.read_bytes()
         assert data[:4] == b"MOMO"
-        assert data[4] == 0x04  # version
+        assert data[4] == 0x05  # version
 
         # 人名辞書テーブル（表層形 + ユニット別読み）+ 末尾に単一漢字辞書テーブル
         expected = bytearray(struct.pack("<I", 2))
@@ -146,7 +146,7 @@ class TestExportNameDict:
         export(str(zip_path), str(out))
 
         data = out.read_bytes()
-        assert data[4] == 0x04
+        assert data[4] == 0x05
         # 辞書なしモデルは n_names = 0、続けて単一漢字辞書テーブル
         assert data.endswith(struct.pack("<I", 0) + _expected_kanji_section())
 
@@ -175,6 +175,23 @@ def _skip_labels(buf: bytes, offset: int, n_classes: int) -> int:
     return offset
 
 
+def _read_csc_weights(buf: bytes, offset: int, n_features: int, value_fmt: str):
+    """読みモデル重み（CSC）を読む。`.mbm` / `.mbmf` で疎構造は同一、値の型だけが違う。
+
+    `value_fmt` は struct の書式（`.mbm` は "b" = int8、`.mbmf` は "f" = float32）。
+    戻り値: (colptr, rowind, data, next_offset)
+    """
+    (n_nonzero,) = struct.unpack_from("<I", buf, offset)
+    offset += 4
+    colptr = struct.unpack_from(f"<{n_features + 1}I", buf, offset)
+    offset += 4 * (n_features + 1)
+    rowind = struct.unpack_from(f"<{n_nonzero}H", buf, offset)
+    offset += 2 * n_nonzero
+    data = struct.unpack_from(f"<{n_nonzero}{value_fmt}", buf, offset)
+    offset += struct.calcsize(f"<{n_nonzero}{value_fmt}")
+    return colptr, rowind, data, offset
+
+
 class TestExportFloat:
     def test_header_magic_and_version(self, tmp_path):
         zip_path = _make_model_zip(tmp_path, None)
@@ -183,7 +200,7 @@ class TestExportFloat:
 
         data = out.read_bytes()
         assert data[:4] == b"MBMF"
-        assert data[4] == 0x01  # version
+        assert data[4] == 0x05  # version（.mbm と共有。区別は magic だけで行う）
 
     def test_read_weights_are_plain_float32(self, tmp_path):
         zip_path = _make_model_zip(tmp_path, None)
@@ -196,18 +213,15 @@ class TestExportFloat:
         offset = _skip_vocab(data, 16, n_features)
         offset = _skip_labels(data, offset, n_classes)
 
-        (n_nonzero,) = struct.unpack_from("<I", data, offset)
-        offset += 4
-        offset += 4 * (n_classes + 1)  # indptr
-        offset += 4 * n_nonzero  # indices
-        read_data = struct.unpack_from(f"<{n_nonzero}f", data, offset)
+        colptr, rowind, read_data, _ = _read_csc_weights(data, offset, n_features, "f")
 
         # _make_model_zip の coef は全要素が非ゼロ（0.5 / -0.25 の密行列）
-        assert n_nonzero == n_classes * n_features
-        row0 = read_data[:n_features]
-        row1 = read_data[n_features:]
-        assert all(abs(v - 0.5) < 1e-6 for v in row0)
-        assert all(abs(v - (-0.25)) < 1e-6 for v in row1)
+        assert len(read_data) == n_classes * n_features
+        assert colptr[-1] == n_classes * n_features
+        # CSC なので値は列順に並ぶ。値はクラス (行) で決まるので rowind で引く。
+        expected = {0: 0.5, 1: -0.25}
+        for row, v in zip(rowind, read_data):
+            assert abs(v - expected[row]) < 1e-6
 
     def test_matches_quantized_export_within_tolerance(self, tmp_path):
         """.mbm（量子化）と .mbmf（非量子化）が同じ .zip から生成されたとき、
@@ -227,12 +241,7 @@ class TestExportFloat:
         # --- .mbmf: 読みモデル重み + 境界モデル重み ---
         off_f = _skip_vocab(mbmf, 16, n_features)
         off_f = _skip_labels(mbmf, off_f, n_classes)
-        (n_nonzero_f,) = struct.unpack_from("<I", mbmf, off_f)
-        off_f += 4
-        off_f += 4 * (n_classes + 1)  # indptr
-        off_f += 4 * n_nonzero_f  # indices
-        read_data_f = struct.unpack_from(f"<{n_nonzero_f}f", mbmf, off_f)
-        off_f += 4 * n_nonzero_f
+        _, rowind_f, read_data_f, off_f = _read_csc_weights(mbmf, off_f, n_features, "f")
         off_f += 4 * n_classes  # intercept_read
         boundary_data_f = struct.unpack_from(f"<{n_features}f", mbmf, off_f)
 
@@ -241,25 +250,19 @@ class TestExportFloat:
         off_q = _skip_labels(mbm, off_q, n_classes)
         scales_r = struct.unpack_from(f"<{n_classes}f", mbm, off_q)
         off_q += 4 * n_classes
-        (n_nonzero_q,) = struct.unpack_from("<I", mbm, off_q)
-        off_q += 4
-        indptr_q = struct.unpack_from(f"<{n_classes + 1}I", mbm, off_q)
-        off_q += 4 * (n_classes + 1)
-        off_q += 4 * n_nonzero_q  # indices
-        data_q = struct.unpack_from(f"<{n_nonzero_q}b", mbm, off_q)
-        off_q += n_nonzero_q
+        _, rowind_q, data_q, off_q = _read_csc_weights(mbm, off_q, n_features, "b")
         off_q += 4 * n_classes  # intercept_read
         (scale_b,) = struct.unpack_from("<f", mbm, off_q)
         off_q += 4
         boundary_data_q = struct.unpack_from(f"<{n_features}b", mbm, off_q)
 
-        assert n_nonzero_f == n_nonzero_q
+        # 疎構造は量子化の有無に関係なく同一のはず
+        assert rowind_f == rowind_q
 
-        for row in range(n_classes):
-            start, end = indptr_q[row], indptr_q[row + 1]
-            for j in range(start, end):
-                dequantized = data_q[j] * scales_r[row]
-                assert abs(dequantized - read_data_f[j]) < abs(scales_r[row]) + 1e-6
+        # 量子化 scale はクラス (行) ごとなので、CSC では rowind から引く
+        for j, row in enumerate(rowind_q):
+            dequantized = data_q[j] * scales_r[row]
+            assert abs(dequantized - read_data_f[j]) < abs(scales_r[row]) + 1e-6
 
         for q, f in zip(boundary_data_q, boundary_data_f):
             dequantized = q * scale_b

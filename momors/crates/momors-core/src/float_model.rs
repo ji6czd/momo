@@ -32,7 +32,7 @@ pub struct FloatMomoModel {
     /// CSC 列ポインタ (size: `n_features + 1`)
     pub(crate) csc_colptr: Vec<u32>,
     /// CSC 行インデックス = クラスID (size: `n_nonzero`)
-    pub(crate) csc_rowind: Vec<u32>,
+    pub(crate) csc_rowind: Vec<u16>,
     /// CSC 非ゼロ値 (size: `n_nonzero`)。量子化なしの実値そのもの。
     pub(crate) csc_data: Vec<f32>,
 

@@ -33,6 +33,11 @@ FT_KANJI_RUN_LEN = 0xC0
 # CharType の値
 CT_KANJI = 0x42
 
+# ファイル識別情報（exporter.py の MAGIC_MBM / VERSION と同期）
+MAGIC = b'MOMO'
+# バージョンは `.mbmf` と共有する（gen_fixture_mbmf.py が base.VERSION を使う）
+VERSION = 0x05
+
 # 出力先
 OUT_PATH = Path(__file__).parent.parent / "testdata" / "fixture.mbm"
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -54,7 +59,8 @@ VOCAB = [
     (FT_KANJI_RUN_LEN, [],         [],                2,    4),
 ]
 
-# 読みモデル重み (n_classes × n_features) → CSR
+# 読みモデル重み (n_classes × n_features)
+# 定義はクラス (行) ごとに書き、書き出し時に `to_csc()` で CSC に転置する
 # クラス0=カ: feature 0,1,3 にスコア
 # クラス1=キ: feature 0,2,3 にスコア
 # クラス2=ク: feature 0,4 にスコア
@@ -116,7 +122,7 @@ def is_uint8_payload(ft: int) -> bool:
 def build_header() -> bytes:
     return struct.pack(
         '<4sBBBBII',
-        b'MOMO', 0x04, 0x00, 0x00, 0x00,
+        MAGIC, VERSION, 0x00, 0x00, 0x00,
         N_CLASSES, N_FEATURES,
     )
 
@@ -150,23 +156,36 @@ def build_labels() -> bytes:
     return bytes(buf)
 
 
-def build_read_weights() -> bytes:
-    """CSR フォーマット: quant_scale[n_classes] + indptr + indices + data"""
-    indptr = [0]
-    indices = []
+def to_csc(rows: list) -> tuple:
+    """行 (クラス) ごとの非ゼロエントリを CSC の (colptr, rowind, data) に転置する。
+
+    `CSR_ROWS` はクラスごとに書いたほうが読みやすいのでその形で定義してあるが、
+    ファイルフォーマット (version 0x05 以降) は CSC なのでここで転置する。
+    列ごとに行インデックス昇順で並べる（scipy の `tocsc()` と同じ並び）。
+    """
+    colptr = [0]
+    rowind = []
     data = []
-    for row in CSR_ROWS:
-        for col, val in row:
-            indices.append(col)
-            data.append(val)
-        indptr.append(len(indices))
+    for col in range(N_FEATURES):
+        for row_idx, row in enumerate(rows):
+            for c, val in row:
+                if c == col:
+                    rowind.append(row_idx)
+                    data.append(val)
+        colptr.append(len(rowind))
+    return colptr, rowind, data
+
+
+def build_read_weights() -> bytes:
+    """CSC フォーマット: quant_scale[n_classes] + n_nonzero + colptr + rowind + data"""
+    colptr, rowind, data = to_csc(CSR_ROWS)
 
     n_nonzero = len(data)
     buf = bytearray()
     buf += struct.pack(f'<{N_CLASSES}f', *QUANT_SCALES_READ)
     buf += struct.pack('<I', n_nonzero)
-    buf += struct.pack(f'<{len(indptr)}I', *indptr)
-    buf += struct.pack(f'<{n_nonzero}I', *indices)
+    buf += struct.pack(f'<{len(colptr)}I', *colptr)
+    buf += struct.pack(f'<{n_nonzero}H', *rowind)
     buf += struct.pack(f'<{n_nonzero}b', *data)
     return bytes(buf)
 

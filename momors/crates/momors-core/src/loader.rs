@@ -9,7 +9,7 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x03
+//!   version      : u8      0x05
 //!   _reserved    : u8[3]   0x00 × 3
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
@@ -25,11 +25,11 @@
 //!   len          : u8
 //!   utf8         : u8[len]
 //!
-//! [読みモデル重み (CSR・int8 量子化・クラスごとscale)]
+//! [読みモデル重み (CSC・int8 量子化・クラスごとscale)]
 //!   quant_scale  : f32 × n_classes  クラス(行)ごとの量子化スケール
 //!   n_nonzero    : u32 LE
-//!   indptr       : u32 × (n_classes + 1)
-//!   indices      : u32 × n_nonzero
+//!   colptr       : u32 × (n_features + 1)
+//!   rowind       : u16 × n_nonzero  行インデックス = クラスID
 //!   data         : i8  × n_nonzero
 //!
 //! [読みモデル intercept]
@@ -61,16 +61,22 @@
 //!       utf8     : u8[len] 読み (カタカナ、UTF-8)
 //! ```
 //!
-//! version 0x03 以前は読めない。フォーマット互換性を装って誤動作するより
+//! version 0x04 以前は読めない。フォーマット互換性を装って誤動作するより
 //! 明示的にエラーにする方針（人名特徴量・読みの有無が精度に直結するため）。
-//! 単一漢字辞書テーブル追加前の旧 0x04 ファイルは、テーブル読み込み時に
-//! EOF となり分かりやすいエラーメッセージを出す（再エクスポートが必要）。
+//! 旧バージョンのファイルは再エクスポートが必要。
 //!
-//! ## CSR → CSC 変換
+//! ## CSC 形式で保存する理由
 //!
-//! ファイルは CSR (Compressed Sparse Row) 形式で保存されているが、
-//! 推論時のアクセスパターン (特徴量列で走査) に合わせて [`MomoModel`]
-//! では CSC (Compressed Sparse Column) で保持する。この変換は本モジュール内で行う。
+//! 推論時のアクセスパターンは「アクティブな特徴量 (列) で走査」なので、
+//! [`MomoModel`] が保持する最終形は CSC (Compressed Sparse Column) である。
+//! version 0x04 まではファイルを CSR (行 = クラス) で保存しており、ロード時に
+//! CSR → CSC 変換をしていたが、変換の瞬間に CSR と CSC の両方が同時にメモリ上に
+//! 存在するためピークメモリが跳ねていた。0x05 でファイル自体を CSC にしたので、
+//! 読んだ配列がそのまま最終形になり、変換もその一時的なメモリも不要になった。
+//!
+//! 行インデックス `rowind` はクラスID (`< n_classes`) なので `u16` で保存する。
+//! 非ゼロ要素ごとに `data` (1 byte) と対で常駐するため、ここを `u32` にすると
+//! int8 量子化の効果を打ち消してしまう。
 
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -87,13 +93,25 @@ use crate::{Error, Result};
 // 定数
 // ============================================================
 
+/// ファイル識別情報
 const MAGIC: [u8; 4] = *b"MOMO";
+/// フォーマットのバージョン。`.mbmf` (`float_loader.rs`) と同じ番号を共有する
+/// ―― 両者はセクション構成を共通に保つ設計なので、採番を分けると
+/// 「どちらの 0x02 か」を常に意識する羽目になる。
+pub(crate) const VERSION: u8 = 5;
 
 /// ヘッダ由来のカウント値（n_classes / n_features / n_nonzero）の妥当性上限。
 /// これを超える値をそのまま `Vec::with_capacity` 等に渡すと、壊れた/不正な
-/// `.mbm` ファイル1つで巨大メモリ確保・OOM を引き起こしうるため、
+/// モデルファイル1つで巨大メモリ確保・OOM を引き起こしうるため、
 /// 本クレートが現実的に扱う規模を大幅に超える値は早期に `CorruptModel` で弾く。
-const MAX_REASONABLE_COUNT: u32 = 50_000_000;
+/// `.mbm` / `.mbmf` (`float_loader.rs`) の両方で共有する。
+pub(crate) const MAX_REASONABLE_COUNT: u32 = 50_000_000;
+
+/// `n_classes` の上限。CSC の行インデックス (`csc_rowind`) はクラスIDを `u16` で
+/// 持つため、クラスID の最大値 `n_classes - 1` が `u16::MAX` に収まる必要がある。
+/// 読みラベル（かな表記）は現実的に数千種類（現行モデルで 1587）であり、
+/// この上限に達することはない。
+pub(crate) const MAX_CLASSES: u32 = u16::MAX as u32 + 1;
 
 // ============================================================
 // 公開エントリポイント
@@ -131,7 +149,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     }
 
     let version = reader.read_u8().map_err(io_err(path))?;
-    if version != 0x04 {
+    if version != VERSION {
         return Err(Error::UnsupportedVersion { version });
     }
 
@@ -154,6 +172,13 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
             ),
         });
     }
+    if n_classes > MAX_CLASSES {
+        return Err(Error::CorruptModel {
+            reason: format!(
+                "n_classes={n_classes} が上限 {MAX_CLASSES} を超えています（CSC 行インデックスが u16 のため）"
+            ),
+        });
+    }
 
     // ---- モデル本体を構築 ----
     let mut model = MomoModel::new();
@@ -166,21 +191,12 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     // ---- 読みラベルテーブル ----
     model.read_classes = read_labels(reader, n_classes, path)?;
 
-    // ---- 読みモデル重み (CSR → CSC) ----
-    let (read_scale, csr_indptr, csr_indices, csr_data) =
-        read_csr_weights(reader, n_classes, n_features, path)?;
-    model.read_scale = read_scale;
-
-    let (colptr, rowind, data_csc) = csr_to_csc(
-        n_classes as usize,
-        n_features as usize,
-        &csr_indptr,
-        &csr_indices,
-        &csr_data,
-    );
+    // ---- 読みモデル重み (CSC・int8 量子化) ----
+    model.read_scale = read_f32_vec(reader, n_classes as usize, path)?;
+    let (colptr, rowind, n_nonzero) = read_csc_structure(reader, n_classes, n_features, path)?;
     model.csc_colptr = colptr;
     model.csc_rowind = rowind;
-    model.csc_data = data_csc;
+    model.csc_data = read_i8_vec(reader, n_nonzero, path)?;
 
     // ---- 読みモデル intercept ----
     model.intercept_read = read_f32_vec(reader, n_classes as usize, path)?;
@@ -257,7 +273,11 @@ pub(crate) fn read_vocab<R: Read>(
 /// 読みラベルテーブルを読む。
 ///
 /// `.mbm` / `.mbmf` 共通のセクション読み込みヘルパー。
-pub(crate) fn read_labels<R: Read>(reader: &mut R, n_classes: u32, path: &Path) -> Result<Vec<String>> {
+pub(crate) fn read_labels<R: Read>(
+    reader: &mut R,
+    n_classes: u32,
+    path: &Path,
+) -> Result<Vec<String>> {
     let mut labels = Vec::with_capacity(n_classes as usize);
     let mut buf = Vec::new();
     for _ in 0..n_classes {
@@ -272,19 +292,23 @@ pub(crate) fn read_labels<R: Read>(reader: &mut R, n_classes: u32, path: &Path) 
     Ok(labels)
 }
 
-/// 読みモデル重み (CSR 形式) を読む。
-/// 戻り値: `(quant_scale[n_classes], indptr, indices, data)`
+/// 読みモデル重みの CSC 疎構造 (`n_nonzero` / `colptr` / `rowind`) を読む。
+/// 戻り値: `(colptr[n_features + 1], rowind[n_nonzero], n_nonzero)`
 ///
-/// `indptr`/`indices` はファイルから読んだ生の値であり、`csr_to_csc` で
-/// そのまま配列添字として使われる。壊れたファイルによる範囲外アクセス
-/// panic を防ぐため、ここで整合性を検証してから返す。
-fn read_csr_weights<R: Read>(
+/// 値配列 `data` は呼び出し側が読む。`.mbm` は int8、`.mbmf` は float32 と
+/// 型が違うだけで、ここまでのレイアウトは両者で完全に同一のため共有する。
+///
+/// 返す値は推論時 ([`WeightModel::compute_read_scores`]) に範囲チェック無しで
+/// 配列添字として使われる。壊れたファイルによる範囲外アクセス panic を防ぐため、
+/// ここで整合性を検証してから返す。
+///
+/// [`WeightModel::compute_read_scores`]: crate::weight_model::WeightModel::compute_read_scores
+pub(crate) fn read_csc_structure<R: Read>(
     reader: &mut R,
     n_classes: u32,
     n_features: u32,
     path: &Path,
-) -> Result<(Vec<f32>, Vec<u32>, Vec<u32>, Vec<i8>)> {
-    let scales = read_f32_vec(reader, n_classes as usize, path)?;
+) -> Result<(Vec<u32>, Vec<u16>, usize)> {
     let n_nonzero = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     if n_nonzero > MAX_REASONABLE_COUNT {
         return Err(Error::CorruptModel {
@@ -293,53 +317,51 @@ fn read_csr_weights<R: Read>(
     }
     let n_nonzero = n_nonzero as usize;
 
-    let indptr_len = n_classes as usize + 1;
-    let mut indptr = vec![0u32; indptr_len];
-    for slot in &mut indptr {
+    let colptr_len = n_features as usize + 1;
+    let mut colptr = vec![0u32; colptr_len];
+    for slot in &mut colptr {
         *slot = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     }
 
-    // 整合性チェック: indptr は単調非減少で、各要素は n_nonzero 以下であること
-    // （csr_to_csc がこれを前提に範囲外チェック無しで添字アクセスするため）。
+    // 整合性チェック: colptr は単調非減少で、各要素は n_nonzero 以下であること
+    // （列の範囲 colptr[f]..colptr[f+1] で csc_data / csc_rowind を添字アクセスするため）。
     let mut prev = 0u32;
-    for (row, &p) in indptr.iter().enumerate() {
+    for (col, &p) in colptr.iter().enumerate() {
         if p < prev || p as usize > n_nonzero {
             return Err(Error::CorruptModel {
                 reason: format!(
-                    "CSR indptr[{row}]={p} が不正です（直前の値={prev}, n_nonzero={n_nonzero}）"
+                    "CSC colptr[{col}]={p} が不正です（直前の値={prev}, n_nonzero={n_nonzero}）"
                 ),
             });
         }
         prev = p;
     }
-    // 整合性チェック: indptr の最後の値は n_nonzero と一致するはず
-    if *indptr.last().unwrap() as usize != n_nonzero {
+    // 整合性チェック: colptr の最後の値は n_nonzero と一致するはず
+    if *colptr.last().unwrap() as usize != n_nonzero {
         return Err(Error::CorruptModel {
             reason: format!(
-                "CSR indptr[last]={} と n_nonzero={} が一致しません",
-                indptr.last().unwrap(),
+                "CSC colptr[last]={} と n_nonzero={} が一致しません",
+                colptr.last().unwrap(),
                 n_nonzero
             ),
         });
     }
 
-    let mut indices = vec![0u32; n_nonzero];
-    for slot in &mut indices {
-        *slot = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+    let mut rowind = vec![0u16; n_nonzero];
+    for slot in &mut rowind {
+        *slot = reader.read_u16::<LittleEndian>().map_err(io_err(path))?;
     }
-    // 整合性チェック: 各特徴量IDは n_features 未満であること
-    // （csc_colptr/csc_rowind の構築時にこの範囲を前提に添字アクセスするため）。
-    if let Some(&bad) = indices.iter().find(|&&col| col >= n_features) {
+    // 整合性チェック: 各クラスIDは n_classes 未満であること
+    // （スコア配列 scores[cls] / read_scale[cls] を添字アクセスするため）。
+    if let Some(&bad) = rowind.iter().find(|&&row| row as u32 >= n_classes) {
         return Err(Error::CorruptModel {
             reason: format!(
-                "CSR indices に不正な特徴量ID {bad} があります（n_features={n_features}）"
+                "CSC rowind に不正なクラスID {bad} があります（n_classes={n_classes}）"
             ),
         });
     }
 
-    let data = read_i8_vec(reader, n_nonzero, path)?;
-
-    Ok((scales, indptr, indices, data))
+    Ok((colptr, rowind, n_nonzero))
 }
 
 /// 人名辞書テーブルを読む。
@@ -394,7 +416,10 @@ pub(crate) fn read_name_dict<R: Read>(
 /// ここで EOF になるため、再エクスポートを促すエラーメッセージに変換する。
 ///
 /// `.mbm` / `.mbmf` 共通のセクション読み込みヘルパー。
-pub(crate) fn read_kanji_dict<R: Read>(reader: &mut R, path: &Path) -> Result<Vec<(char, Vec<String>)>> {
+pub(crate) fn read_kanji_dict<R: Read>(
+    reader: &mut R,
+    path: &Path,
+) -> Result<Vec<(char, Vec<String>)>> {
     let n_entries = reader.read_u32::<LittleEndian>().map_err(|e| {
         if e.kind() == std::io::ErrorKind::UnexpectedEof {
             Error::CorruptModel {
@@ -465,59 +490,6 @@ fn read_i8_vec<R: Read>(reader: &mut R, len: usize, path: &Path) -> Result<Vec<i
         *slot = reader.read_i8().map_err(io_err(path))?;
     }
     Ok(v)
-}
-
-// ============================================================
-// CSR → CSC 変換
-// ============================================================
-
-/// CSR を CSC に変換する。
-///
-/// CSR は `(indptr[n_classes+1], indices[n_nonzero], data[n_nonzero])` で、
-/// 行 (クラス) ごとの非ゼロエントリを表す。CSC は列 (特徴量) ごとに整理する。
-///
-/// 非ゼロ値の型 `T` はジェネリックにしてある。`.mbm` (量子化済み `i8`) と
-/// `.mbmf` (量子化前の `f32`、`float_loader.rs`) の両方から共通で呼べるようにするため。
-pub(crate) fn csr_to_csc<T: Copy + Default>(
-    n_classes: usize,
-    n_features: usize,
-    indptr: &[u32],
-    indices: &[u32],
-    data: &[T],
-) -> (Vec<u32>, Vec<u32>, Vec<T>) {
-    let n_nonzero = data.len();
-
-    // --- Step 1: 各列の非ゼロエントリ数をカウント ---
-    let mut col_count = vec![0u32; n_features];
-    for &col in indices {
-        col_count[col as usize] += 1;
-    }
-
-    // --- Step 2: 累積和で colptr を構築 ---
-    let mut colptr = vec![0u32; n_features + 1];
-    for i in 0..n_features {
-        colptr[i + 1] = colptr[i] + col_count[i];
-    }
-
-    // --- Step 3: 各エントリを CSC の正しい位置に書き込む ---
-    let mut rowind = vec![0u32; n_nonzero];
-    let mut data_csc = vec![T::default(); n_nonzero];
-    // 次の挿入位置を追跡 (colptr のコピーを使い回す)
-    let mut next_pos: Vec<u32> = colptr[..n_features].to_vec();
-
-    for row in 0..n_classes {
-        let start = indptr[row] as usize;
-        let end = indptr[row + 1] as usize;
-        for j in start..end {
-            let col = indices[j] as usize;
-            let pos = next_pos[col] as usize;
-            rowind[pos] = row as u32;
-            data_csc[pos] = data[j];
-            next_pos[col] += 1;
-        }
-    }
-
-    (colptr, rowind, data_csc)
 }
 
 // ============================================================
@@ -673,6 +645,16 @@ mod tests {
     }
 
     #[test]
+    fn n_classes_over_u16_returns_error() {
+        // csc_rowind がクラスIDを u16 で持つため、n_classes は MAX_CLASSES (65536)
+        // を超えてはならない。ここでは 65537 (0x00010001) を与えて弾かれることを確認する。
+        let bad_data = b"MOMO\x05\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let mut cursor = std::io::Cursor::new(&bad_data[..]);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
+    }
+
+    #[test]
     fn old_version_v2_returns_error() {
         // 旧バージョンは明示的にエラー（人名辞書セクションが無く、黙って読めると
         // 人名特徴量・読みなしで誤動作するため）
@@ -694,6 +676,19 @@ mod tests {
         assert!(matches!(
             result,
             Err(Error::UnsupportedVersion { version: 0x03 })
+        ));
+    }
+
+    #[test]
+    fn old_version_v4_returns_error() {
+        // v4（読みモデル重みが CSR）も読めない。CSC 化でレイアウトが変わったため、
+        // 黙って読むと重みが壊れたまま推論してしまう。
+        let bad_data = b"MOMO\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut cursor = std::io::Cursor::new(&bad_data[..]);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedVersion { version: 0x04 })
         ));
     }
 
@@ -753,7 +748,7 @@ mod tests {
     fn build_header_bytes(n_classes: u32, n_features: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"MOMO");
-        bytes.push(0x04);
+        bytes.push(0x05);
         bytes.extend_from_slice(&[0, 0, 0]); // reserved
         bytes.extend_from_slice(&n_classes.to_le_bytes());
         bytes.extend_from_slice(&n_features.to_le_bytes());
@@ -776,65 +771,68 @@ mod tests {
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
+    // --- CSC 疎構造の読み込み (read_csc_structure) のテスト ---
+    //
+    // 壊れたファイルで推論時に範囲外アクセス panic を起こさないよう、
+    // ローダーが弾くことを確認する。
+
     #[test]
-    fn csr_index_out_of_range_returns_error() {
+    fn csc_rowind_out_of_range_returns_error() {
         // n_classes=2, n_features=3, n_nonzero=1
-        // indices[0] = 5 は n_features=3 の範囲外
+        // rowind[0] = 5 は n_classes=2 の範囲外（scores[5] で panic する）
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&0.01f32.to_le_bytes()); // scales[0]
-        bytes.extend_from_slice(&0.02f32.to_le_bytes()); // scales[1]
         bytes.extend_from_slice(&1u32.to_le_bytes()); // n_nonzero
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // indptr[0]
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // indptr[1]
-        bytes.extend_from_slice(&1u32.to_le_bytes()); // indptr[2]
-        bytes.extend_from_slice(&5u32.to_le_bytes()); // indices[0] = 5 (範囲外)
-        bytes.push(10u8); // data[0]
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[0]
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[1]
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[2]
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // colptr[3]
+        bytes.extend_from_slice(&5u16.to_le_bytes()); // rowind[0] = 5 (範囲外)
         let mut cursor = std::io::Cursor::new(bytes);
-        let result = read_csr_weights(&mut cursor, 2, 3, Path::new("test"));
+        let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
     #[test]
-    fn csr_indptr_non_monotonic_returns_error() {
-        // n_classes=2, n_features=3, n_nonzero=3
-        // indptr = [0, 3, 1] は単調非減少ではない
+    fn csc_colptr_non_monotonic_returns_error() {
+        // n_features=3 なので colptr は 4 要素。[0, 3, 1, 3] は単調非減少ではない
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&0.01f32.to_le_bytes()); // scales[0]
-        bytes.extend_from_slice(&0.02f32.to_le_bytes()); // scales[1]
         bytes.extend_from_slice(&3u32.to_le_bytes()); // n_nonzero
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // indptr[0]
-        bytes.extend_from_slice(&3u32.to_le_bytes()); // indptr[1]
-        bytes.extend_from_slice(&1u32.to_le_bytes()); // indptr[2] = 1 < 直前の 3
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[0]
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // colptr[1]
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // colptr[2] = 1 < 直前の 3
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // colptr[3]
         let mut cursor = std::io::Cursor::new(bytes);
-        let result = read_csr_weights(&mut cursor, 2, 3, Path::new("test"));
+        let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
-    // --- CSR → CSC 変換の独立テスト ---
-
     #[test]
-    fn csr_to_csc_simple() {
-        // 3 行 × 5 列、テスト用 .mbm と同じパターン
-        let indptr = vec![0u32, 3, 6, 8];
-        let indices = vec![0u32, 1, 3, 0, 2, 3, 0, 4];
-        let data = vec![50i8, 80, 30, 40, 70, 20, 10, 90];
-
-        let (colptr, rowind, data_csc) = csr_to_csc(3, 5, &indptr, &indices, &data);
-        assert_eq!(colptr, vec![0, 3, 4, 5, 7, 8]);
-        assert_eq!(rowind, vec![0, 1, 2, 0, 1, 0, 1, 2]);
-        assert_eq!(data_csc, vec![50, 40, 10, 80, 70, 30, 20, 90]);
+    fn csc_colptr_last_mismatch_returns_error() {
+        // colptr の最後は n_nonzero と一致していなければならない
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // n_nonzero = 3
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[0]
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[1]
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[2]
+        bytes.extend_from_slice(&2u32.to_le_bytes()); // colptr[3] = 2 != n_nonzero
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
     #[test]
-    fn csr_to_csc_empty() {
-        // 非ゼロエントリがない場合
-        let indptr = vec![0u32, 0, 0, 0];
-        let indices: Vec<u32> = vec![];
-        let data: Vec<i8> = vec![];
-
-        let (colptr, rowind, data_csc) = csr_to_csc(3, 5, &indptr, &indices, &data);
-        assert_eq!(colptr, vec![0, 0, 0, 0, 0, 0]);
+    fn csc_structure_empty_is_ok() {
+        // 非ゼロエントリがないモデルも壊れてはいない
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // n_nonzero = 0
+        for _ in 0..4 {
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr = [0, 0, 0, 0]
+        }
+        let mut cursor = std::io::Cursor::new(bytes);
+        let (colptr, rowind, n_nonzero) =
+            read_csc_structure(&mut cursor, 2, 3, Path::new("test")).unwrap();
+        assert_eq!(colptr, vec![0, 0, 0, 0]);
         assert!(rowind.is_empty());
-        assert!(data_csc.is_empty());
+        assert_eq!(n_nonzero, 0);
     }
 }

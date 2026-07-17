@@ -6,7 +6,7 @@ from .trainer import create_data, train
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="momo")
+    parser = argparse.ArgumentParser(prog="trainer", description="Momo Py: 学習ツール")
     subparsers = parser.add_subparsers(dest="command")
     parser.add_argument(
         "-v", "--version", action="version", version=f"Momo {version('momo-py')}"

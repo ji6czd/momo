@@ -50,7 +50,10 @@ mod weight_model;
 // ============================================================
 
 pub use error::{Error, Result};
-pub use prediction::{PredictionResult, Predictor, PredictorConfig};
+pub use prediction::{
+    Contribution, DecisionSource, PredictionResult, Predictor, PredictorConfig, TraceResult,
+    TraceRow,
+};
 
 /// 量子化前 (`.mbmf`) の重みで推論する `Predictor`。
 ///

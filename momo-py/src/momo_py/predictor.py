@@ -9,8 +9,6 @@ from typing import List, Tuple, Set, Dict, Optional, Any
 from importlib import resources
 import joblib
 import numpy as np
-from sklearn.linear_model import SGDClassifier
-from sklearn.feature_extraction import DictVectorizer
 
 from .features import (
     get_units,
@@ -25,6 +23,7 @@ from .utils import (
     CharType,
     normalize_input,
     convert_to_katakana,
+    parse_kanji_dict_tsv,
 )
 from .name_dict import (
     NAME_DICT_FILENAME,
@@ -34,10 +33,7 @@ from .name_dict import (
     load_name_dict,
     parse_name_dict_text,
 )
-from .pybraille import to_braille, to_jp_braille
-
-# 単一漢字辞書のファイル名（モデルZIPへの同梱名・パッケージリソース名と共通）
-SINGLE_KANJI_DICT_FILENAME = "single_character_dic.tsv"
+from .bundle import LRModelBundle, SINGLE_KANJI_DICT_FILENAME
 
 # 小書き仮名（拗音・促音など）。直前の文字に吸収されるべき文字。
 _SMALL_KANA = frozenset("ぁぃぅぇぉゃゅょっゎァィゥェォャュョッヮ")
@@ -48,10 +44,26 @@ _KATAKANA_NO_PASSTHROUGH = frozenset("ヵヶ")
 
 # 々繰り返し判定: 先頭音節の連濁マップ（カタカナ）
 _RENDAKU_MAP: Dict[str, str] = {
-    "カ": "ガ", "キ": "ギ", "ク": "グ", "ケ": "ゲ", "コ": "ゴ",
-    "サ": "ザ", "シ": "ジ", "ス": "ズ", "セ": "ゼ", "ソ": "ゾ",
-    "タ": "ダ", "チ": "ヂ", "ツ": "ヅ", "テ": "デ", "ト": "ド",
-    "ハ": "バ", "ヒ": "ビ", "フ": "ブ", "ヘ": "ベ", "ホ": "ボ",
+    "カ": "ガ",
+    "キ": "ギ",
+    "ク": "グ",
+    "ケ": "ゲ",
+    "コ": "ゴ",
+    "サ": "ザ",
+    "シ": "ジ",
+    "ス": "ズ",
+    "セ": "ゼ",
+    "ソ": "ゾ",
+    "タ": "ダ",
+    "チ": "ヂ",
+    "ツ": "ヅ",
+    "テ": "デ",
+    "ト": "ド",
+    "ハ": "バ",
+    "ヒ": "ビ",
+    "フ": "ブ",
+    "ヘ": "ベ",
+    "ホ": "ボ",
 }
 
 # ライマンの法則: 読みにこれらの文字が含まれていれば連濁しない
@@ -107,27 +119,12 @@ _BYPASS_CTYPES = frozenset(
 )
 
 
-def _parse_kanji_dict_tsv(text: str) -> Dict[str, List[str]]:
-    """TSVテキストを単一漢字辞書に変換する。
-    フォーマット: 漢字[TAB]読み1[TAB]読み2[TAB]...
-    """
-    result: Dict[str, List[str]] = {}
-    for line in text.splitlines():
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 2:
-            continue
-        result[parts[0]] = parts[1:]
-    return result
-
-
 def _load_single_kanji_dict(path: str) -> Dict[str, List[str]]:
     """単一漢字辞書TSVを読み込む。
     フォーマット: 漢字[TAB]読み1[TAB]読み2[TAB]...
     """
     with open(path, encoding="utf-8") as f:
-        return _parse_kanji_dict_tsv(f.read())
+        return parse_kanji_dict_tsv(f.read())
 
 
 # 🌟 訓読みを誘発しやすい「安全な送り仮名」のリスト
@@ -172,11 +169,10 @@ _KUN_COUNTER_SIGNALS = {
     ("人", "リ"),  # ひとり・ふたり
 }
 
+
 def _is_digit_label(label: str) -> bool:
     """ラベルが（半角/全角）数字のみで構成されるか。"""
-    return label != "" and all(
-        ("0" <= c <= "9") or ("０" <= c <= "９") for c in label
-    )
+    return label != "" and all(("0" <= c <= "9") or ("０" <= c <= "９") for c in label)
 
 
 # ==========================================
@@ -470,7 +466,6 @@ class PredictionResult:
     def to_json(self) -> str:
         text_safe = json.dumps(self.source_text, ensure_ascii=False)
         kana_safe = json.dumps(self.kana_text, ensure_ascii=False)
-        braille_safe = json.dumps(to_jp_braille(self.kana_text), ensure_ascii=False)
 
         conf_str = "[" + ", ".join([f"{c:.3f}" for c in self.confidences]) + "]"
         k2s_str = "[" + ", ".join(map(str, self.kana_to_src_index)) + "]"
@@ -481,7 +476,6 @@ class PredictionResult:
             f"{{\n"
             f'  "text": {text_safe},\n'
             f'  "kana": {kana_safe},\n'
-            f'  "braille": {braille_safe},\n'
             f'  "kana_to_src_index": {k2s_str},\n'
             f'  "src_to_kana_index": {s2k_str},\n'
             f'  "confidences": {conf_str},\n'
@@ -570,22 +564,6 @@ def _remap_result_to_source(
     result.source_text = source_text
 
 
-# ==========================================
-# 🌟 LRモデルのバンドル（読み＋境界）
-# ==========================================
-@dataclass
-class LRModelBundle:
-    """ZIPに格納するモデル一式"""
-
-    vectorizer_read: DictVectorizer
-    coef_read_sparse: Any
-    intercept_read: Any
-    read_classes: Any
-    vectorizer_boundary: DictVectorizer
-    model_boundary: SGDClassifier
-    version_info: dict
-
-
 class Predictor:
     def __init__(self, config: PredictorConfig):
         if config.model_path:
@@ -634,9 +612,9 @@ class Predictor:
             # 学習時に同梱された単一漢字辞書（同上）
             embedded_single_kanji_text: Optional[str] = None
             if SINGLE_KANJI_DICT_FILENAME in namelist:
-                embedded_single_kanji_text = zf.read(
-                    SINGLE_KANJI_DICT_FILENAME
-                ).decode("utf-8")
+                embedded_single_kanji_text = zf.read(SINGLE_KANJI_DICT_FILENAME).decode(
+                    "utf-8"
+                )
 
             bundle: LRModelBundle = joblib.load(io.BytesIO(zf.read(bundle_name)))
             self._vectorizer_read = bundle.vectorizer_read
@@ -666,12 +644,12 @@ class Predictor:
                 config.single_kanji_dict_path
             )
         elif embedded_single_kanji_text is not None:
-            self._single_kanji_dict = _parse_kanji_dict_tsv(embedded_single_kanji_text)
+            self._single_kanji_dict = parse_kanji_dict_tsv(embedded_single_kanji_text)
         else:
             tsv_text = (
                 resources.files("momo_py") / f"resources/{SINGLE_KANJI_DICT_FILENAME}"
             ).read_text(encoding="utf-8")
-            self._single_kanji_dict = _parse_kanji_dict_tsv(tsv_text)
+            self._single_kanji_dict = parse_kanji_dict_tsv(tsv_text)
 
         # カスタム辞書のロードとインデックス構築
         self._dict_index: Dict[str, List[Tuple[str, List[DictUnit]]]] = {}
@@ -889,7 +867,13 @@ class Predictor:
                 else:
                     i += 1
 
-        return source_seq, bypass_indices, ascii_overrides, dict_overrides, dict_boundaries
+        return (
+            source_seq,
+            bypass_indices,
+            ascii_overrides,
+            dict_overrides,
+            dict_boundaries,
+        )
 
     # ==========================================
     # 🌟 ステップ 2: 推論（LinearSVC版）
@@ -1103,10 +1087,7 @@ class Predictor:
                         if ctype == "KANJI":
                             last_fallback_reading = label  # 々のために伝播
                     if decision == DecisionSource.LR:
-                        if (
-                            confidence < _LR_LOW_THRESHOLD
-                            and ctype == "KANJI"
-                        ):
+                        if confidence < _LR_LOW_THRESHOLD and ctype == "KANJI":
                             decision = DecisionSource.LR_LOW
 
                 clean_label = label

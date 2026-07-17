@@ -7,12 +7,9 @@ from importlib.metadata import version
 from .trainer import create_data, train
 from .predictor import Predictor, PredictorConfig
 
-from .pybraille import to_jp_braille
-
 
 def run_predict(
     config: PredictorConfig,
-    show_trace: bool = False,
     show_profile: bool = False,
     segmented_output: bool = False,
     segmented_source_output: bool = False,
@@ -21,11 +18,12 @@ def run_predict(
     show_braille: bool = True,
     create_tsv: bool = False,
 ) -> None:
-    """標準入力からテキストを読み込み、予測結果をJSON形式で出力する対話型モード。
-    show_trace が True の場合、各文字の決定根拠をターミナルにも表示する。
+    """標準入力からテキストを読み込み、予測結果を出力する対話型モード。
+
+    各文字の決定根拠・特徴量寄与度を見る trace や、特徴量ごとのラベル重みを見る
+    label 診断は Rust 版 `momo-inspect`（trace / label サブコマンド）へ移行した。
     """
     predictor = Predictor(config)
-    use_color = sys.stderr.isatty()
     try:
         for line in sys.stdin:
             text = line.strip()
@@ -50,68 +48,16 @@ def run_predict(
                 else result.source_text
             )
 
-            if show_trace:
-                print(result.to_json())
-                print("─" * 48, file=sys.stderr)
-                print(result.format_terminal(use_color=use_color), file=sys.stderr)
-                print("─" * 48, file=sys.stderr)
-            elif create_tsv:
+            if create_tsv:
                 print(f"{src}\t{kana}")
-                print(to_jp_braille(result.kana_text))
             else:
                 if show_source:
                     print(src)
-                if show_braille:
-                    print(to_jp_braille(result.kana_text))
                 if show_kana:
                     print(kana)
 
     except KeyboardInterrupt:
         print("\n🛑 予測モード終了。お疲れ様でした！")
-
-
-# --- [デバッグ用ツール群（AI脳内スキャナー）] ---
-
-
-def run_label_scanner(config: PredictorConfig) -> None:
-    """特徴量を入力してスコア上位のラベルを表示する"""
-    predictor = Predictor(config)
-    print("🧠 AI脳内スキャナー起動 (Ctrl+D で終了)")
-    print("使い方: 見たい文字を1文字入力（例: 金）")
-    print("応用編: 特徴量名で直接検索（例: char=金, -1:char=の）")
-    print("-" * 40)
-
-    vocab = predictor._vectorizer_read.vocabulary_
-
-    try:
-        for line in sys.stdin:
-            text = line.strip()
-            if not text:
-                continue
-
-            target_feature = f"char={text}" if len(text) == 1 else text
-
-            if target_feature not in vocab:
-                print(f"  -> (この特徴量は学習データに存在しません)")
-                print("-" * 40)
-                continue
-
-            feat_idx = vocab[target_feature]
-            col = predictor._coef_read_sparse.getcol(feat_idx).toarray().flatten()
-
-            weights = sorted(
-                zip(predictor._read_classes, col), key=lambda x: x[1], reverse=True
-            )
-
-            print(f"\n🔍 検索対象: '{target_feature}'")
-            for label, weight in weights:
-                if weight == 0.0:
-                    break
-                print(f"  ラベル: {label:6} | 点数: {weight:+.3f}")
-            print("-" * 40)
-
-    except KeyboardInterrupt:
-        print("\n🛑 スキャナー終了。")
 
 
 def main():
@@ -140,16 +86,6 @@ def main():
         dest="name_dict",
         default=None,
         help="人名辞書ファイルのパス（人名B/Iフラグ特徴量。省略時はモデルまたは実行ファイルと同じ場所の person_name_dic.tsv を自動検出）",
-    )
-    predict_parser.add_argument(
-        "--trace", action="store_true", help="各文字の決定根拠をターミナルに表示する"
-    )
-    predict_parser.add_argument(
-        "--explain",
-        type=int,
-        default=8,
-        metavar="N",
-        help="--trace時に表示する特徴量寄与度の上位件数（デフォルト: 8、0で無効）",
     )
     predict_parser.add_argument(
         "--profile", action="store_true", help="予測の実行時間を表示する"
@@ -187,11 +123,6 @@ def main():
     predict_parser.add_argument(
         "--create-momo-tsv",
         action="store_true",
-    )
-    labelscan_parser = subparsers.add_parser("label")
-    labelscan_parser.add_argument("--model", default=None)
-    labelscan_parser.add_argument(
-        "--dict", dest="custom_dict", default=None, help="カスタム辞書ファイルのパス"
     )
 
     create_data_parser = subparsers.add_parser("createdata")
@@ -263,9 +194,6 @@ def main():
         )
 
     elif args.command == "predict":
-        # --trace なしのときは explain_top_n=0 にして計算を省略
-        explain_top_n = args.explain if args.trace else 0
-
         exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
 
         single_dict_path = args.single_dict
@@ -287,12 +215,11 @@ def main():
             custom_dict_path=args.custom_dict,
             single_kanji_dict_path=single_dict_path,
             person_name_dict_path=name_dict_path,
-            explain_top_n=explain_top_n,
+            explain_top_n=0,  # 特徴量寄与度の表示は Rust 版 momo-inspect trace へ移行
             window=args.window,
         )
         run_predict(
             config,
-            show_trace=args.trace,
             show_profile=args.profile,
             segmented_output=args.segment,
             segmented_source_output=args.segment_source,
@@ -301,13 +228,6 @@ def main():
             show_kana=not args.no_kana,
             show_braille=not args.no_braille,
         )
-
-    elif args.command == "label":
-        config = PredictorConfig(
-            model_path=args.model,
-            custom_dict_path=args.custom_dict,
-        )
-        run_label_scanner(config)
 
 
 if __name__ == "__main__":

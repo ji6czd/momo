@@ -258,6 +258,21 @@ impl WeightModel for MomoModel {
         }
         score
     }
+
+    fn read_feature_column(&self, feat_id: u32) -> Vec<(u32, f32)> {
+        if feat_id >= self.n_features {
+            return Vec::new();
+        }
+        let col_start = self.csc_colptr[feat_id as usize] as usize;
+        let col_end = self.csc_colptr[feat_id as usize + 1] as usize;
+        (col_start..col_end)
+            .map(|j| {
+                let cls = self.csc_rowind[j] as u32;
+                let weight = (self.csc_data[j] as f32) * self.read_scale[cls as usize];
+                (cls, weight)
+            })
+            .collect()
+    }
 }
 
 // ============================================================

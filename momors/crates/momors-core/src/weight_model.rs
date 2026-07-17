@@ -60,8 +60,20 @@ pub trait WeightModel: Sized {
     /// `scores[cls]` を「intercept + 特徴量重みの合計」で上書きする。
     ///
     /// `scores.len()` は `n_classes()` と一致していること。
-    fn compute_read_scores(&self, feat_ids: &[u32], scratch: &mut Self::Scratch, scores: &mut [f32]);
+    fn compute_read_scores(
+        &self,
+        feat_ids: &[u32],
+        scratch: &mut Self::Scratch,
+        scores: &mut [f32],
+    );
 
     /// 境界モデルの生スコア (sigmoid 前) を計算する。
     fn compute_boundary_score(&self, feat_ids: &[u32]) -> f32;
+
+    /// 読みモデルの1特徴量（列）の非ゼロ重みを `(class_id, 実重み)` の列で返す。
+    ///
+    /// 実重みは量子化・scale を解決した後の値（`.mbm` は `int8 * scale`、
+    /// `.mbmf` はそのまま）。範囲外 `feat_id` は空 Vec。診断（explain / label
+    /// スキャナ）専用で、推論のホットパスでは使わない。
+    fn read_feature_column(&self, feat_id: u32) -> Vec<(u32, f32)>;
 }

@@ -128,6 +128,54 @@ impl CharType {
         self.category() == 0x50
     }
 
+    /// Python 版 `CharType.value` と一致する文字列名を返す。
+    ///
+    /// 特徴量名の整形・解析（`type_s=KANJI` 等）に使う。exporter の
+    /// `CHARTYPE_TO_INT` が扱う名前と同一でなければならない。
+    pub fn as_str(self) -> &'static str {
+        use CharType::*;
+        match self {
+            Space => "SPACE",
+            Alpha => "ALPHA",
+            Numeric => "NUM",
+            Reserved => "RESERVED",
+            Symbol => "SYMBOL",
+            SymbolClose => "SYMBOL_CLOSE",
+            SymbolOpen => "SYMBOL_OPEN",
+            SymbolStop => "SYMBOL_STOP",
+            SymbolPause => "SYMBOL_PAUSE",
+            Hiragana => "HIRAGANA",
+            Katakana => "KATAKANA",
+            Kanji => "KANJI",
+            JapaneseNumeric => "JAPANESE_NUMERIC",
+            Skip => "SKIP",
+            Other => "OTHER",
+        }
+    }
+
+    /// [`as_str`](CharType::as_str) の逆変換。未知の名前は `None`。
+    pub fn from_name(s: &str) -> Option<Self> {
+        use CharType::*;
+        Some(match s {
+            "SPACE" => Space,
+            "ALPHA" => Alpha,
+            "NUM" => Numeric,
+            "RESERVED" => Reserved,
+            "SYMBOL" => Symbol,
+            "SYMBOL_CLOSE" => SymbolClose,
+            "SYMBOL_OPEN" => SymbolOpen,
+            "SYMBOL_STOP" => SymbolStop,
+            "SYMBOL_PAUSE" => SymbolPause,
+            "HIRAGANA" => Hiragana,
+            "KATAKANA" => Katakana,
+            "KANJI" => Kanji,
+            "JAPANESE_NUMERIC" => JapaneseNumeric,
+            "SKIP" => Skip,
+            "OTHER" => Other,
+            _ => return None,
+        })
+    }
+
     /// `u8` 値から [`CharType`] を構築する。
     ///
     /// 主にモデルファイル読み込み時に使う。未定義の値は `None` を返す。

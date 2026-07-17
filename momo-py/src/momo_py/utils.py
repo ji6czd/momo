@@ -348,6 +348,21 @@ def has_vowel(char: str, vowel: str) -> bool:
     return char_vowel == vowel_kata
 
 
+def parse_kanji_dict_tsv(text: str) -> Dict[str, List[str]]:
+    """TSVテキストを単一漢字辞書に変換する。
+    フォーマット: 漢字[TAB]読み1[TAB]読み2[TAB]...
+    """
+    result: Dict[str, List[str]] = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        result[parts[0]] = parts[1:]
+    return result
+
+
 def split_on_unescaped_slash(s: str) -> List[str]:
     """バックスラッシュでエスケープされていない '/' で s を分割する。"""
     blocks: List[str] = []

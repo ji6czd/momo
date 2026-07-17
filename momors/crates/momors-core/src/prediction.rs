@@ -43,6 +43,89 @@ const CHAR_NOMA: u32 = 0x3005;
 /// Python 版 `_LR_LOW_THRESHOLD` と対応。
 const NAME_READING_CONF_THRESHOLD: f32 = 0.5;
 
+/// LR_LOW 表示のしきい値。この自信度未満の LR 判定を「低自信度」に色分けする。
+/// Python 版 `_LR_LOW_THRESHOLD` と対応。
+const LR_LOW_THRESHOLD: f32 = 0.5;
+
+// ============================================================
+// DecisionSource
+// ============================================================
+
+/// 1文字ごとの読み決定の根拠。trace（`momo-inspect trace`）の色分け・タグ表示に使う。
+///
+/// Python 版 `predictor.DecisionSource` のうち、Rust core の推論経路が実際に生成する
+/// ものだけを持つ（カスタム辞書経路が無いため `DICT` は無い。漢字辞書は argmax の
+/// 候補制約であって低自信度フォールバックではないため `FALLBACK_KANJI` も無い）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionSource {
+    /// LR（読みモデル）の予測をそのまま採用。
+    Lr,
+    /// 自信度は低いが LR を採用（`conf < 0.5`）。
+    LrLow,
+    /// JAPANESE_NUMERIC のルールベース変換。
+    FallbackNumeric,
+    /// 々（同の字点）の繰り返し処理。
+    FallbackRepeat,
+    /// かな直接変換フォールバック（モデル予測がひらがなに対して不正）。
+    FallbackKana,
+    /// 文字消失を防ぐ救済（孤立 CONTINUE 等）。
+    FallbackOrphan,
+    /// 人名辞書の固定読み（低自信度フォールバック）。
+    DictName,
+    /// 記号・空白・英字などの素通し。
+    Bypass,
+}
+
+impl DecisionSource {
+    /// Python 版のタグ文字列と一致する短い表示名を返す。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DecisionSource::Lr => "LR",
+            DecisionSource::LrLow => "LR_LOW",
+            DecisionSource::FallbackNumeric => "FALLBACK_NUM",
+            DecisionSource::FallbackRepeat => "FALLBACK_々",
+            DecisionSource::FallbackKana => "FALLBACK_KANA",
+            DecisionSource::FallbackOrphan => "FALLBACK_ORPH",
+            DecisionSource::DictName => "DICT_NAME",
+            DecisionSource::Bypass => "BYPASS",
+        }
+    }
+}
+
+// ============================================================
+// 診断（trace / explain）結果
+// ============================================================
+
+/// 1特徴量の寄与度。`weight` は採用クラスに対する重み（値は 0/1 なので実質重み）。
+#[derive(Debug, Clone)]
+pub struct Contribution {
+    pub feature: String,
+    pub weight: f32,
+}
+
+/// trace の1原文文字ぶんの行。
+#[derive(Debug, Clone)]
+pub struct TraceRow {
+    /// 原文の1文字（複合ユニットでも先頭文字のバイト位置基準の1文字）。
+    pub source: char,
+    /// この文字に対応するかな（無ければ空文字列＝スキップ）。
+    pub kana: String,
+    /// 決定根拠（この文字の最初のかなのタグ）。かなが無い場合は `None`。
+    pub decision: Option<DecisionSource>,
+    /// 自信度（この文字のかなの最小値）。かなが無い場合は `None`。
+    pub confidence: Option<f32>,
+    /// 上位特徴量寄与度（LR / LR_LOW の行のみ・`top_n>0` のとき）。
+    pub contributions: Vec<Contribution>,
+}
+
+/// `Predictor::trace` の結果。
+#[derive(Debug, Clone)]
+pub struct TraceResult {
+    pub source_text: String,
+    pub kana_text: String,
+    pub rows: Vec<TraceRow>,
+}
+
 // ============================================================
 // PredictorConfig
 // ============================================================
@@ -112,6 +195,8 @@ pub struct PredictionResult {
     pub(crate) source_text: String,
     pub(crate) kana_text: String,
     pub(crate) confidences: Vec<f32>,
+    /// 各かなバイトの決定根拠。`confidences` と同じ長さ・整列で、trace 用。
+    pub(crate) decision_sources: Vec<DecisionSource>,
     /// かなのバイト位置 → 原文の **UTF-8 バイト位置**
     pub(crate) kana_to_src_index: Vec<usize>,
     /// 原文の **UTF-8 バイト位置** → かなのバイト位置のリスト
@@ -133,6 +218,11 @@ impl PredictionResult {
     /// `len()` は `kana_text().len()` と同じ。
     pub fn confidences(&self) -> &[f32] {
         &self.confidences
+    }
+
+    /// 各かなバイトの決定根拠のスライス。`confidences()` と同じ長さ・整列。
+    pub fn decision_sources(&self) -> &[DecisionSource] {
+        &self.decision_sources
     }
 
     /// 「かなのバイト位置 → 原文の UTF-8 バイト位置」のマッピング。
@@ -475,18 +565,28 @@ impl<M: WeightModel> Predictor<M> {
             let mut kana = String::new();
             let mut srcs = Vec::new();
             let mut confs = Vec::new();
+            let mut decs = Vec::new();
             // 開き括弧
             kana.push(sp.open);
             srcs.extend(std::iter::repeat_n(sp.pos, sp.open.len_utf8()));
             confs.extend(std::iter::repeat_n(1.0, sp.open.len_utf8()));
+            decs.extend(std::iter::repeat_n(
+                DecisionSource::Bypass,
+                sp.open.len_utf8(),
+            ));
             // 中身（インデックスは text 座標へずらす）
             kana.push_str(&inner.kana_text);
             srcs.extend(inner.kana_to_src_index.iter().map(|&s| s + offset));
             confs.extend_from_slice(&inner.confidences);
+            decs.extend_from_slice(&inner.decision_sources);
             // 閉じ括弧
             kana.push(sp.close);
             srcs.extend(std::iter::repeat_n(sp.close_pos, sp.close.len_utf8()));
             confs.extend(std::iter::repeat_n(1.0, sp.close.len_utf8()));
+            decs.extend(std::iter::repeat_n(
+                DecisionSource::Bypass,
+                sp.close.len_utf8(),
+            ));
 
             atoms.push(Atom {
                 pos: sp.pos,
@@ -495,6 +595,7 @@ impl<M: WeightModel> Predictor<M> {
                 kana,
                 srcs,
                 confs,
+                decs,
             });
         }
         splice_atoms(&mut result, text, atoms);
@@ -525,6 +626,7 @@ impl<M: WeightModel> Predictor<M> {
             source_text: text.to_string(),
             kana_text: String::new(),
             confidences: Vec::new(),
+            decision_sources: Vec::new(),
             kana_to_src_index: Vec::new(),
             src_to_kana_index: vec![Vec::new(); text.len()],
         };
@@ -584,7 +686,7 @@ impl<M: WeightModel> Predictor<M> {
             // bypass (素通し)
             // ============================================================
             if entry.ctype.is_bypass() {
-                self.emit_char_passthrough(entry, 1.0, &mut result);
+                self.emit_char_passthrough(entry, 1.0, DecisionSource::Bypass, &mut result);
                 parent_src_idx = Some(i);
                 parent_is_bypass = true;
                 parent_is_kanji = false;
@@ -601,7 +703,7 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
             if entry.ctype == CharType::Katakana && !is_counter_small_kana(entry.cp) {
                 let direct = katakana_passthrough(entry);
-                self.emit_label(entry, &direct, 1.0, &mut result);
+                self.emit_label(entry, &direct, 1.0, DecisionSource::Lr, &mut result);
                 parent_src_idx = Some(i);
                 parent_is_bypass = false;
                 parent_is_kanji = false;
@@ -613,6 +715,7 @@ impl<M: WeightModel> Predictor<M> {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
                     result.confidences.push(1.0);
+                    result.decision_sources.push(DecisionSource::Lr);
                 }
                 continue;
             }
@@ -665,7 +768,13 @@ impl<M: WeightModel> Predictor<M> {
                     NumericFallback::Output(fallback) => {
                         let has_split =
                             sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
-                        self.emit_label(entry, fallback, conf, &mut result);
+                        self.emit_label(
+                            entry,
+                            fallback,
+                            conf,
+                            DecisionSource::FallbackNumeric,
+                            &mut result,
+                        );
                         parent_src_idx = Some(i);
                         parent_is_bypass = false;
                         parent_is_kanji = false;
@@ -676,6 +785,9 @@ impl<M: WeightModel> Predictor<M> {
                             result.kana_text.push(' ');
                             result.kana_to_src_index.push(entry.orig_idx as usize);
                             result.confidences.push(conf);
+                            result
+                                .decision_sources
+                                .push(DecisionSource::FallbackNumeric);
                         }
                         continue;
                     }
@@ -721,7 +833,12 @@ impl<M: WeightModel> Predictor<M> {
                 };
                 if revert {
                     let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
-                    self.emit_char_passthrough(entry, conf, &mut result);
+                    self.emit_char_passthrough(
+                        entry,
+                        conf,
+                        DecisionSource::FallbackNumeric,
+                        &mut result,
+                    );
                     parent_src_idx = Some(i);
                     parent_is_bypass = false;
                     parent_is_kanji = false;
@@ -732,6 +849,9 @@ impl<M: WeightModel> Predictor<M> {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
                         result.confidences.push(conf);
+                        result
+                            .decision_sources
+                            .push(DecisionSource::FallbackNumeric);
                     }
                     continue;
                 }
@@ -745,7 +865,12 @@ impl<M: WeightModel> Predictor<M> {
                 // 1. 孤立 CONTINUE 救済: 親がない・bypass・KANJI以外が親の場合は
                 //    現在の文字を「親」にして、文字をそのまま出力する。
                 if parent_src_idx.is_none() || parent_is_bypass || !parent_is_kanji {
-                    self.emit_char_passthrough(entry, conf, &mut result);
+                    self.emit_char_passthrough(
+                        entry,
+                        conf,
+                        DecisionSource::FallbackOrphan,
+                        &mut result,
+                    );
                     parent_src_idx = Some(i);
                     parent_is_bypass = false;
                     parent_is_kanji = entry.ctype == CharType::Kanji;
@@ -756,13 +881,14 @@ impl<M: WeightModel> Predictor<M> {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
                         result.confidences.push(conf);
+                        result.decision_sources.push(DecisionSource::FallbackOrphan);
                     }
                     continue;
                 }
 
                 // 2. NUMERIC + CONTINUE 救済: 数字 (1, 2, ...) を素通し
                 if entry.ctype == CharType::Numeric {
-                    self.emit_char_passthrough(entry, conf, &mut result);
+                    self.emit_char_passthrough(entry, conf, DecisionSource::Lr, &mut result);
                     continue;
                 }
 
@@ -771,6 +897,7 @@ impl<M: WeightModel> Predictor<M> {
                     self.insert_small_kana_into_parent(
                         entry.cp,
                         conf,
+                        DecisionSource::Lr,
                         &source_seq,
                         parent_src_idx.unwrap(),
                         &mut parent_kana_byte_end,
@@ -788,7 +915,7 @@ impl<M: WeightModel> Predictor<M> {
             if label == LABEL_SKIP {
                 // NUMERIC + SKIP 救済: 数字を素通し
                 if entry.ctype == CharType::Numeric {
-                    self.emit_char_passthrough(entry, conf, &mut result);
+                    self.emit_char_passthrough(entry, conf, DecisionSource::Lr, &mut result);
                     continue;
                 }
                 // それ以外の SKIP は単純スキップ (親情報は更新しない)
@@ -809,16 +936,25 @@ impl<M: WeightModel> Predictor<M> {
             // - 通常時:   `label` から複製
             // これにより、後段の `last_fallback` 更新時に借用が競合しない。
             // 文字列は通常短い (数バイト) のでコピーのオーバーヘッドは小さい。
+            // 決定根拠タグ（trace 用）。LR の既定は自信度で LR / LR_LOW を分ける。
+            // 各フォールバック分岐が発火したら上書きする。
+            let mut dec = if conf < LR_LOW_THRESHOLD {
+                DecisionSource::LrLow
+            } else {
+                DecisionSource::Lr
+            };
             let effective_label: String = if entry.cp == CHAR_NOMA
                 && !last_fallback.is_empty()
                 && !is_valid_repeat(label, &last_fallback)
             {
+                dec = DecisionSource::FallbackRepeat;
                 last_fallback.clone()
             } else if entry.ctype == CharType::Hiragana {
                 let direct = hiragana_direct(entry);
                 if is_valid_kana_prediction(entry, label, &direct) {
                     label.to_string()
                 } else {
+                    dec = DecisionSource::FallbackKana;
                     direct
                 }
             } else if let Some(reading) = name_readings[i]
@@ -829,12 +965,13 @@ impl<M: WeightModel> Predictor<M> {
                 // 人名スパン内 かつ モデルが低自信度のときだけ、辞書の固定読みで
                 // 置換する（Python 版 DICT_NAME と対応）。自信のある予測は尊重する
                 // ので、人名と同表層の別語（森林・関係など）を壊さない。
+                dec = DecisionSource::DictName;
                 reading.to_string()
             } else {
                 label.to_string()
             };
 
-            self.emit_label(entry, &effective_label, conf, &mut result);
+            self.emit_label(entry, &effective_label, conf, dec, &mut result);
 
             // 親情報更新
             parent_src_idx = Some(i);
@@ -857,6 +994,7 @@ impl<M: WeightModel> Predictor<M> {
                 result.kana_text.push(' ');
                 result.kana_to_src_index.push(entry.orig_idx as usize);
                 result.confidences.push(conf);
+                result.decision_sources.push(dec);
             }
         }
 
@@ -911,7 +1049,13 @@ impl<M: WeightModel> Predictor<M> {
     }
 
     /// 原文の `entry.cp` をそのまま結果に書き出す (bypass / 救済共通)。
-    fn emit_char_passthrough(&self, entry: &SourceEntry, conf: f32, result: &mut PredictionResult) {
+    fn emit_char_passthrough(
+        &self,
+        entry: &SourceEntry,
+        conf: f32,
+        dec: DecisionSource,
+        result: &mut PredictionResult,
+    ) {
         let ch = char::from_u32(entry.cp).unwrap_or('\u{FFFD}');
         let mut buf = [0u8; 4];
         let ch_utf8 = ch.encode_utf8(&mut buf);
@@ -919,6 +1063,7 @@ impl<M: WeightModel> Predictor<M> {
         for _ in 0..ch_utf8.len() {
             result.kana_to_src_index.push(entry.orig_idx as usize);
             result.confidences.push(conf);
+            result.decision_sources.push(dec);
         }
     }
 
@@ -928,22 +1073,26 @@ impl<M: WeightModel> Predictor<M> {
         entry: &SourceEntry,
         label: &str,
         conf: f32,
+        dec: DecisionSource,
         result: &mut PredictionResult,
     ) {
         result.kana_text.push_str(label);
         for _ in 0..label.len() {
             result.kana_to_src_index.push(entry.orig_idx as usize);
             result.confidences.push(conf);
+            result.decision_sources.push(dec);
         }
     }
 
     /// 親ラベル末尾に小書き仮名を挿入する (LABEL_CONTINUE 救済の 3 番目)。
     ///
     /// `parent_kana_byte_end` を呼び出し側で更新する必要がある (`&mut` 経由)。
+    #[allow(clippy::too_many_arguments)]
     fn insert_small_kana_into_parent(
         &self,
         small_cp: u32,
         conf: f32,
+        dec: DecisionSource,
         source_seq: &[SourceEntry],
         parent_idx: usize,
         parent_kana_byte_end: &mut usize,
@@ -972,8 +1121,176 @@ impl<M: WeightModel> Predictor<M> {
             result
                 .confidences
                 .insert(*parent_kana_byte_end + offset, conf);
+            result
+                .decision_sources
+                .insert(*parent_kana_byte_end + offset, dec);
         }
         *parent_kana_byte_end += kana_utf8.len();
+    }
+
+    // ============================================================
+    // 診断 API（trace / label スキャナ）
+    // ============================================================
+
+    /// テキストを推論し、原文文字ごとに「かな・決定根拠・自信度・上位特徴量寄与度」を
+    /// まとめた [`TraceResult`] を返す（`momo-inspect trace` 用）。
+    ///
+    /// `top_n` は各文字で表示する特徴量寄与度の上位件数（0 で寄与度を計算しない）。
+    /// 寄与度は LR / LR_LOW（読みモデル駆動）の文字にのみ付く。
+    ///
+    /// 寄与度は原文テキストを再度特徴量化して各位置の argmax クラスに対して算出する。
+    /// 欧文リガチャ等の正規化や括弧を含む入力では、かな・決定根拠・自信度は正しいが、
+    /// 寄与度の位置対応がずれる場合がある（プレーンな和文では一致する）。
+    pub fn trace(&self, text: &str, top_n: usize) -> Result<TraceResult> {
+        let pred = self.predict(text)?;
+        let explain = self.explain_by_source_byte(&pred.source_text, top_n);
+
+        // かな列のバイト位置のうち「文字の先頭」であるものの集合（複合バイトの
+        // 継続バイトを除いて1文字ずつ取り出すため）。
+        let kana_char_starts: std::collections::HashSet<usize> = pred
+            .kana_text
+            .char_indices()
+            .map(|(byte, _)| byte)
+            .collect();
+
+        let mut rows = Vec::new();
+        for (b, ch) in pred.source_text.char_indices() {
+            let kana_bytes = &pred.src_to_kana_index[b];
+
+            // この原文文字に対応するかな文字と、その自信度・決定根拠を集める。
+            let mut kana = String::new();
+            let mut min_conf: Option<f32> = None;
+            let mut first_dec: Option<DecisionSource> = None;
+            for &kb in kana_bytes {
+                // バイト位置がかな文字の先頭のときだけ1文字取り出す。
+                if kana_char_starts.contains(&kb) {
+                    kana.extend(pred.kana_text[kb..].chars().next());
+                }
+                let c = pred.confidences[kb];
+                min_conf = Some(min_conf.map_or(c, |m| m.min(c)));
+                if first_dec.is_none() {
+                    first_dec = Some(pred.decision_sources[kb]);
+                }
+            }
+
+            // 寄与度は読みモデル駆動（LR / LR_LOW）の文字にのみ付ける。
+            let contributions = match first_dec {
+                Some(DecisionSource::Lr) | Some(DecisionSource::LrLow) => {
+                    explain.get(&b).cloned().unwrap_or_default()
+                }
+                _ => Vec::new(),
+            };
+
+            rows.push(TraceRow {
+                source: ch,
+                kana,
+                decision: first_dec,
+                confidence: min_conf,
+                contributions,
+            });
+        }
+
+        Ok(TraceResult {
+            source_text: pred.source_text.clone(),
+            kana_text: pred.kana_text.clone(),
+            rows,
+        })
+    }
+
+    /// 特徴量名に対する読みモデルのクラス別重みを、重みの降順で返す
+    /// （`momo-inspect label` 用）。
+    ///
+    /// `feature` は完全な特徴量名（`char_s=金` / `type_trans_p1_s=KANJI->KANJI` 等）、
+    /// または単一文字。単一文字は `char_s=<文字>` として扱う（Python 版が `char=`
+    /// を引いて形骸化していたのを、現行の特徴量名に合わせて修正したもの）。
+    /// 未知・不正な特徴量名、または語彙に無い特徴量は空 Vec。
+    pub fn feature_label_weights(&self, feature: &str) -> Vec<(String, f32)> {
+        let key = match FeatureKey::parse_name(feature) {
+            Some(k) => k,
+            None => {
+                // 特徴量名として解釈できなければ、単一（複合）文字の char_s とみなす。
+                match FeatureKey::parse_name(&format!("char_s={feature}")) {
+                    Some(k) => k,
+                    None => return Vec::new(),
+                }
+            }
+        };
+        let Some(id) = self.model.vocab_find(&key) else {
+            return Vec::new();
+        };
+        let mut weights: Vec<(String, f32)> = self
+            .model
+            .read_feature_column(id)
+            .into_iter()
+            .filter_map(|(cls, w)| self.model.read_class(cls).map(|name| (name.to_string(), w)))
+            .collect();
+        weights.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        weights
+    }
+
+    /// 原文の各文字（バイト位置）→ 上位特徴量寄与度、のマップを作る。
+    ///
+    /// 各位置を argmax して、その採用クラスに対する発火特徴量の重みを寄与度とする。
+    /// Python 版 `_explain_position` に対応。
+    fn explain_by_source_byte(
+        &self,
+        text: &str,
+        top_n: usize,
+    ) -> std::collections::HashMap<usize, Vec<Contribution>> {
+        let mut map = std::collections::HashMap::new();
+        if top_n == 0 || text.is_empty() {
+            return map;
+        }
+        let source_seq = to_source_seq(text);
+        if source_seq.is_empty() {
+            return map;
+        }
+        let (name_flags, _) =
+            crate::name_dict::compute_name_matches(&source_seq, self.model.name_dict());
+        let all_keys = compute_source_features(&source_seq, &name_flags);
+
+        let n_cls = self.model.n_classes() as usize;
+        let mut scratch = self.model.new_scratch();
+        let mut scores = vec![0f32; n_cls];
+
+        for (i, entry) in source_seq.iter().enumerate() {
+            // 発火特徴量の (FeatureKey, feature_id) ペアを集める。
+            let mut pairs: Vec<(FeatureKey, u32)> = Vec::new();
+            let mut ids: Vec<u32> = Vec::new();
+            for k in &all_keys[i] {
+                if let Some(id) = self.model.vocab_find(k) {
+                    pairs.push((*k, id));
+                    ids.push(id);
+                }
+            }
+            let (best_cls, _) = self.read_argmax(entry, &ids, &mut scratch, &mut scores);
+            let best_cls = best_cls as u32;
+
+            // 採用クラスに対して非ゼロ重みを持つ特徴量だけを寄与度に集める。
+            let mut contribs: Vec<Contribution> = Vec::new();
+            for (key, id) in &pairs {
+                if let Some((_, w)) = self
+                    .model
+                    .read_feature_column(*id)
+                    .into_iter()
+                    .find(|(cls, _)| *cls == best_cls)
+                {
+                    contribs.push(Contribution {
+                        feature: key.to_string(),
+                        weight: w,
+                    });
+                }
+            }
+            // 寄与度の降順（Python と同じく符号付き値でソート）で上位 top_n。
+            contribs.sort_by(|a, b| {
+                b.weight
+                    .partial_cmp(&a.weight)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            contribs.truncate(top_n);
+            map.insert(entry.orig_idx as usize, contribs);
+        }
+        map
     }
 }
 
@@ -1024,6 +1341,8 @@ struct Atom {
     srcs: Vec<usize>,
     /// `kana` のバイトごとの自信度。
     confs: Vec<f32>,
+    /// `kana` のバイトごとの決定根拠（trace 用）。
+    decs: Vec<DecisionSource>,
 }
 
 /// 原子がどちらの語に密着するか。
@@ -1146,6 +1465,7 @@ fn strip_bracket_chars(text: &str) -> (Removed, Vec<Atom>) {
                 kana: c.to_string(),
                 srcs: vec![b; c.len_utf8()],
                 confs: vec![1.0; c.len_utf8()],
+                decs: vec![DecisionSource::Bypass; c.len_utf8()],
             });
         } else {
             out.push(c);
@@ -1221,6 +1541,7 @@ fn trim_trailing_boundary_spaces(result: &mut PredictionResult, text: &str) {
         result.kana_text.remove(kb);
         result.kana_to_src_index.remove(kb);
         result.confidences.remove(kb);
+        result.decision_sources.remove(kb);
     }
 }
 
@@ -1235,6 +1556,7 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
         ch: char,
         src: usize,
         conf: f32,
+        dec: DecisionSource,
         space: bool,
     }
     let mut cells: Vec<Cell> = Vec::with_capacity(result.kana_text.len());
@@ -1244,6 +1566,7 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
             ch,
             src,
             conf: result.confidences[kb],
+            dec: result.decision_sources[kb],
             // 原文の空白は書き手が書いたデータなので内容セルとして扱う。
             space: get_char_type(ch) == CharType::Space && !is_source_space(text, src),
         });
@@ -1280,32 +1603,43 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
     let mut kana = String::new();
     let mut k2s: Vec<usize> = Vec::new();
     let mut conf: Vec<f32> = Vec::new();
+    let mut decs: Vec<DecisionSource> = Vec::new();
 
-    let push_text = |kana: &mut String,
-                     k2s: &mut Vec<usize>,
-                     conf: &mut Vec<f32>,
-                     s: &str,
-                     src: usize,
-                     c: f32| {
-        kana.push_str(s);
+    struct Sink<'a> {
+        kana: &'a mut String,
+        k2s: &'a mut Vec<usize>,
+        conf: &'a mut Vec<f32>,
+        decs: &'a mut Vec<DecisionSource>,
+    }
+    let mut sink = Sink {
+        kana: &mut kana,
+        k2s: &mut k2s,
+        conf: &mut conf,
+        decs: &mut decs,
+    };
+
+    let push_text = |sink: &mut Sink, s: &str, src: usize, c: f32, dec: DecisionSource| {
+        sink.kana.push_str(s);
         for _ in 0..s.len() {
-            k2s.push(src);
-            conf.push(c);
+            sink.k2s.push(src);
+            sink.conf.push(c);
+            sink.decs.push(dec);
         }
     };
-    let push_atom = |kana: &mut String, k2s: &mut Vec<usize>, conf: &mut Vec<f32>, a: &Atom| {
-        kana.push_str(&a.kana);
-        k2s.extend_from_slice(&a.srcs);
-        conf.extend_from_slice(&a.confs);
+    let push_atom = |sink: &mut Sink, a: &Atom| {
+        sink.kana.push_str(&a.kana);
+        sink.k2s.extend_from_slice(&a.srcs);
+        sink.conf.extend_from_slice(&a.confs);
+        sink.decs.extend_from_slice(&a.decs);
     };
 
     if content.is_empty() {
         for a in &atoms {
-            push_atom(&mut kana, &mut k2s, &mut conf, a);
+            push_atom(&mut sink, a);
         }
     } else {
         for a in &leading {
-            push_atom(&mut kana, &mut k2s, &mut conf, a);
+            push_atom(&mut sink, a);
         }
 
         for j in 0..content.len() {
@@ -1313,21 +1647,20 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
 
             if let Some(opens) = prefix.get(&ci) {
                 for a in opens {
-                    push_atom(&mut kana, &mut k2s, &mut conf, a);
+                    push_atom(&mut sink, a);
                 }
             }
             let mut buf = [0u8; 4];
             push_text(
-                &mut kana,
-                &mut k2s,
-                &mut conf,
+                &mut sink,
                 cells[ci].ch.encode_utf8(&mut buf),
                 cells[ci].src,
                 cells[ci].conf,
+                cells[ci].dec,
             );
             if let Some(closes) = suffix.get(&ci) {
                 for a in closes {
-                    push_atom(&mut kana, &mut k2s, &mut conf, a);
+                    push_atom(&mut sink, a);
                 }
             }
 
@@ -1343,13 +1676,13 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
                         .and_then(|v| v.last())
                         .and_then(|a| a.srcs.last().copied())
                         .unwrap_or(cells[ci].src);
-                    push_text(&mut kana, &mut k2s, &mut conf, " ", space_src, 1.0);
+                    push_text(&mut sink, " ", space_src, 1.0, DecisionSource::Bypass);
                 }
             }
         }
 
         for a in &trailing {
-            push_atom(&mut kana, &mut k2s, &mut conf, a);
+            push_atom(&mut sink, a);
         }
     }
 
@@ -1357,6 +1690,7 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
     result.kana_text = kana;
     result.kana_to_src_index = k2s;
     result.confidences = conf;
+    result.decision_sources = decs;
     result.source_text = text.to_string();
     let mut src_to_kana: Vec<Vec<usize>> = vec![Vec::new(); text.len()];
     for (j, &src) in result.kana_to_src_index.iter().enumerate() {
@@ -1666,6 +2000,7 @@ mod tests {
             source_text: text.to_string(),
             kana_text: kana.to_string(),
             confidences: vec![0.9; kana_to_src.len()],
+            decision_sources: vec![DecisionSource::Lr; kana_to_src.len()],
             kana_to_src_index: kana_to_src,
             src_to_kana_index: vec![Vec::new(); text.len()],
         }
@@ -1822,6 +2157,7 @@ mod tests {
             kana: "（b）".to_string(),
             srcs: vec![1, 1, 1, 4, 5, 5, 5],
             confs: vec![1.0; 7],
+            decs: vec![DecisionSource::Bypass; 7],
         };
         splice_atoms(&mut r, text, vec![atom]);
         assert_eq!(r.kana_text, "a（b） c");
@@ -1848,6 +2184,7 @@ mod tests {
             kana: "（b）".to_string(),
             srcs: vec![1, 1, 1, 4, 5, 5, 5],
             confs: vec![1.0; 7],
+            decs: vec![DecisionSource::Bypass; 7],
         };
         splice_atoms(&mut r, text, vec![atom]);
         assert_eq!(r.kana_text, "a（b）c");

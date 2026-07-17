@@ -42,7 +42,7 @@ from .name_dict import (
     name_flag_for_unit,
     parse_name_marks,
 )
-from .predictor import LRModelBundle, SINGLE_KANJI_DICT_FILENAME
+from .bundle import LRModelBundle, SINGLE_KANJI_DICT_FILENAME
 from .exporter import export, export_float
 
 KUTOUTEN = frozenset(["。", "、", "？", "！", ".", ","])

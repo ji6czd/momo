@@ -280,7 +280,10 @@ tasks:
       - task: dist:stage
       - mkdir -p "{{.OUT}}"
       - candle -arch x64 "-dVersion={{.VERSION}}" "-dStageDir={{.STAGE}}" -out "{{.OBJ}}" "{{.WXS}}"
-      - light -ext WixUIExtension -loc "C:/Program Files (x86)/WiX Toolset v3.14/SDK/wixui/WixUI_ja-jp.wxl" -out "{{.OUT}}/Momo-{{.VERSION}}-x64.msi" "{{.OBJ}}"
+      # ICE69: FileAssociationMbr が [#MomoEditorExe] を参照する。ICE69 はフィーチャ間の
+      # [#File] 参照を一律に弾くが、FileAssociation は Application の子フィーチャなので
+      # MomoEditor.exe は必ず同時にインストールされる。誤検知のため抑止する。
+      - light -ext WixUIExtension -sice:ICE69 -loc "C:/Program Files (x86)/WiX Toolset v3.14/SDK/wixui/WixUI_ja-jp.wxl" -out "{{.OUT}}/Momo-{{.VERSION}}-x64.msi" "{{.OBJ}}"
 
   dist:pyo3:
     desc: Build Python wheel and copy to dist/

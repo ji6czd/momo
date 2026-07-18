@@ -6,30 +6,24 @@ vars:
 
 tasks:
   default:
-    desc: Build momo-py package
-    cmds:
-      - mkdir -p src/momo_py/resources
-      # 点字 TOML は dataset/ から同期しない。momo-py（pybraille）は凍結して
-      # フェードアウトする方針のため、src/momo_py/resources/ の点字 TOML は
-      # 旧フォーマットのまま固定する。dataset/ 側は momors-braille（Rust）専用に
-      # 進化させる（クラス名の階層化など）。正典は Rust。
-      - cp {{.DATASET_DIR}}/basic_data*.zip src/momo_py/resources/
-      - cp {{.DATASET_DIR}}/single_character_dic.tsv src/momo_py/resources/
-      - uv build
+    desc: Training and build model data
+    tasks:
+      - createdata
+      - train
 
   createdata:
     desc: Create training data from raw TSV
     cmds:
-      - uv run momopy createdata --raw '{{.DATASET_DIR}}/basic_raw.tsv'
+      - uv run trainer createdata --raw '{{.DATASET_DIR}}/basic_raw.tsv'
       - uv run makedic {{.DATASET_DIR}}/basic_data.tsv {{.DATASET_DIR}}/single_character_dic.tsv
 
   train:
     desc: Train the model (Python)
     deps: [createdata]
     cmds:
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 4 --jobs {{.JOBS}}
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 5 --jobs {{.JOBS}}
-      - uv run momopy train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 7 --jobs {{.JOBS}}
+      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 4 --jobs {{.JOBS}}
+      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 5 --jobs {{.JOBS}}
+      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 7 --jobs {{.JOBS}}
 
   test:
     desc: Run Python tests
@@ -42,9 +36,3 @@ tasks:
     desc: Clean Python build artifacts
     cmds:
       - rm -rf dist/
-  publish:google:
-    desc: Publish the package to Google Artifact Registry
-    deps:
-      - default
-    cmds:
-      - uv publish --publish-url https://asia-northeast1-python.pkg.dev/neomomo/momo-py/ --username oauth2accesstoken --keyring-provider subprocess

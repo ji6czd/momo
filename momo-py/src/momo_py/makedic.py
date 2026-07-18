@@ -1,3 +1,10 @@
+"""
+makedic.py
+TSVファイルから漢字の読みの辞書を作成する。
+Usage:
+    python makedic.py <input_tsv_file> <output_tsv_file>
+"""
+
 import re
 import sys
 from collections import Counter, defaultdict
@@ -47,9 +54,7 @@ def makedic(tsv_file: str, dic_file: str) -> None:
 
 def main():
     if len(sys.argv) != 3:
-        print(
-            "Usage: makedic <input_tsv_file> <output_tsv_file>"
-        )
+        print("Usage: makedic <input_tsv_file> <output_tsv_file>")
         sys.exit(1)
     makedic(sys.argv[1], sys.argv[2])
 

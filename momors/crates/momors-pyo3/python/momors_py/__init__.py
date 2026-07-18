@@ -1,13 +1,13 @@
 from .momors_py import (
-    BrailleConverter,
     BrailleResult,
+    BrailleTranslator,
     PredictionResult,
     Predictor,
 )
 
 __all__ = [
-    "BrailleConverter",
     "BrailleResult",
+    "BrailleTranslator",
     "PredictionResult",
     "Predictor",
 ]

@@ -63,23 +63,31 @@ class Predictor:
 
 
 class BrailleResult:
-    """点字変換結果。`BrailleConverter.convert()` の戻り値。"""
+    """点字変換結果。`BrailleTranslator.translate()` の戻り値。"""
 
     braille: str
     """変換後の点字文字列"""
-    kana_to_braille: list[int]
-    """かな文字インデックス → 点字先頭セルインデックス"""
+    text_to_braille: list[int]
+    """原文文字インデックス → 点字先頭セルインデックス"""
 
     def __repr__(self) -> str: ...
 
 
-class BrailleConverter:
-    """カナ文字列 → 日本語点字変換器。"""
+class BrailleTranslator:
+    """点訳器。行の言語を判定して日本語（かな→点字）／英語（UEB）へ振り分ける。"""
 
     def __init__(self) -> None:
         """組み込みテーブルで変換器を作成する。"""
         ...
 
-    def convert(self, kana: str) -> BrailleResult:
-        """カナ文字列を点字に変換する。"""
+    def translate(self, text: str) -> BrailleResult:
+        """1行を言語判定して点字に変換する（日本語=かな / 英語=UEB）。"""
+        ...
+
+    def translate_japanese(self, kana: str) -> BrailleResult:
+        """言語判定せず、必ず日本語として点訳する（英字は外字符 ⠰ ＋無縮約）。"""
+        ...
+
+    def translate_english(self, text: str) -> BrailleResult:
+        """言語判定せず、必ず英語（UEB）として点訳する。"""
         ...

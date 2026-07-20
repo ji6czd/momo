@@ -35,6 +35,7 @@ pub mod nabcc;
 pub mod reader;
 pub mod table;
 pub mod translator;
+pub mod width;
 pub mod writer;
 
 pub use backtranslator::{

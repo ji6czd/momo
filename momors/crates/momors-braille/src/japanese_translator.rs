@@ -123,17 +123,10 @@ impl JapaneseTranslator {
     /// `kana_text` は読みに変換済みのテキスト（上位の予測器の出力）。漢字は扱わない。
     /// ASCII 文字・数字・句読点が混在していても処理できる。
     pub fn translate(&self, kana_text: &str) -> Result<JapaneseResult> {
-        // momors-core がバイパスした全角数字・英字を ASCII に正規化する
-        let normalized: String = kana_text
-            .chars()
-            .map(|c| match c as u32 {
-                0xFF10..=0xFF19 => char::from_u32(c as u32 - 0xFF10 + 0x30).unwrap_or(c), // ０-９→0-9
-                0xFF21..=0xFF3A => char::from_u32(c as u32 - 0xFF21 + 0x41).unwrap_or(c), // Ａ-Ｚ→A-Z
-                0xFF41..=0xFF5A => char::from_u32(c as u32 - 0xFF41 + 0x61).unwrap_or(c), // ａ-ｚ→a-z
-                _ => c,
-            })
-            .collect();
-        let chars: Vec<char> = normalized.chars().collect();
+        // 幅正規化: 半角カナ → 全角カタカナ（`ｶﾞ→ガ` の合成含む）、全角英数字 → ASCII。
+        // src_len[k] は正規化後の k 文字目が消費した原文文字数（`ｶﾞ→ガ` なら 2）。
+        // 末尾で kana_to_braille を原文インデックスへ展開するのに使う。
+        let (chars, src_len) = crate::width::normalize(kana_text);
         let n = chars.len();
 
         let mut braille = String::new();
@@ -329,6 +322,21 @@ impl JapaneseTranslator {
                 i += 1;
             }
         }
+
+        // kana_to_braille は正規化後の文字ごとに1エントリ。合成（`ｶﾞ→ガ`）で
+        // 潰れた原文文字も同じ点字位置を指すよう、src_len で原文インデックスへ展開する。
+        // 合成が無ければ src_len は全て 1 で、展開は恒等（従来と同一）。
+        let kana_to_braille = if src_len.iter().any(|&l| l != 1) {
+            let mut expanded = Vec::with_capacity(src_len.iter().sum());
+            for (pos, &len) in kana_to_braille.iter().zip(&src_len) {
+                for _ in 0..len {
+                    expanded.push(*pos);
+                }
+            }
+            expanded
+        } else {
+            kana_to_braille
+        };
 
         Ok(JapaneseResult {
             braille_text: braille,
@@ -563,6 +571,50 @@ classes = ["stop", "inline"]
         let r = conv().translate("3.14").unwrap();
         // ⠼⠉ (3) + ⠲ (.) + ⠁ (1) + ⠙ (4)
         assert_eq!(r.braille_text(), "⠼⠉⠲⠁⠙");
+    }
+
+    // --- 半角カナ ---
+
+    #[test]
+    fn halfwidth_kana_same_as_fullwidth() {
+        // ｱｲｳｴｵ は全角と同じ点字
+        let r = conv().translate("ｱｲｳｴｵ").unwrap();
+        assert_eq!(r.braille_text(), "⠁⠃⠉⠋⠊");
+    }
+
+    #[test]
+    fn halfwidth_voiced_composes() {
+        // ｶﾞ（2文字）→ ガ → ⠐⠡。両文字とも同じ点字位置を指す。
+        let r = conv().translate("ｶﾞ").unwrap();
+        assert_eq!(r.braille_text(), "⠐⠡");
+        assert_eq!(r.kana_to_braille(), &[0, 0]);
+    }
+
+    #[test]
+    fn halfwidth_semivoiced_composes() {
+        // ﾊﾟﾝ → パン。パ=⠠⠡相当（濁点系）、ン=⠴
+        let full = conv().translate("パン").unwrap();
+        let half = conv().translate("ﾊﾟﾝ").unwrap();
+        assert_eq!(half.braille_text(), full.braille_text());
+        // ﾊ ﾟ ﾝ の3文字。ﾊ と ﾟ はパの位置(0)、ﾝ はンの位置。
+        assert_eq!(half.kana_to_braille(), &[0, 0, full.kana_to_braille()[1]]);
+    }
+
+    #[test]
+    fn halfwidth_compound_youon() {
+        // ｷｬ（半角、拗音）→ キャ → ⠈⠡
+        let r = conv().translate("ｷｬ").unwrap();
+        assert_eq!(r.braille_text(), "⠈⠡");
+        assert_eq!(r.kana_to_braille(), &[0, 0]);
+    }
+
+    #[test]
+    fn halfwidth_voiced_youon() {
+        // ｷﾞｬ（3文字: ｷ ﾞ ｬ）→ ギャ。ｷ と ﾞ はギャの位置(0)、ｬ も同じ(複合音)。
+        let full = conv().translate("ギャ").unwrap();
+        let half = conv().translate("ｷﾞｬ").unwrap();
+        assert_eq!(half.braille_text(), full.braille_text());
+        assert_eq!(half.kana_to_braille(), &[0, 0, 0]);
     }
 
     #[test]

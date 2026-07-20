@@ -66,6 +66,8 @@ pub(crate) fn lookup(c: char) -> Option<(Role, Treatment)> {
         '”' => (Close, Inline),
         '‘' => (Open, Inline),
         '’' => (Close, Inline),
+        '【' => (Open, Inline),
+        '】' => (Close, Inline),
         // 注釈・挿入系: 中身は傍注
         '（' => (Open, Aside),
         '）' => (Close, Aside),
@@ -73,8 +75,6 @@ pub(crate) fn lookup(c: char) -> Option<(Role, Treatment)> {
         ')' => (Close, Aside),
         '｛' => (Open, Aside),
         '｝' => (Close, Aside),
-        '【' => (Open, Aside),
-        '】' => (Close, Aside),
         _ => return None,
     })
 }

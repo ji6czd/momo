@@ -379,28 +379,36 @@ impl PredictionResult {
     /// 開始フラグ（⠼ ⠰ ⠠）はそのフラグを発動させた原文文字のインデックスに帰属し、
     /// 終了フラグ（⠤ など）とクラス遷移スペースは直前の原文文字に帰属する
     /// （`JapaneseTranslator` が `brl_pos` を遷移スペースの直後・開始フラグの前で記録するため）。
-    /// 複合音（キャ → ⠈⠡）が 2 セル占める場合、両セルとも複合音の原文位置を指す。
+    ///
+    /// **各点字セルは「最初にその位置を指したかな文字」に帰属**し、どのかなも指さない
+    /// 位置（穴）は直前のセルの帰属を繰り越す。複数のかなが同じ点字先頭を指すとき
+    /// （複合音 キャ→⠈⠡、および半角合成 ｷﾞ→ギ）は**先頭のかな**（基字）に帰属する。
+    /// 半角合成では ｷ と ﾞ が別々の原文文字なので、`[start, next)` の範囲方式では
+    /// 空範囲になった ｷ が取りこぼされ ﾞ に両セルが渡ってしまう。先書き優先にすることで
+    /// [`source_to_braille_char`](Self::source_to_braille_char) と往復整合する
+    /// （momors-braille の `invert_text_to_braille` と同じ流儀）。
     pub fn braille_char_to_source(
         &self,
         kana_to_braille: &[usize],
         braille_char_count: usize,
     ) -> Vec<usize> {
         let kana_to_src = self.kana_to_source_char();
-        let n_kana = kana_to_braille.len();
-        let mut result = vec![0usize; braille_char_count];
 
-        for i in 0..n_kana {
-            let start = kana_to_braille[i];
-            let end = if i + 1 < n_kana {
-                kana_to_braille[i + 1]
+        // 各セルを「最初にそこへ来たかな」の原文位置で埋める（先書き優先）。
+        let mut result = vec![usize::MAX; braille_char_count];
+        for (i, &p) in kana_to_braille.iter().enumerate() {
+            if p < braille_char_count && result[p] == usize::MAX {
+                result[p] = kana_to_src.get(i).copied().unwrap_or(0);
+            }
+        }
+
+        // 穴（どのかなも指さない位置）は直前のセルの帰属を繰り越す。
+        let mut last = 0;
+        for slot in result.iter_mut() {
+            if *slot == usize::MAX {
+                *slot = last;
             } else {
-                braille_char_count
-            };
-            let src = kana_to_src.get(i).copied().unwrap_or(0);
-            for p in start..end {
-                if p < braille_char_count {
-                    result[p] = src;
-                }
+                last = *slot;
             }
         }
 
@@ -2681,14 +2689,15 @@ mod tests {
         let predictor: Predictor = Predictor::load(config).unwrap();
 
         // 複合音を模倣: kana[0](a→src0) と kana[1](b→src1) が同じ braille pos 0 を指す。
-        // kana[0] の範囲 [0,0) は空になり、kana[1] の範囲 [0,2) が両セルを引き継ぐ。
-        // (実際の キャ では kana[0]=キ と kana[1]=ャ が同一 src を指すが、
-        //  ASCII proxy ではsrc[0] と src[1] が異なるため kana[1] の src が採用される)
+        // 先書き優先なので pos 0 は先頭のかな kana[0](a→src0) に帰属する。
+        // (実際の キャ では kana[0]=キ と kana[1]=ャ が同一 src を指すためどちらでも同じ。
+        //  半角合成 ｷﾞ→ギ のように基字と濁点が別原文のときは先頭=基字が正しい)
         let result = predictor.predict("abc").unwrap();
         let b2s = result.braille_char_to_source(&[0, 0, 2], 3);
-        // pos 0,1 → kana[1](b) → src 1
+        // pos 0   → kana[0](a) → src 0（先書き優先）
+        // pos 1   → 穴 → 直前(src 0)を繰り越し
         // pos 2   → kana[2](c) → src 2
-        assert_eq!(b2s, vec![1, 1, 2]);
+        assert_eq!(b2s, vec![0, 0, 2]);
     }
 
     #[test]
@@ -2708,5 +2717,31 @@ mod tests {
                 assert_eq!(b2s[bi], s, "b2s[{bi}] should be {s}");
             }
         }
+    }
+
+    #[test]
+    fn braille_char_to_source_halfwidth_voiced() {
+        // 半角合成の回帰: 「ｶｷﾞ」は予測器を素通りして kana_text="ｶｷﾞ"(3文字)、
+        // japanese_translator が ｷﾞ→ギ を合成し kana_to_braille=[0,1,1]・点字3セル(⠡⠐⠣)。
+        // 旧・範囲方式では基字 ｷ が空範囲で取りこぼされ b2s=[0,2,2]（⠐⠣→ﾞ）になっていた。
+        let config = PredictorConfig::new(fixture_model_path());
+        let predictor: Predictor = Predictor::load(config).unwrap();
+
+        let result = predictor.predict("ｶｷﾞ").unwrap();
+        assert_eq!(result.kana_text(), "ｶｷﾞ");
+        assert_eq!(result.kana_to_source_char(), vec![0, 1, 2]);
+
+        let kana_to_braille = vec![0usize, 1, 1];
+        let b2s = result.braille_char_to_source(&kana_to_braille, 3);
+        // ⠡→ｶ(0)、⠐→ｷ(1)、⠣→ｷ(1)。ﾞ に潰れず先頭=基字 ｷ に帰属する。
+        assert_eq!(b2s, vec![0, 1, 1]);
+
+        // 順方向。ｷ と ﾞ は合成でどちらも ⠐(セル1) を指す。
+        let s2b = result.source_to_braille_char(&kana_to_braille);
+        assert_eq!(s2b, vec![vec![0], vec![1], vec![1]]);
+
+        // 基字 ｷ は順逆で整合する（逆引きで消えない）のが今回の修正点。
+        // 濁点 ﾞ は ｷ と同じセルに潰れるため、逆引きは先頭の ｷ を採る（往復はしない）。
+        assert_eq!(b2s[s2b[1][0]], 1, "ｷ(src1) は往復整合する");
     }
 }

@@ -517,7 +517,8 @@ impl<M: WeightModel> Predictor<M> {
     ///
     /// C++ 版 `Predictor::predict()` とフィーチャーパリティ:
     ///
-    /// - bypass (記号系・ALPHA)
+    /// - bypass (記号系)
+    /// - ALPHA (読みは素通し・境界だけ境界モデルに委ねる)
     /// - JAPANESE_NUMERIC ルールベース変換 (`digit_table` / `kurai_fallback`)
     /// - 々フォールバック (直前漢字の読みを繰り返す)
     /// - LABEL_CONTINUE 救済 (孤立、NUMERIC、小書き仮名)
@@ -701,6 +702,31 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
+                continue;
+            }
+
+            // ============================================================
+            // ALPHA（英字）: 読みは素通し・境界だけモデルに委ねる
+            //
+            // 英字自身の読みは原文のまま（bypass）だが、直後のマスあけは境界モデルに
+            // 委ねる。英字↔和文のマスあけを点字段階の固定クラス遷移ではなくデータで
+            // 学習させるため。カタカナ分岐と同型（読み素通し＋境界モデル）。
+            // ============================================================
+            if entry.ctype == CharType::Alpha {
+                self.emit_char_passthrough(entry, 1.0, DecisionSource::Bypass, &mut result);
+                parent_src_idx = Some(i);
+                parent_is_bypass = true;
+                parent_is_kanji = false;
+                parent_has_small_kana = false;
+                parent_kana_byte_end = result.kana_text.len();
+                last_fallback.clear();
+                let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                if has_split {
+                    result.kana_text.push(' ');
+                    result.kana_to_src_index.push(entry.orig_idx as usize);
+                    result.confidences.push(1.0);
+                    result.decision_sources.push(DecisionSource::Bypass);
+                }
                 continue;
             }
 
@@ -2391,12 +2417,15 @@ mod tests {
     }
 
     #[test]
-    fn predict_bypass_alpha() {
+    fn predict_alpha_reading_passthrough() {
         let config = PredictorConfig::new(fixture_model_path());
         let predictor: Predictor = Predictor::load(config).unwrap();
 
+        // 英字の読みは素通し（原文のまま）。直後のマスあけは境界モデルに委ねるが、
+        // fixture モデルは "abc" 内で割らないのでスペースは出ない。読み素通しの
+        // アサートはスペースを除いて確認する（境界はモデル依存なので固定しない）。
         let result = predictor.predict("abc").unwrap();
-        assert_eq!(result.kana_text(), "abc");
+        assert_eq!(result.kana_text().replace(' ', ""), "abc");
     }
 
     #[test]

@@ -103,14 +103,15 @@ impl CharType {
 
     /// 素通し (bypass) 扱いにすべき文字種か。
     ///
-    /// `Space`・`Alpha`・記号系・`Other` は推論を行わず、原文をそのまま出力する。
-    /// C++ 版の `is_bypass()` に `Space` と `Other` を追加した拡張版。
+    /// `Space`・記号系・`Other` は読みも境界も推論せず、原文をそのまま出力する。
+    /// 英字 `Alpha` は読みこそ素通しだが、直後のマスあけは境界モデルに委ねるため
+    /// bypass には含めない（カタカナと同じ「読み素通し＋境界モデル」扱い。
+    /// 推論本体 `predict_normalized` の ALPHA 分岐を参照）。
     #[inline]
     pub fn is_bypass(self) -> bool {
         matches!(
             self,
             CharType::Space
-                | CharType::Alpha
                 | CharType::Symbol
                 | CharType::SymbolClose
                 | CharType::SymbolOpen

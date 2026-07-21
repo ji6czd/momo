@@ -285,7 +285,6 @@ author = "MOMO Project"
 classes = ["stop", "pause", "open", "close", "inline"]
 
 [table.punct.jp]
-"～" = { braille = "⠤⠤", class = "pause" }
 "　" = "⠀⠀"
 "。" = { braille = "⠲", class = "stop" }
 "、" = { braille = "⠰", class = "pause" }
@@ -294,6 +293,8 @@ classes = ["stop", "pause", "open", "close", "inline"]
 "？" = { braille = "⠢", class = "stop" }
 "：" = { braille = "⠠⠤", class = "pause" }
 "％" = { braille = "⠰⠏", class = "pause" }
+# "～" = { braille = "⠤⠤", class = "pause" }
+"～" = "⠤⠤"
 "「" = { braille = "⠤", class = "open" }
 "」" = { braille = "⠤", class = "close" }
 "『" = { braille = "⠰⠤", class = "open" }

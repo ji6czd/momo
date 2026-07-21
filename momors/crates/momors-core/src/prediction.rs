@@ -720,7 +720,7 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -744,7 +744,7 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = entry.compound_len >= 2 && is_small_kana(entry.cp2);
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -800,8 +800,7 @@ impl<M: WeightModel> Predictor<M> {
                         continue;
                     }
                     NumericFallback::Output(fallback) => {
-                        let has_split =
-                            sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                        let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
                         self.emit_label(
                             entry,
                             fallback,
@@ -866,7 +865,7 @@ impl<M: WeightModel> Predictor<M> {
                     !next_is_kun_counter
                 };
                 if revert {
-                    let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                    let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
                     self.emit_char_passthrough(
                         entry,
                         conf,
@@ -910,7 +909,7 @@ impl<M: WeightModel> Predictor<M> {
                     parent_is_kanji = entry.ctype == CharType::Kanji;
                     parent_has_small_kana = false;
                     parent_kana_byte_end = result.kana_text.len();
-                    let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+                    let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
                     if has_split {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -961,7 +960,7 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
 
             // 境界判定
-            let has_split = sigmoid(self.compute_boundary_score(&all_feat_ids[i])) >= 0.5;
+            let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
 
             // 々フォールバック: 低自信度の「々」は直前漢字の読みを繰り返す
             //
@@ -1080,6 +1079,22 @@ impl<M: WeightModel> Predictor<M> {
     /// 境界モデルの生スコア (sigmoid 前) を計算する。
     fn compute_boundary_score(&self, feat_ids: &[u32]) -> f32 {
         self.model.compute_boundary_score(feat_ids)
+    }
+
+    /// 位置 `i` の直後に境界スペース（マスあけ）を入れるか判定する。
+    ///
+    /// 境界モデルのスコアが閾値を超え、**かつ**英数字ラン内部でないときだけ `true`。
+    ///
+    /// 英数字ラン内部（現在も次も英字/算用数字）を割るのは、点訳のどんな文脈でも
+    /// 正しくない不変条件なので、モデル判定より優先して抑制する（`AB345` を
+    /// `AB 345` にしない・`50Hz` の内部も割らない）。ランの外側（塊↔かな/漢字/記号、
+    /// 助詞の前）はこれまでどおりモデルに委ねる。線形モデルは疎な文字特徴に外挿で
+    /// 振り回されてラン内部を誤分割しがちなため、ここは構造で保証する。
+    fn boundary_has_split(&self, feat_ids: &[u32], source_seq: &[SourceEntry], i: usize) -> bool {
+        if sigmoid(self.compute_boundary_score(feat_ids)) < 0.5 {
+            return false;
+        }
+        !is_alnum_run_internal(source_seq, i)
     }
 
     /// 原文の `entry.cp` をそのまま結果に書き出す (bypass / 救済共通)。
@@ -1813,6 +1828,20 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
+/// 英字（Alpha）または算用数字（Numeric）か。全角も含む（`CharType::is_latin` 相当）。
+/// 漢数字（JapaneseNumeric）は和文扱いのため含めない。
+#[inline]
+fn is_alnum(ct: CharType) -> bool {
+    matches!(ct, CharType::Alpha | CharType::Numeric)
+}
+
+/// 位置 `i` とその次が、ともに英字/算用数字か（＝英数字ランの内部境界か）。
+/// 末尾（次が無い）なら false。
+#[inline]
+fn is_alnum_run_internal(source_seq: &[SourceEntry], i: usize) -> bool {
+    is_alnum(source_seq[i].ctype) && source_seq.get(i + 1).is_some_and(|e| is_alnum(e.ctype))
+}
+
 /// 特徴量キー列をモデルの語彙テーブルで引いて feature_id 列に変換する。
 fn lookup_feature_ids<M: WeightModel>(keys: &[FeatureKey], model: &M) -> Vec<u32> {
     let mut ids = Vec::with_capacity(keys.len());
@@ -2426,6 +2455,24 @@ mod tests {
         // アサートはスペースを除いて確認する（境界はモデル依存なので固定しない）。
         let result = predictor.predict("abc").unwrap();
         assert_eq!(result.kana_text().replace(' ', ""), "abc");
+    }
+
+    #[test]
+    fn predict_alnum_run_not_split_internally() {
+        let config = PredictorConfig::new(fixture_model_path());
+        let predictor: Predictor = Predictor::load(config).unwrap();
+
+        // 英数字ラン（英字＋算用数字が切れ目なく続く塊）の内部は、境界モデルが
+        // 何を出しても割らない（構造ガード）。`AB345` を `AB 345` にしない。
+        // 末尾に非英数字が無いので、正しく動けばスペースは1つも出ない。
+        for code in ["AB345", "AB1", "IPv6", "MP3", "123AB", "50Hz"] {
+            let out = predictor.predict(code).unwrap();
+            assert!(
+                !out.kana_text().contains(' '),
+                "英数字ラン内部を割ってはいけない: {code} -> {}",
+                out.kana_text()
+            );
+        }
     }
 
     #[test]

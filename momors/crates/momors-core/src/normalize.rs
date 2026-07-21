@@ -41,25 +41,43 @@ pub(crate) fn normalize_compat_ideographs(text: &str) -> String {
     out
 }
 
-/// 推論入力テキストを正規化する（互換漢字の畳み込み + 欧文リガチャ等の展開）。
+/// 推論入力テキストを正規化する（互換漢字の畳み込み + 欧文リガチャ等の展開
+/// + かな繰り返し記号の解決）。
 ///
 /// 1→N 展開された文字は、展開後の全バイトが原文の同じ文字（の先頭バイト位置）
-/// を指す。Python 版 `normalize_input()` と対象カテゴリを一致させる。
+/// を指す。Python 版 `normalize_input()` と対象カテゴリを一致させる（ただし
+/// かな繰り返し記号の解決は Rust 独自。Python 推論は凍結のため）。
 pub(crate) fn normalize_input(text: &str) -> NormalizedText {
     let mut out = String::with_capacity(text.len());
     let mut map: Vec<usize> = Vec::with_capacity(text.len());
     let mut changed = false;
+    // 繰り返し記号（ゝゞヽヾ）解決用に、直前に出力したかな1文字を覚えておく。
+    let mut prev_out: Option<char> = None;
     for (src_byte, c) in text.char_indices() {
+        // かな繰り返し記号: 直前の出力かなを繰り返す（ゞ/ヾ は濁音化）。
+        // 例「みすゞ」→「みすず」。々（漢字の同の字点）と違い読みでなくテキストで
+        // 解決できるので、モデルに渡る前にここで畳む（rare な記号を既知のかなにする）。
+        if let Some(resolved) = prev_out.and_then(|p| resolve_iteration(p, c)) {
+            changed = true;
+            out.push(resolved);
+            map.extend(std::iter::repeat_n(src_byte, resolved.len_utf8()));
+            prev_out = Some(resolved);
+            continue;
+        }
+
         let pushed_len = if let Some(expanded) = table::expand_lookup(c as u32) {
             changed = true;
             out.push_str(expanded);
+            prev_out = expanded.chars().last();
             expanded.len()
         } else if let Some(mapped) = table::normalize_lookup(c as u32).and_then(char::from_u32) {
             changed = true;
             out.push(mapped);
+            prev_out = Some(mapped);
             mapped.len_utf8()
         } else {
             out.push(c);
+            prev_out = Some(c);
             c.len_utf8()
         };
         map.extend(std::iter::repeat_n(src_byte, pushed_len));
@@ -67,6 +85,33 @@ pub(crate) fn normalize_input(text: &str) -> NormalizedText {
     NormalizedText {
         text: out,
         byte_map: if changed { Some(map) } else { None },
+    }
+}
+
+/// かな繰り返し記号を直前のかな `prev` で解決する。
+/// `c` が繰り返し記号でなければ `None`。
+///
+/// - `ゝ`(U+309D) / `ヽ`(U+30FD): 直前かなをそのまま繰り返す
+/// - `ゞ`(U+309E) / `ヾ`(U+30FE): 直前かなを濁音化して繰り返す（す→ず）
+fn resolve_iteration(prev: char, c: char) -> Option<char> {
+    match c {
+        'ゝ' | 'ヽ' => Some(prev),
+        'ゞ' | 'ヾ' => Some(voice(prev)),
+        _ => None,
+    }
+}
+
+/// かなに濁点を付けた形を返す。濁点を持たないかなはそのまま返す（best effort）。
+/// ひらがな・カタカナとも か/さ/た/は 行は濁音形が +1、う/ウ のみ特殊。
+fn voice(c: char) -> char {
+    match c {
+        'う' => 'ゔ',
+        'ウ' => 'ヴ',
+        'か' | 'き' | 'く' | 'け' | 'こ' | 'さ' | 'し' | 'す' | 'せ' | 'そ' | 'た' | 'ち'
+        | 'つ' | 'て' | 'と' | 'は' | 'ひ' | 'ふ' | 'へ' | 'ほ' | 'カ' | 'キ' | 'ク' | 'ケ'
+        | 'コ' | 'サ' | 'シ' | 'ス' | 'セ' | 'ソ' | 'タ' | 'チ' | 'ツ' | 'テ' | 'ト' | 'ハ'
+        | 'ヒ' | 'フ' | 'ヘ' | 'ホ' => char::from_u32(c as u32 + 1).unwrap_or(c),
+        _ => c,
     }
 }
 
@@ -78,6 +123,34 @@ mod tests {
     fn cjk_radicals_supplement() {
         assert_eq!(normalize_compat_ideographs("⺟"), "母");
         assert_eq!(normalize_compat_ideographs("⻳"), "龟");
+    }
+
+    #[test]
+    fn iteration_mark_voiced_hiragana() {
+        // 金子みすゞ: ゞ が直前「す」を濁音化して「ず」になる。
+        let n = normalize_input("みすゞ");
+        assert_eq!(n.text, "みすず");
+        // 3文字とも3バイトで 1:1、byte_map は原文位置を指す。
+        assert_eq!(n.byte_map.unwrap(), vec![0, 0, 0, 3, 3, 3, 6, 6, 6]);
+    }
+
+    #[test]
+    fn iteration_mark_voiced_katakana() {
+        // ヾ（カタカナ濁点繰り返し）: ス→ズ。
+        assert_eq!(normalize_input("ミスヾ").text, "ミスズ");
+    }
+
+    #[test]
+    fn iteration_mark_unvoiced() {
+        // ゝ/ヽ はそのまま繰り返す。
+        assert_eq!(normalize_input("こゝ").text, "ここ");
+        assert_eq!(normalize_input("バナヽ").text, "バナナ");
+    }
+
+    #[test]
+    fn iteration_mark_unvoiceable_prev_stays() {
+        // 濁点を持たないかな（な）に ゞ が付いても best effort でそのまま繰り返す。
+        assert_eq!(normalize_input("なゞ").text, "なな");
     }
 
     #[test]

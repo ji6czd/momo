@@ -1835,11 +1835,35 @@ fn is_alnum(ct: CharType) -> bool {
     matches!(ct, CharType::Alpha | CharType::Numeric)
 }
 
-/// 位置 `i` とその次が、ともに英字/算用数字か（＝英数字ランの内部境界か）。
-/// 末尾（次が無い）なら false。
+/// ASCII/欧文トークンを構成する可視文字か。
+///
+/// 日本語に混ざった ASCII・Latin-1 の連続は、原文どおり1トークンとして保つための
+/// 判定。文字・数字・記号（`-` `.` `=` `&` `#` …）を問わず含む。
+/// - 可視 ASCII: `0x21..=0x7E`（空白・制御を除く）
+/// - Latin-1 可視文字: `0xA1..=0xFF`（NBSP `0xA0`・軟ハイフン `0xAD` を除く。
+///   é ñ ü « ° 等の欧文文字）
+#[inline]
+fn is_western_runner(cp: u32) -> bool {
+    matches!(cp, 0x21..=0x7E | 0xA1..=0xAC | 0xAE..=0xFF)
+}
+
+/// 位置 `i` の直後が ASCII/欧文トークンの内部境界か。
+///
+/// 日本語に混ざった ASCII・欧文の連続は原文どおりに保つ（意味的に分割可能でも、
+/// 原文が繋げているなら分けない＝原文忠実）。`test=hogehoge` や `CRISPR-Cas9` の
+/// 内部を割らない。割れ得るのは英数字の直後だけ（記号は bypass で境界を出さない）
+/// なので「`i` が英数字 かつ 次が可視 ASCII/Latin-1 または全角英数字」で判定する。
+/// ランの末尾（次が日本語）だけモデルが決める（X線=続ける / Recボタン=分ける）。
+///
+/// `i` 自身が英数字でなければ false（末尾も false）。
 #[inline]
 fn is_alnum_run_internal(source_seq: &[SourceEntry], i: usize) -> bool {
-    is_alnum(source_seq[i].ctype) && source_seq.get(i + 1).is_some_and(|e| is_alnum(e.ctype))
+    if !is_alnum(source_seq[i].ctype) {
+        return false;
+    }
+    source_seq
+        .get(i + 1)
+        .is_some_and(|next| is_alnum(next.ctype) || is_western_runner(next.cp))
 }
 
 /// 特徴量キー列をモデルの語彙テーブルで引いて feature_id 列に変換する。
@@ -2462,17 +2486,45 @@ mod tests {
         let config = PredictorConfig::new(fixture_model_path());
         let predictor: Predictor = Predictor::load(config).unwrap();
 
-        // 英数字ラン（英字＋算用数字が切れ目なく続く塊）の内部は、境界モデルが
-        // 何を出しても割らない（構造ガード）。`AB345` を `AB 345` にしない。
-        // 末尾に非英数字が無いので、正しく動けばスペースは1つも出ない。
-        for code in ["AB345", "AB1", "IPv6", "MP3", "123AB", "50Hz"] {
+        // 日本語に混ざった ASCII/欧文の連続は原文どおり1トークンとして保ち、内部は
+        // 境界モデルが何を出しても割らない（構造ガード）。連結記号・演算子（- . / _
+        // = & # + @ :）も欧文文字（é ñ ü）も含む。末尾に非トークン文字が無いので、
+        // 正しく動けばスペースは1つも出ない。
+        for code in [
+            "AB345",
+            "IPv6",
+            "50Hz",
+            "CRISPR-Cas9",
+            "COVID-19",
+            "3.14",
+            "TCP/IP",
+            "foo_bar",
+            "test=hogehoge",
+            "File&&text==true",
+            "user@host.com",
+            "C++",
+            "café",
+            "naïve",
+        ] {
             let out = predictor.predict(code).unwrap();
             assert!(
                 !out.kana_text().contains(' '),
-                "英数字ラン内部を割ってはいけない: {code} -> {}",
+                "英数字トークン内部を割ってはいけない: {code} -> {}",
                 out.kana_text()
             );
         }
+    }
+
+    #[test]
+    fn predict_sentence_period_not_treated_as_token_internal() {
+        let config = PredictorConfig::new(fixture_model_path());
+        let predictor: Predictor = Predictor::load(config).unwrap();
+
+        // 文末ピリオドは英数字に挟まれていないので、トークン内連結記号として
+        // 扱わない（`abc. 次` の `.` は 3.14 の `.` とは別物）。ここでは
+        // クラッシュせず素通しされること・ピリオドが保持されることだけ確認する。
+        let out = predictor.predict("abc.").unwrap();
+        assert!(out.kana_text().contains('.'), "文末ピリオドは保持される");
     }
 
     #[test]

@@ -25,8 +25,8 @@ author = "MOMO Project"
 # 詳細は japanese_grade1_braille.toml のヘッダコメント参照。
 [transitions]
 # 文字種境界
-"kana -> latin" = 1 # かな→英字: 外字符（⠰）の前を一マスあける
-"latin -> kana" = 1 # 英字→かな: 語の切れ目を一マスあける
+# "kana -> latin" = 1 # かな→英字: 外字符（⠰）の前を一マスあける
+# "latin -> kana" = 1 # 英字→かな: 語の切れ目を一マスあける
 # 半角記号と全角の繊維
 "punct.latin.stop -> kana" = 1
 "punct.latin.pause -> kana" = 1
@@ -263,6 +263,10 @@ author = "MOMO Project"
 "ッ" = "⠂" # 促音
 "ー" = "⠒" # 長音符
 
+# 独立濁点・半濁点（半角 ﾞ/ﾟ が基字と合成できないときの落とし先。点字パターンは後で埋める）
+"゛" = "⠘⠐" # U+309B KATAKANA-HIRAGANA VOICED SOUND MARK
+"゜" = "⠘⠠" # U+309C KATAKANA-HIRAGANA SEMI-VOICED SOUND MARK
+
 # --------------------------------------------------------------
 # 句読点・記号
 # class = この記号自身の分類（省略時は無分類）
@@ -412,6 +416,8 @@ classes = ["stop", "pause", "open", "close", "inline"]
 ">" = "⠜"
 "/" = "⠌"
 "?" = "⠹"
+# ASCIIではないLatin
+"¥" = "⡳"
 
 # --------------------------------------------------------------
 # 数字

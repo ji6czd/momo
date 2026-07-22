@@ -13,16 +13,17 @@
 use crate::Error;
 use std::path::{Path, PathBuf};
 
+use crate::Result;
 use crate::bracket::{self, Role, Treatment};
-use crate::char_type::{get_char_type, CharType};
+use crate::char_type::{CharType, get_char_type};
+use crate::counter::{CounterAction, arabic_run, counter_needs_gate, resolve_multi};
 use crate::feature::FeatureKey;
-use crate::featurize::{compute_source_features, to_source_seq, SourceEntry};
+use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
 use crate::model::MomoModel;
 use crate::numeric::{
-    convert_japanese_numeric, is_digit_label, is_kun_counter_signal, NumericFallback,
+    NumericFallback, convert_japanese_numeric, is_digit_label, is_kun_counter_signal,
 };
 use crate::weight_model::WeightModel;
-use crate::Result;
 
 // ============================================================
 // 定数
@@ -64,6 +65,8 @@ pub enum DecisionSource {
     LrLow,
     /// JAPANESE_NUMERIC のルールベース変換。
     FallbackNumeric,
+    /// 助数詞（「N日」「Nつ」「N人」）のルールベース読み（特殊訓読み・桁＋接尾）。
+    FallbackCounter,
     /// 々（同の字点）の繰り返し処理。
     FallbackRepeat,
     /// かな直接変換フォールバック（モデル予測がひらがなに対して不正）。
@@ -83,6 +86,7 @@ impl DecisionSource {
             DecisionSource::Lr => "LR",
             DecisionSource::LrLow => "LR_LOW",
             DecisionSource::FallbackNumeric => "FALLBACK_NUM",
+            DecisionSource::FallbackCounter => "FALLBACK_COUNTER",
             DecisionSource::FallbackRepeat => "FALLBACK_々",
             DecisionSource::FallbackKana => "FALLBACK_KANA",
             DecisionSource::FallbackOrphan => "FALLBACK_ORPH",
@@ -680,8 +684,17 @@ impl<M: WeightModel> Predictor<M> {
         // 小書き仮名はこの位置に挿入する。
         let mut parent_kana_byte_end: usize = 0;
 
+        // 日付助数詞パスがユニット（「N日」）を丸ごと消費したとき、その末尾までの
+        // インデックスをここまで飛ばす（この位置未満は処理済みとして読み飛ばす）。
+        let mut skip_until: usize = 0;
+
         // --- 各文字を処理 ---
         for i in 0..n {
+            // 日付助数詞パスが消費済みのインデックスは読み飛ばす。
+            if i < skip_until {
+                continue;
+            }
+
             let entry = &source_seq[i];
 
             // ============================================================
@@ -752,6 +765,95 @@ impl<M: WeightModel> Predictor<M> {
                     result.decision_sources.push(DecisionSource::Lr);
                 }
                 continue;
+            }
+
+            // ============================================================
+            // 助数詞パス: 「多桁の算用数字ラン＋助数詞」を一桁の読みから守る
+            //
+            // 一桁の読み（2日→ふつか・1人→ひとり）はモデル＝データが正本。ルールは
+            // 触らない。文字単位モデルは多桁で下一桁へ特殊読みを漏らす（21人→2ヒトリ・
+            // 22日→2ミッカ）ので、二桁以上のランだけ値から読みを確定して守る。
+            //
+            // 例外表（counter.rs）: 10/20日は綴る（トオカ/ハツカ）・14/24日は数字＋カ・
+            // 他は数字＋接尾（21日→21ニチ）。日は「2024日本」の日→ニを弾くゲート付き。
+            // ラン先頭でのみ判定し、一桁ランは素通し（モデルに委ねる）。
+            // ============================================================
+            if entry.ctype == CharType::Numeric
+                && (i == 0 || source_seq[i - 1].ctype != CharType::Numeric)
+                && let Some((value, run_end)) = arabic_run(&source_seq, i)
+                && run_end - i >= 2 // 多桁のみ（一桁はモデルに委ねる）
+                && run_end < n
+            {
+                let counter_cp = source_seq[run_end].cp;
+                // ゲートが要る助数詞（日）だけ、助数詞文字のモデル読みを見る。
+                let model_reading = if counter_needs_gate(counter_cp) {
+                    let (cls, _) = self.read_argmax(
+                        &source_seq[run_end],
+                        &all_feat_ids[run_end],
+                        &mut read_scratch,
+                        &mut scores,
+                    );
+                    self.model.read_class(cls as u32).unwrap_or("")
+                } else {
+                    ""
+                };
+
+                if let Some(action) = resolve_multi(counter_cp, value, model_reading) {
+                    let has_split =
+                        self.boundary_has_split(&all_feat_ids[run_end], &source_seq, run_end);
+                    match action {
+                        CounterAction::Spell(kana) => {
+                            // 綴り読みは分解できない（トオカ・ハツカ）。ラン先頭に束ねる。
+                            self.emit_label(
+                                entry,
+                                kana,
+                                1.0,
+                                DecisionSource::FallbackCounter,
+                                &mut result,
+                            );
+                        }
+                        CounterAction::DigitsPlus(suffix) => {
+                            // 数字はそのまま（原文の桁）＋接尾。下一桁への特殊読み漏れを断つ。
+                            for digit in &source_seq[i..run_end] {
+                                self.emit_char_passthrough(
+                                    digit,
+                                    1.0,
+                                    DecisionSource::FallbackCounter,
+                                    &mut result,
+                                );
+                            }
+                            self.emit_label(
+                                &source_seq[run_end],
+                                suffix,
+                                1.0,
+                                DecisionSource::FallbackCounter,
+                                &mut result,
+                            );
+                        }
+                    }
+
+                    // 親追跡・状態更新（ユニット末尾＝助数詞を親にする）
+                    parent_src_idx = Some(run_end);
+                    parent_is_bypass = false;
+                    parent_is_kanji = false;
+                    parent_has_small_kana = false;
+                    parent_kana_byte_end = result.kana_text.len();
+                    last_fallback.clear();
+
+                    if has_split {
+                        result.kana_text.push(' ');
+                        result
+                            .kana_to_src_index
+                            .push(source_seq[run_end].orig_idx as usize);
+                        result.confidences.push(1.0);
+                        result
+                            .decision_sources
+                            .push(DecisionSource::FallbackCounter);
+                    }
+
+                    skip_until = run_end + 1;
+                    continue;
+                }
             }
 
             // ============================================================

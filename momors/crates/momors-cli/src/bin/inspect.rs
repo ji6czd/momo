@@ -158,6 +158,7 @@ fn decision_color(dec: DecisionSource) -> &'static str {
         DecisionSource::Lr => "\x1b[32m",              // 緑
         DecisionSource::LrLow => "\x1b[33m",           // 黄
         DecisionSource::FallbackNumeric => "\x1b[36m", // シアン
+        DecisionSource::FallbackCounter => "\x1b[96m", // 明るいシアン
         DecisionSource::FallbackRepeat => "\x1b[35m",  // マゼンタ
         DecisionSource::FallbackKana => "\x1b[96m",    // 明るいシアン
         DecisionSource::FallbackOrphan => "\x1b[31m",  // 赤

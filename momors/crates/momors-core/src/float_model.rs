@@ -9,11 +9,11 @@
 //! 誤差がテキスト推論の結果にどれだけ影響するかを検証できる
 //! （`momo-compare-quant` CLI が用途）。
 
+use crate::Result;
 use crate::feature::FeatureKey;
 use crate::model::VocabEntry;
 use crate::name_dict::NameIndex;
 use crate::weight_model::WeightModel;
-use crate::Result;
 
 /// `.mbmf` から読み込まれたモデルデータ。
 ///

@@ -13,9 +13,9 @@
 
 use std::path::Path;
 
+use crate::Result;
 use crate::feature::FeatureKey;
 use crate::name_dict::NameIndex;
-use crate::Result;
 
 /// [`Predictor`](crate::prediction::Predictor) が推論に使う重みモデルの共通インタフェース。
 ///

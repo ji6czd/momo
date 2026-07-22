@@ -335,11 +335,7 @@ fn parse_run_key(s: &str) -> Option<u8> {
 
 /// 人名フラグ u8 → "B"/"I"。
 fn name_flag_to_str(v: u8) -> &'static str {
-    if v == 2 {
-        "I"
-    } else {
-        "B"
-    }
+    if v == 2 { "I" } else { "B" }
 }
 
 fn cp_char(cp: u32) -> char {

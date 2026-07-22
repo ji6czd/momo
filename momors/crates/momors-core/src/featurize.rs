@@ -18,7 +18,7 @@
 //! 自然に取れること、後段で原文スライスを取るときに変換が不要なこと、
 //! Rust の文字列表現と整合的なことが理由。
 
-use crate::char_type::{get_char_type, CharType};
+use crate::char_type::{CharType, get_char_type};
 use crate::feature::{FeatureKey, FeatureType};
 
 // ============================================================
@@ -464,11 +464,7 @@ fn numeric_run_length(seq: &[SourceEntry], i: usize) -> u32 {
 /// 学習時の `_RUN_LEN_MAP = {"1": 1, "2": 2, "3": 3, "4": 4, "5+": 5}` に対応。
 #[inline]
 fn clamp_run(run: u32) -> u8 {
-    if run <= 4 {
-        run as u8
-    } else {
-        5
-    }
+    if run <= 4 { run as u8 } else { 5 }
 }
 
 /// 小書き仮名（拗音複合ユニット検出に使用）。
@@ -613,21 +609,27 @@ mod tests {
         // 佐: name_s=B, name_n1=I（先頭なので name_p1 なし）
         assert!(feats[0].contains(&FeatureKey::u8_payload(FeatureType::NameFlagSelf, 1)));
         assert!(feats[0].contains(&FeatureKey::u8_payload(FeatureType::NameFlagNext1, 2)));
-        assert!(!feats[0]
-            .iter()
-            .any(|k| k.feature_type == FeatureType::NameFlagPrev1));
+        assert!(
+            !feats[0]
+                .iter()
+                .any(|k| k.feature_type == FeatureType::NameFlagPrev1)
+        );
 
         // 藤: name_s=I, name_p1=B, 次は O なので name_n1 なし（人名の右端）
         assert!(feats[1].contains(&FeatureKey::u8_payload(FeatureType::NameFlagSelf, 2)));
         assert!(feats[1].contains(&FeatureKey::u8_payload(FeatureType::NameFlagPrev1, 1)));
-        assert!(!feats[1]
-            .iter()
-            .any(|k| k.feature_type == FeatureType::NameFlagNext1));
+        assert!(
+            !feats[1]
+                .iter()
+                .any(|k| k.feature_type == FeatureType::NameFlagNext1)
+        );
 
         // さ: 自分は O（name_s なし）、name_p1=I
-        assert!(!feats[2]
-            .iter()
-            .any(|k| k.feature_type == FeatureType::NameFlagSelf));
+        assert!(
+            !feats[2]
+                .iter()
+                .any(|k| k.feature_type == FeatureType::NameFlagSelf)
+        );
         assert!(feats[2].contains(&FeatureKey::u8_payload(FeatureType::NameFlagPrev1, 2)));
 
         // ん: 人名特徴量なし
@@ -751,9 +753,11 @@ mod tests {
         );
         assert!(feats[1].contains(&key));
         // 最初の「あ」には TypeTransition がない (prev がないため)
-        assert!(!feats[0]
-            .iter()
-            .any(|k| k.feature_type == FeatureType::TypeTransition));
+        assert!(
+            !feats[0]
+                .iter()
+                .any(|k| k.feature_type == FeatureType::TypeTransition)
+        );
     }
 
     #[test]

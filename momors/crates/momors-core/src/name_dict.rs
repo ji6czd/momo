@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use crate::featurize::{to_source_seq, SourceEntry};
+use crate::featurize::{SourceEntry, to_source_seq};
 
 // ============================================================
 // フラグ値

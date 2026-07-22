@@ -6,10 +6,10 @@
 //!
 //! [`Predictor`]: crate::Predictor
 
+use crate::Result;
 use crate::feature::FeatureKey;
 use crate::name_dict::NameIndex;
 use crate::weight_model::WeightModel;
-use crate::Result;
 
 // ============================================================
 // 語彙テーブル

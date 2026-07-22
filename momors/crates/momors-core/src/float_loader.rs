@@ -47,8 +47,8 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::float_model::FloatMomoModel;
 use crate::loader::{
-    io_err, read_csc_structure, read_f32_vec, read_kanji_dict, read_labels, read_name_dict,
-    read_vocab, MAX_CLASSES, MAX_REASONABLE_COUNT, VERSION,
+    MAX_CLASSES, MAX_REASONABLE_COUNT, VERSION, io_err, read_csc_structure, read_f32_vec,
+    read_kanji_dict, read_labels, read_name_dict, read_vocab,
 };
 use crate::{Error, Result};
 

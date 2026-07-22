@@ -100,14 +100,14 @@ mod tests {
 
     #[test]
     fn quotation_is_inline() {
-        for c in "「」『』“”‘’".chars() {
+        for c in "「」『』“”‘’【】".chars() {
             assert_eq!(lookup(c).map(|(_, t)| t), Some(Treatment::Inline), "{c}");
         }
     }
 
     #[test]
     fn annotation_is_aside() {
-        for c in "（）()｛｝【】".chars() {
+        for c in "（）()｛｝".chars() {
             assert_eq!(lookup(c).map(|(_, t)| t), Some(Treatment::Aside), "{c}");
         }
     }

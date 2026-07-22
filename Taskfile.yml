@@ -82,6 +82,11 @@ tasks:
     cmds:
       - cargo test
 
+  eval:regression:
+    desc: "回帰テスト: dataset/eval_regression.tsv を全窓(small/medium/large)で検証"
+    cmds:
+      - bash eval/run_regression.sh
+
   sdk:
     desc: Build C++ and C# SDKs and create distribution archives
     deps: [sdk:zip:cpp, sdk:zip:csharp]

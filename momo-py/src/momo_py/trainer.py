@@ -181,8 +181,8 @@ def _check_japanese_reading(
 ) -> None:
     """日本語（かな・漢字・漢数字）ユニットの読みに半角文字が混入していないか検査する。
 
-    これらの読みはカタカナ（"三"→"ミッ"）または全角数字（"三"→"３"）で書く。
-    半角数字（"三"→"3"）は全角→半角変換を学習してしまうためデータ作成時の誤り。
+    これらの読みはカタカナ（"三"→"ミッ"）で書く。
+    半角数字（"三"→"3"）は許容する。
     ラベル内の半角スペース（"ワ/ ジン" のような '/' 抜け）もここで検出される。
     """
     if ctype not in _READING_CTYPES:
@@ -190,7 +190,7 @@ def _check_japanese_reading(
     clean_label = r_label.replace("+S", "")
     if clean_label in (LABEL_SKIP, LABEL_CONTINUE):
         return
-    if any(ord(c) <= 0x7F for c in clean_label):
+    if any(ord(c) <= 0x7F and not c.isdigit() for c in clean_label):
         print(
             f"🚨 警告 (Line {line_num}): '{target_chars}' の読み "
             f"'{clean_label}' に半角文字が含まれています。\n"

@@ -321,7 +321,7 @@ classes = ["stop", "pause", "open", "close", "inline"]
 "？" = { braille = "⠢", class = "stop" }
 "：" = { braille = "⠠⠤", class = "pause" }
 "％" = { braille = "⠰⠏", class = "pause" }
-# "～" = { braille = "⠤⠤", class = "pause" }
+"／" = { braille = "⠌", class = "pause" }
 "～" = "⠤⠤"
 "「" = { braille = "⠤", class = "open" }
 "」" = { braille = "⠤", class = "close" }

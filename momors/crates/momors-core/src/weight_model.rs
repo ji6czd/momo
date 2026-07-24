@@ -68,7 +68,13 @@ pub trait WeightModel: Sized {
     );
 
     /// 境界モデルの生スコア (sigmoid 前) を計算する。
-    fn compute_boundary_score(&self, feat_ids: &[u32]) -> f32;
+    ///
+    /// 読みモデルのスコア計算 (`compute_read_scores`) と違い、事前に解決した
+    /// 語彙IDではなく生の `FeatureKey` を受け取る。線形実装は内部で
+    /// `vocab_find` を都度呼ぶが、GBDT（カテゴリカル特徴量）実装は読みモデルと
+    /// 別の語彙空間を持つため、そもそも共有 `feat_ids` に解決する意味がない
+    /// （[`crate::boundary`] 参照）。
+    fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32;
 
     /// 読みモデルの1特徴量（列）の非ゼロ重みを `(class_id, 実重み)` の列で返す。
     ///

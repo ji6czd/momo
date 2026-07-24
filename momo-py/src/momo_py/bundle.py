@@ -28,9 +28,8 @@ class LRModelBundle:
                        線形モデル。exporter が .mbm/.mbmf に量子化して書き出せる。
       "gbdt"        : model_boundary (LGBMClassifier) + boundary_cat_names/boundary_cat_vocabs
                        （momo_py.categorical の列名・語彙表）によるカテゴリカル特徴量。
-                       momors-core がまだ木のアンサンブル推論に対応していないため、
-                       exporter は .mbm/.mbmf の書き出しをスキップする（.zip読み込みでの
-                       精度検証のみ可能）。
+                       exporter が木のアンサンブルを .mbm/.mbmf の境界モデルセクション
+                       （version 0x06、algo_tag=0x01）に書き出す。
     """
 
     vectorizer_read: DictVectorizer

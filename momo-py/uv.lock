@@ -83,7 +83,7 @@ name = "momors-py"
 version = "0.8.12"
 source = { path = "../dist/momors_py-0.8.12-cp313-abi3-win_amd64.whl" }
 wheels = [
-    { filename = "momors_py-0.8.12-cp313-abi3-win_amd64.whl", hash = "sha256:20b527df5468993c534b585f823bd4ed612c0d4261b7d83277c4fa8bd8bf83d0" },
+    { filename = "momors_py-0.8.12-cp313-abi3-win_amd64.whl", hash = "sha256:539e20236e473c0243ebe6b4ff1137d16338195bd176a19e229d966ea47328b6" },
 ]
 
 [[package]]

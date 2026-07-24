@@ -36,7 +36,10 @@ CT_KANJI = 0x42
 # ファイル識別情報（exporter.py の MAGIC_MBM / VERSION と同期）
 MAGIC = b'MOMO'
 # バージョンは `.mbmf` と共有する（gen_fixture_mbmf.py が base.VERSION を使う）
-VERSION = 0x05
+VERSION = 0x06
+
+# 境界モデルの algo_tag（version 0x06 で追加。このフィクスチャは線形のみ）
+BOUNDARY_ALGO_LINEAR = 0x00
 
 # 出力先
 OUT_PATH = Path(__file__).parent.parent / "testdata" / "fixture.mbm"
@@ -196,6 +199,7 @@ def build_intercept_read() -> bytes:
 
 def build_boundary() -> bytes:
     buf = bytearray()
+    buf.append(BOUNDARY_ALGO_LINEAR)
     buf += struct.pack('<f', QUANT_SCALE_BOUNDARY)
     buf += struct.pack(f'<{N_FEATURES}b', *BOUNDARY_DATA)
     buf += struct.pack('<ff', *BOUNDARY_INTERCEPT)

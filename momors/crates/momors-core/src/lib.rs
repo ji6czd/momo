@@ -32,6 +32,7 @@ pub mod error;
 pub mod prediction;
 
 // 内部モジュール（実装が進んだら追加していく）
+mod boundary;
 mod bracket;
 mod char_type;
 mod counter;

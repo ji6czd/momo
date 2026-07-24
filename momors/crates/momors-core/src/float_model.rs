@@ -10,6 +10,7 @@
 //! （`momo-compare-quant` CLI が用途）。
 
 use crate::Result;
+use crate::boundary::FloatBoundary;
 use crate::feature::FeatureKey;
 use crate::model::VocabEntry;
 use crate::name_dict::NameIndex;
@@ -39,11 +40,9 @@ pub struct FloatMomoModel {
     /// 各クラスの intercept (size: `n_classes`)
     pub(crate) intercept_read: Vec<f32>,
 
-    // --- 境界モデル重み (float32・量子化なし) ---
-    /// 境界モデル (二値分類) のクラス 1 重みベクトル (size: `n_features`)
-    pub(crate) boundary_data: Vec<f32>,
-    /// 境界モデルの intercept `[class 0, class 1]`
-    pub(crate) boundary_intercept: [f32; 2],
+    // --- 境界モデル ---
+    /// 線形（float32・量子化なし）または木のアンサンブル（GBDT）。[`crate::boundary`] 参照。
+    pub(crate) boundary: FloatBoundary,
 
     pub(crate) name_dict: NameIndex,
     pub(crate) kanji_dict: Vec<(char, Vec<String>)>,
@@ -78,8 +77,7 @@ impl Default for FloatMomoModel {
             csc_rowind: Vec::new(),
             csc_data: Vec::new(),
             intercept_read: Vec::new(),
-            boundary_data: Vec::new(),
-            boundary_intercept: [0.0, 0.0],
+            boundary: FloatBoundary::default(),
             name_dict: NameIndex::new(),
             kanji_dict: Vec::new(),
             n_classes: 0,
@@ -150,14 +148,9 @@ impl WeightModel for FloatMomoModel {
         }
     }
 
-    fn compute_boundary_score(&self, feat_ids: &[u32]) -> f32 {
-        let mut score = self.boundary_intercept[1];
-        for &feat_id in feat_ids {
-            if feat_id < self.n_features {
-                score += self.boundary_data[feat_id as usize];
-            }
-        }
-        score
+    fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32 {
+        self.boundary
+            .compute_score(feat_keys, |k| self.vocab_find(k))
     }
 
     fn read_feature_column(&self, feat_id: u32) -> Vec<(u32, f32)> {

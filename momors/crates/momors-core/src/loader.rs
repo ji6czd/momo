@@ -9,7 +9,7 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x05
+//!   version      : u8      0x06
 //!   _reserved    : u8[3]   0x00 × 3
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
@@ -35,10 +35,13 @@
 //! [読みモデル intercept]
 //!   intercept    : f32 × n_classes
 //!
-//! [境界モデル重み (int8 量子化)]
-//!   quant_scale  : f32
-//!   data         : i8 × n_features
-//!   intercept    : f32 × 2
+//! [境界モデル]              algo_tag プレフィックス付き（version 0x06、`boundary.rs`）
+//!   algo_tag     : u8      0x00 = 線形, 0x01 = 木のアンサンブル (GBDT)
+//!   --- 0x00 (線形。0x05 までと同一バイト列) ---
+//!     quant_scale  : f32
+//!     data         : i8 × n_features
+//!     intercept    : f32 × 2
+//!   --- 0x01 (木。カテゴリカル語彙テーブル + 木のアンサンブル。詳細は boundary.rs) ---
 //!
 //! [人名辞書テーブル]        version 0x03 で追加、0x04 で読みを追加
 //!   n_names      : u32 LE  人名エントリ数（辞書なしモデルは 0）
@@ -98,7 +101,7 @@ const MAGIC: [u8; 4] = *b"MOMO";
 /// フォーマットのバージョン。`.mbmf` (`float_loader.rs`) と同じ番号を共有する
 /// ―― 両者はセクション構成を共通に保つ設計なので、採番を分けると
 /// 「どちらの 0x02 か」を常に意識する羽目になる。
-pub(crate) const VERSION: u8 = 5;
+pub(crate) const VERSION: u8 = 6;
 
 /// ヘッダ由来のカウント値（n_classes / n_features / n_nonzero）の妥当性上限。
 /// これを超える値をそのまま `Vec::with_capacity` 等に渡すと、壊れた/不正な
@@ -201,13 +204,8 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     // ---- 読みモデル intercept ----
     model.intercept_read = read_f32_vec(reader, n_classes as usize, path)?;
 
-    // ---- 境界モデル重み ----
-    model.boundary_scale = reader.read_f32::<LittleEndian>().map_err(io_err(path))?;
-    model.boundary_data = read_i8_vec(reader, n_features as usize, path)?;
-    model.boundary_intercept = [
-        reader.read_f32::<LittleEndian>().map_err(io_err(path))?,
-        reader.read_f32::<LittleEndian>().map_err(io_err(path))?,
-    ];
+    // ---- 境界モデル (algo_tag で線形/木を分岐、boundary.rs) ----
+    model.boundary = crate::boundary::parse_int8(reader, n_features as usize, path)?;
 
     // ---- 人名辞書テーブル (version 0x04: 表層形 + ユニット別読み) ----
     let names = read_name_dict(reader, path)?;
@@ -238,36 +236,45 @@ pub(crate) fn read_vocab<R: Read>(
 ) -> Result<Vec<(FeatureKey, u32)>> {
     let mut vocab = Vec::with_capacity(n_features as usize);
     for _ in 0..n_features {
-        let ft_byte = reader.read_u8().map_err(io_err(path))?;
-        let feature_type =
-            FeatureType::from_u8(ft_byte).ok_or(Error::InvalidFeatureType { value: ft_byte })?;
-
-        let mut key = FeatureKey {
-            feature_type,
-            ..FeatureKey::default()
-        };
-
-        // ペイロード読み込み
-        let nct = feature_type.chartype_count();
-        for i in 0..nct {
-            let ct_byte = reader.read_u8().map_err(io_err(path))?;
-            let ct = CharType::from_u8(ct_byte).ok_or(Error::InvalidCharType { value: ct_byte })?;
-            key.ct[i] = ct;
-        }
-
-        let ncp = feature_type.char32_count();
-        for i in 0..ncp {
-            key.cp[i] = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-        }
-
-        if feature_type.is_uint8_payload() {
-            key.u8val = reader.read_u8().map_err(io_err(path))?;
-        }
-
+        let key = read_feature_key(reader, path)?;
         let feature_id = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
         vocab.push((key, feature_id));
     }
     Ok(vocab)
+}
+
+/// 語彙テーブルの1エントリ分の `FeatureKey`（`feature_id` 等の付随フィールドを
+/// 除いたペイロードのみ）を読む。`read_vocab`（読みモデル語彙テーブル、末尾に
+/// `feature_id: u32`）と `boundary.rs` のカテゴリカル語彙テーブル（末尾に
+/// `column_index: u32` + `code: u32`）の両方が、この同一のペイロード読み込み
+/// ロジックを共有する。
+pub(crate) fn read_feature_key<R: Read>(reader: &mut R, path: &Path) -> Result<FeatureKey> {
+    let ft_byte = reader.read_u8().map_err(io_err(path))?;
+    let feature_type =
+        FeatureType::from_u8(ft_byte).ok_or(Error::InvalidFeatureType { value: ft_byte })?;
+
+    let mut key = FeatureKey {
+        feature_type,
+        ..FeatureKey::default()
+    };
+
+    let nct = feature_type.chartype_count();
+    for i in 0..nct {
+        let ct_byte = reader.read_u8().map_err(io_err(path))?;
+        let ct = CharType::from_u8(ct_byte).ok_or(Error::InvalidCharType { value: ct_byte })?;
+        key.ct[i] = ct;
+    }
+
+    let ncp = feature_type.char32_count();
+    for i in 0..ncp {
+        key.cp[i] = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+    }
+
+    if feature_type.is_uint8_payload() {
+        key.u8val = reader.read_u8().map_err(io_err(path))?;
+    }
+
+    Ok(key)
 }
 
 /// 読みラベルテーブルを読む。
@@ -481,7 +488,10 @@ pub(crate) fn read_f32_vec<R: Read>(reader: &mut R, len: usize, path: &Path) -> 
 }
 
 /// i8 ベクタを読む。
-fn read_i8_vec<R: Read>(reader: &mut R, len: usize, path: &Path) -> Result<Vec<i8>> {
+///
+/// `.mbm` の読みモデル重み（本ファイル）と `boundary.rs` の境界モデル線形重み
+/// （int8量子化）の両方から使うため `pub(crate)`。
+pub(crate) fn read_i8_vec<R: Read>(reader: &mut R, len: usize, path: &Path) -> Result<Vec<i8>> {
     let mut v = vec![0i8; len];
     // i8 は単純な符号付きバイトなので、まず u8 として読み、transmute する。
     // read_exact は &mut [u8] を取るので、安全に変換するため bytemuck 等は使わず
@@ -524,6 +534,33 @@ fn _io_err_owned(path: PathBuf) -> impl Fn(std::io::Error) -> Error {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    /// fixture_gbdt.mbm（GBDT境界モデル、algo_tag=0x01）のパスを返す。
+    fn fixture_gbdt_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture_gbdt.mbm")
+    }
+
+    #[test]
+    fn load_fixture_gbdt_boundary_is_tree() {
+        use crate::feature::FeatureType;
+        use crate::weight_model::WeightModel;
+
+        let model = load(fixture_gbdt_path()).expect("fixture_gbdt.mbm が読めること");
+        assert!(matches!(model.boundary, crate::boundary::Boundary::Tree(_)));
+
+        // gen_fixture_mbm_gbdt.py のコメント通りの期待値。
+        let kanji = vec![FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji)];
+        assert!((model.compute_boundary_score(&kanji) - 0.75).abs() < 1e-6);
+
+        let hiragana = vec![FeatureKey::type_1(
+            FeatureType::TypeSelf,
+            CharType::Hiragana,
+        )];
+        assert!((model.compute_boundary_score(&hiragana) - (-0.25)).abs() < 1e-6);
+
+        // type_s キーが無い（欠損） → default_left=False → 右の葉。
+        assert!((model.compute_boundary_score(&[]) - (-0.25)).abs() < 1e-6);
+    }
 
     /// fixture.mbm のパスを返す。
     /// テストは crate ルートから実行される (`cargo test`) ことを前提とする。
@@ -617,10 +654,19 @@ mod tests {
     fn load_fixture_boundary() {
         let model = load(fixture_path()).unwrap();
 
-        assert!((model.boundary_scale - 0.005).abs() < 1e-6);
-        assert_eq!(model.boundary_data, vec![10, -5, 20, 15, -3]);
-        assert!((model.boundary_intercept[0] - 0.2).abs() < 1e-6);
-        assert!((model.boundary_intercept[1] - (-0.2)).abs() < 1e-6);
+        match &model.boundary {
+            crate::boundary::Boundary::Linear {
+                scale,
+                data,
+                intercept,
+            } => {
+                assert!((scale - 0.005).abs() < 1e-6);
+                assert_eq!(data, &vec![10i8, -5, 20, 15, -3]);
+                assert!((intercept[0] - 0.2).abs() < 1e-6);
+                assert!((intercept[1] - (-0.2)).abs() < 1e-6);
+            }
+            crate::boundary::Boundary::Tree(_) => panic!("fixture.mbm の境界モデルは線形のはず"),
+        }
     }
 
     // --- エラー系のテスト (in-memory バイト列で検証) ---
@@ -648,7 +694,7 @@ mod tests {
     fn n_classes_over_u16_returns_error() {
         // csc_rowind がクラスIDを u16 で持つため、n_classes は MAX_CLASSES (65536)
         // を超えてはならない。ここでは 65537 (0x00010001) を与えて弾かれることを確認する。
-        let bad_data = b"MOMO\x05\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MOMO\x06\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
@@ -689,6 +735,19 @@ mod tests {
         assert!(matches!(
             result,
             Err(Error::UnsupportedVersion { version: 0x04 })
+        ));
+    }
+
+    #[test]
+    fn old_version_v5_returns_error() {
+        // v5（境界モデルが algo_tag なしの固定線形レイアウト）も読めない。
+        // algo_tag が無いと後続バイト列がそのままずれて誤動作するため。
+        let bad_data = b"MOMO\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut cursor = std::io::Cursor::new(&bad_data[..]);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedVersion { version: 0x05 })
         ));
     }
 
@@ -748,7 +807,7 @@ mod tests {
     fn build_header_bytes(n_classes: u32, n_features: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"MOMO");
-        bytes.push(0x05);
+        bytes.push(VERSION);
         bytes.extend_from_slice(&[0, 0, 0]); // reserved
         bytes.extend_from_slice(&n_classes.to_le_bytes());
         bytes.extend_from_slice(&n_features.to_le_bytes());

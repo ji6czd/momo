@@ -561,24 +561,26 @@ def train(
     use_svc: bool = True,
     n_jobs: int = 4,
     name_dict: str | None = None,
-    boundary_algo: str = "sgd",
+    boundary_algo: str = "gbdt",
 ) -> None:
     """
-    TSVから読みモデルと境界モデル（SGDClassifier）を学習し、1つのZIPにまとめる。
+    TSVから読みモデルと境界モデルを学習し、1つのZIPにまとめる。
 
     モデル構成:
         読みモデル  : LinearSVC (use_svc=True) または SGDClassifier/hinge (use_svc=False)
             - LinearSVC: 精度優先。メモリが (クラス数×特徴量次元)×float64 必要
             - SGDClassifier: メモリ節約。大規模データで LinearSVC がOOMになる場合に使用
         境界モデル  : boundary_algo で切り替え
-            - "sgd"  (既定) : SGDClassifier(loss='modified_huber')。2値分類（0/1）、
-                              predict_proba が使える（漢数字フォールバック判定に使用）。
-                              exporter が .mbm/.mbmf に量子化して書き出せる。
-            - "gbdt"        : LGBMClassifier + カテゴリカル特徴量（momo_py.categorical）。
+            - "gbdt" (既定) : LGBMClassifier + カテゴリカル特徴量（momo_py.categorical）。
                               線形モデルが表現しづらい「複数文字の組み合わせ」条件付き境界
-                              判定で精度が上回ることを実験で確認済み（utilities/gbdt_boundary_experiment.py）。
-                              momors-core が木のアンサンブル推論に未対応のため、exporter は
-                              .mbm/.mbmf の書き出しをスキップする（.zip読み込みでの評価専用、実運用未対応）。
+                              判定で精度が上回ることを実験・実データ両方で確認済み
+                              （utilities/gbdt_boundary_experiment.py、recall_audit.py の
+                              BOUNDARY不一致が線形比87%減）。exporter が木のアンサンブルを
+                              .mbm/.mbmf の境界モデルセクション（version 0x06、algo_tag=0x01）
+                              に書き出し、momors-core 側も対応済み。
+            - "sgd"         : SGDClassifier(loss='modified_huber')。2値分類（0/1）、
+                              predict_proba が使える（漢数字フォールバック判定に使用）。
+                              比較・切り戻し用に残置。
 
     人名特徴量:
         name_dict に人名辞書のパスを指定すると（None のときは tsvdata と同じ
@@ -818,13 +820,6 @@ def train(
         print(f"   ├ {NAME_DICT_FILENAME}")
     print(f"   ├ {SINGLE_KANJI_DICT_FILENAME}")
     print(f"   └ version_info.json")
-
-    if boundary_algo == "gbdt":
-        print(
-            "\n⚠️  境界モデルが 'gbdt' のため .mbm/.mbmf の書き出しをスキップします"
-            "（momors-core は木のアンサンブル推論に未対応。.zip からの評価のみ可能）。"
-        )
-        return
 
     export(zip_path, mbm_path)
     print(f"量子化モデル (MBM) エクスポート完了: {mbm_path}")

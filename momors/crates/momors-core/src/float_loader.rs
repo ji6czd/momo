@@ -15,7 +15,7 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MBMF"
-//!   version      : u8      0x05    ← .mbm と同じ番号を共有する
+//!   version      : u8      0x06    ← .mbm と同じ番号を共有する
 //!   _reserved    : u8[3]   0x00 × 3
 //!   n_classes    : u32 LE
 //!   n_features   : u32 LE
@@ -31,9 +31,9 @@
 //!
 //! [読みモデル intercept]    .mbm と同一
 //!
-//! [境界モデル重み (float32・量子化なし)]
-//!   data         : f32 × n_features  ← quant_scale なし、実値そのもの
-//!   intercept    : f32 × 2
+//! [境界モデル]              algo_tag プレフィックス付き（`boundary.rs`）
+//!   algo_tag == 0x00 (線形): data (f32 × n_features、quant_scale なし) + intercept (f32 × 2)
+//!   algo_tag == 0x01 (木)  : .mbm と完全に同一バイト列（元々量子化していない）
 //!
 //! [人名辞書テーブル]        .mbm と同一
 //! [単一漢字辞書テーブル]    .mbm と同一
@@ -133,12 +133,8 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
     // ---- 読みモデル intercept (.mbm と共通実装) ----
     model.intercept_read = read_f32_vec(reader, n_classes as usize, path)?;
 
-    // ---- 境界モデル重み (float32・量子化なし) ----
-    model.boundary_data = read_f32_vec(reader, n_features as usize, path)?;
-    model.boundary_intercept = [
-        reader.read_f32::<LittleEndian>().map_err(io_err(path))?,
-        reader.read_f32::<LittleEndian>().map_err(io_err(path))?,
-    ];
+    // ---- 境界モデル (algo_tag で線形/木を分岐、boundary.rs) ----
+    model.boundary = crate::boundary::parse_float(reader, n_features as usize, path)?;
 
     // ---- 人名辞書テーブル / 単一漢字辞書テーブル (.mbm と共通実装) ----
     let names = read_name_dict(reader, path)?;
@@ -165,6 +161,35 @@ mod tests {
     /// fixture.mbmf のパスを返す。
     fn fixture_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture.mbmf")
+    }
+
+    /// fixture_gbdt.mbmf（GBDT境界モデル、algo_tag=0x01）のパスを返す。
+    fn fixture_gbdt_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture_gbdt.mbmf")
+    }
+
+    #[test]
+    fn load_fixture_gbdt_boundary_is_tree() {
+        use crate::char_type::CharType;
+
+        let model = load(fixture_gbdt_path()).expect("fixture_gbdt.mbmf が読めること");
+        assert!(matches!(
+            model.boundary,
+            crate::boundary::FloatBoundary::Tree(_)
+        ));
+
+        // .mbm 版と完全に同一バイト列のはずなので、期待値も同じ
+        // (gen_fixture_mbm_gbdt.py のコメント参照)。
+        let kanji = vec![FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji)];
+        assert!((model.compute_boundary_score(&kanji) - 0.75).abs() < 1e-6);
+
+        let hiragana = vec![FeatureKey::type_1(
+            FeatureType::TypeSelf,
+            CharType::Hiragana,
+        )];
+        assert!((model.compute_boundary_score(&hiragana) - (-0.25)).abs() < 1e-6);
+
+        assert!((model.compute_boundary_score(&[]) - (-0.25)).abs() < 1e-6);
     }
 
     #[test]
@@ -223,7 +248,7 @@ mod tests {
     #[test]
     fn n_classes_over_u16_returns_error() {
         // .mbm 側と同じ理由 (csc_rowind が u16) で 65537 は弾かれる。
-        let bad_data = b"MBMF\x05\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MBMF\x06\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
@@ -237,6 +262,18 @@ mod tests {
         assert!(matches!(
             result,
             Err(Error::UnsupportedVersion { version: 0x99 })
+        ));
+    }
+
+    #[test]
+    fn old_version_v5_returns_error() {
+        // v5（境界モデルが algo_tag なしの固定線形レイアウト）も読めない。
+        let bad_data = b"MBMF\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut cursor = std::io::Cursor::new(&bad_data[..]);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedVersion { version: 0x05 })
         ));
     }
 }

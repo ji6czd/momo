@@ -733,7 +733,7 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
+                let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -757,7 +757,7 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = entry.compound_len >= 2 && is_small_kana(entry.cp2);
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
+                let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -800,7 +800,7 @@ impl<M: WeightModel> Predictor<M> {
 
                 if let Some(action) = resolve_multi(counter_cp, value, model_reading) {
                     let has_split =
-                        self.boundary_has_split(&all_feat_ids[run_end], &source_seq, run_end);
+                        self.boundary_has_split(&all_feat_keys[run_end], &source_seq, run_end);
                     match action {
                         CounterAction::Spell(kana) => {
                             // 綴り読みは分解できない（トオカ・ハツカ）。ラン先頭に束ねる。
@@ -902,7 +902,7 @@ impl<M: WeightModel> Predictor<M> {
                         continue;
                     }
                     NumericFallback::Output(fallback) => {
-                        let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
+                        let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
                         self.emit_label(
                             entry,
                             fallback,
@@ -967,7 +967,7 @@ impl<M: WeightModel> Predictor<M> {
                     !next_is_kun_counter
                 };
                 if revert {
-                    let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
+                    let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
                     self.emit_char_passthrough(
                         entry,
                         conf,
@@ -1011,7 +1011,7 @@ impl<M: WeightModel> Predictor<M> {
                     parent_is_kanji = entry.ctype == CharType::Kanji;
                     parent_has_small_kana = false;
                     parent_kana_byte_end = result.kana_text.len();
-                    let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
+                    let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
                     if has_split {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -1062,7 +1062,7 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
 
             // 境界判定
-            let has_split = self.boundary_has_split(&all_feat_ids[i], &source_seq, i);
+            let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
 
             // 々フォールバック: 低自信度の「々」は直前漢字の読みを繰り返す
             //
@@ -1179,8 +1179,8 @@ impl<M: WeightModel> Predictor<M> {
     }
 
     /// 境界モデルの生スコア (sigmoid 前) を計算する。
-    fn compute_boundary_score(&self, feat_ids: &[u32]) -> f32 {
-        self.model.compute_boundary_score(feat_ids)
+    fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32 {
+        self.model.compute_boundary_score(feat_keys)
     }
 
     /// 位置 `i` の直後に境界スペース（マスあけ）を入れるか判定する。
@@ -1192,8 +1192,13 @@ impl<M: WeightModel> Predictor<M> {
     /// `AB 345` にしない・`50Hz` の内部も割らない）。ランの外側（塊↔かな/漢字/記号、
     /// 助詞の前）はこれまでどおりモデルに委ねる。線形モデルは疎な文字特徴に外挿で
     /// 振り回されてラン内部を誤分割しがちなため、ここは構造で保証する。
-    fn boundary_has_split(&self, feat_ids: &[u32], source_seq: &[SourceEntry], i: usize) -> bool {
-        if sigmoid(self.compute_boundary_score(feat_ids)) < 0.5 {
+    fn boundary_has_split(
+        &self,
+        feat_keys: &[FeatureKey],
+        source_seq: &[SourceEntry],
+        i: usize,
+    ) -> bool {
+        if sigmoid(self.compute_boundary_score(feat_keys)) < 0.5 {
             return false;
         }
         !is_alnum_run_internal(source_seq, i)

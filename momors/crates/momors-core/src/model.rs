@@ -7,6 +7,7 @@
 //! [`Predictor`]: crate::Predictor
 
 use crate::Result;
+use crate::boundary::Boundary;
 use crate::feature::FeatureKey;
 use crate::name_dict::NameIndex;
 use crate::weight_model::WeightModel;
@@ -80,13 +81,9 @@ pub struct MomoModel {
     /// 各クラスの intercept (size: `n_classes`)
     pub(crate) intercept_read: Vec<f32>,
 
-    // --- 境界モデル重み (int8 量子化) ---
-    /// 量子化スケール係数
-    pub(crate) boundary_scale: f32,
-    /// 境界モデル (二値分類) のクラス 1 重みベクトル (size: `n_features`)
-    pub(crate) boundary_data: Vec<i8>,
-    /// 境界モデルの intercept `[class 0, class 1]`
-    pub(crate) boundary_intercept: [f32; 2],
+    // --- 境界モデル ---
+    /// 線形（int8量子化）または木のアンサンブル（GBDT）。[`crate::boundary`] 参照。
+    pub(crate) boundary: Boundary,
 
     // --- 人名辞書 (version 0x03 で追加) ---
     /// 人名辞書の照合用インデックス。辞書なしモデルでは空。
@@ -153,11 +150,8 @@ impl MomoModel {
 impl Default for MomoModel {
     /// C++ 版と同じ初期値で構築する。
     ///
-    /// 特に `boundary_scale` は `1.0` で初期化する
-    /// (C++ 版の `float read_scale = 1.0f;` と一致)。
-    /// 実際には loader がファイルから値を読み込んで上書きするが、
-    /// 初期値が `0.0` だと万一上書きされない場合に全スコアが消失するため
-    /// 安全側の初期値として `1.0` を採用する。
+    /// `boundary` は [`Boundary::default`] の安全側の初期値（線形・scale=1.0）で
+    /// 初期化する。実際には loader がファイルから値を読み込んで上書きする。
     /// `read_scale` はクラスごとの配列のため、loader が必ず `n_classes` 件で
     /// 埋めることを前提に空 `Vec` で初期化する。
     fn default() -> Self {
@@ -169,9 +163,7 @@ impl Default for MomoModel {
             csc_rowind: Vec::new(),
             csc_data: Vec::new(),
             intercept_read: Vec::new(),
-            boundary_scale: 1.0,
-            boundary_data: Vec::new(),
-            boundary_intercept: [0.0, 0.0],
+            boundary: Boundary::default(),
             name_dict: NameIndex::new(),
             kanji_dict: Vec::new(),
             n_classes: 0,
@@ -248,15 +240,9 @@ impl WeightModel for MomoModel {
         }
     }
 
-    fn compute_boundary_score(&self, feat_ids: &[u32]) -> f32 {
-        let mut score = self.boundary_intercept[1];
-        let scale = self.boundary_scale;
-        for &feat_id in feat_ids {
-            if feat_id < self.n_features {
-                score += (self.boundary_data[feat_id as usize] as f32) * scale;
-            }
-        }
-        score
+    fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32 {
+        self.boundary
+            .compute_score(feat_keys, |k| self.vocab_find(k))
     }
 
     fn read_feature_column(&self, feat_id: u32) -> Vec<(u32, f32)> {
@@ -292,8 +278,15 @@ mod tests {
         assert_eq!(m.n_features, 0);
         // read_scale はクラスごとの配列。loader が埋める前は空。
         assert!(m.read_scale.is_empty());
-        assert_eq!(m.boundary_scale, 1.0);
-        assert_eq!(m.boundary_intercept, [0.0, 0.0]);
+        match &m.boundary {
+            crate::boundary::Boundary::Linear {
+                scale, intercept, ..
+            } => {
+                assert_eq!(*scale, 1.0);
+                assert_eq!(*intercept, [0.0, 0.0]);
+            }
+            crate::boundary::Boundary::Tree(_) => panic!("既定値は線形であるべき"),
+        }
         assert!(m.vocab.is_empty());
         assert!(m.read_classes.is_empty());
     }

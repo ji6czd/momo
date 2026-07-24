@@ -6,7 +6,7 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 
 [ファイルヘッダ]          16 bytes
   magic        : uint8[4]   "MOMO"
-  version      : uint8      0x05
+  version      : uint8      0x06
   _reserved    : uint8[3]   0x00 x3
   n_classes    : uint32     読みラベル数
   n_features   : uint32     特徴量次元数（語彙サイズ）
@@ -32,10 +32,43 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 [読みモデル intercept]
   intercept    : float32 × n_classes
 
-[境界モデル重み（int8量子化）]
-  quant_scale  : float32
-  data         : int8 × n_features   （クラス1の重みベクトル）
-  intercept    : float32 × 2         （クラス0, クラス1）
+[境界モデル]              version 0x06 で algo_tag プレフィックス付きの可変レイアウトに変更
+  algo_tag     : uint8      0x00 = 線形 (sgd)、0x01 = 木のアンサンブル (gbdt)
+
+  --- algo_tag == 0x00 (線形。0x05 までと同一バイト列) ---
+    quant_scale  : float32
+    data         : int8 × n_features   （クラス1の重みベクトル）
+    intercept    : float32 × 2         （クラス0, クラス1）
+
+  --- algo_tag == 0x01 (木。.mbm/.mbmf で完全に同一バイト列、量子化しない) ---
+    [カテゴリカル語彙テーブル]
+      n_cat_columns      : uint32   カテゴリカル列数（momo_py.categorical の列数）
+      n_cat_vocab_entries: uint32   全列合計のエントリ数
+      以下 n_cat_vocab_entries エントリ（語彙テーブルと同じペイロード方式を列ごとに使う）:
+        feature_type : uint8
+        chartype[N]  : uint8 × N   N = chartype_count(feature_type)
+        char32[M]    : uint32 × M  M = char32_count(feature_type)
+        uint8_val    : uint8       is_uint8_payload(feature_type) のときのみ
+        column_index : uint32      この値が属するカテゴリカル列（0-based。LightGBM の
+                                    split_feature と一致する）
+        code         : uint32      列内での序数コード（momo_py.categorical の vocab コード）
+    [木のアンサンブル]
+      n_trees : uint32
+      以下 n_trees 本、各木は先行順（深さ優先）の再帰的ノード列（長さプレフィックス不要）:
+        node_tag : uint8   0 = leaf, 1 = split
+        --- leaf ---
+          leaf_value : float32
+        --- split ---
+          split_feature : uint32   カテゴリカル列インデックス（column_index と同じ空間）
+          default_left  : uint8    0/1。この列に対応する特徴量がこの位置に存在しない
+                                    （欠損）とき、左右どちらへ進むか
+          n_cats        : uint32
+          cats          : uint32 × n_cats   昇順ソート済み。この集合に列のコードが
+                                    含まれれば左の子へ、含まれなければ右の子へ
+          left_child    : 再帰的ノード
+          right_child   : 再帰的ノード
+      スコアリング: 全木の到達リーフ値の合計をそのまま生スコアとする（追加の
+      intercept はない）。sigmoid + 0.5 閾値へ接続するのは線形モデルと同じ。
 
 [人名辞書テーブル]        version 0x03 で追加、0x04 で読みを追加
   n_names      : uint32     人名エントリ数（辞書なしモデルは 0）
@@ -81,6 +114,10 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
         ファイルサイズの利得は nnz/n_features の比に依存する（2 が損益分岐）。
         同時に `.mbmf` のバージョン番号をこの `.mbm` の採番に合流させた
         （それまでは 0x01 から独立採番していた）。
+  0x06: 境界モデルセクションに algo_tag プレフィックスを追加し、線形 (sgd) に加えて
+        GBDT（LightGBM、カテゴリカル特徴量）の木のアンサンブルを書き出せるように
+        変更。線形の0x05までのバイト列はalgo_tag=0x00として据え置き。
+        0x05 ファイルは読み込み時にエラーになるため再エクスポートすること。
 
 .mbmf フォーマット（量子化前の float32 サイドカー）
 ====================================================
@@ -95,9 +132,11 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
     rowind       : uint16 × n_nonzero     行インデックス = クラスID
     data         : float32 × n_nonzero
 
-  [境界モデル重み（float32・量子化なし）]
+  [境界モデル（algo_tag==0x00 線形のときのみ float32・量子化なし）]
     data         : float32 × n_features   （クラス1の重みベクトル）
     intercept    : float32 × 2            （クラス0, クラス1）
+
+  algo_tag==0x01（木）のときは `.mbm` と完全に同一バイト列（元々量子化していない）。
 
 ファイルヘッダの magic は `MBMF`。**version は `.mbm` と同じ番号を共有する**
 （両者はセクション構成を共通に保つ設計なので、採番を分けると「どちらの 0x02 か」
@@ -129,7 +168,11 @@ from .utils import parse_kanji_dict_tsv
 # `.mbm` と `.mbmf` はセクション構成を共通に保つ設計なので、バージョン番号も
 # 共有する（採番を分けると「どちらの 0x02 か」を常に意識する羽目になる）。
 # 区別は magic だけで行う。
-VERSION = 0x05
+VERSION = 0x06
+
+# 境界モデルセクションの algo_tag（version 0x06 で追加）
+BOUNDARY_ALGO_LINEAR = 0x00
+BOUNDARY_ALGO_TREE = 0x01
 
 MAGIC_MBM = b"MOMO"
 MAGIC_MBMF = b"MBMF"
@@ -565,20 +608,114 @@ def _load_bundle(zip_path: str) -> Tuple[Any, list, str]:
     return bundle, name_entries, single_kanji_text
 
 
-def _require_linear_boundary(bundle: Any) -> None:
-    """境界モデルが線形（sgd）であることを確認する。
+def _build_boundary_cat_vocab_bytes(cat_names: list, cat_vocabs: dict) -> bytes:
+    """GBDT境界モデルのカテゴリカル列語彙表（値文字列→コード）をバイト列に変換する。
 
-    .mbm/.mbmf の境界モデルセクションは coef_/intercept_ を持つ線形モデル前提の
-    バイナリレイアウトで固定されている。momors-core はまだ木のアンサンブル推論に
-    対応していないため、boundary_algo="gbdt" のバンドルは今はエクスポートできない
-    （trainer.train() 側もこのケースでは export() を呼ばずスキップする）。
+    列の値は読みモデル語彙テーブルの値と同じ種類（文字・CharType・run長バケット等）
+    なので、既存の `parse_feature_key` / `_build_vocab_bytes` と同じペイロード方式を
+    列ごとに再利用する。ペイロードなし系（kanji_pos_first）は "name=value" の形では
+    解析できないため、素の特徴量名にフォールバックする。
+    """
+    entries = bytearray()
+    n_entries = 0
+    for col_idx, name in enumerate(cat_names):
+        vocab = cat_vocabs[name]
+        for value_str, code in vocab.items():
+            try:
+                ft, ct_vals, cp_vals, u8_val = parse_feature_key(f"{name}={value_str}")
+            except ValueError:
+                ft, ct_vals, cp_vals, u8_val = parse_feature_key(name)
+            entries.append(ft)
+            for ct in ct_vals:
+                entries.append(ct)
+            for cp in cp_vals:
+                entries += struct.pack("<I", cp)
+            if u8_val is not None:
+                entries.append(u8_val)
+            entries += struct.pack("<II", col_idx, code)
+            n_entries += 1
+
+    out = bytearray()
+    out += struct.pack("<II", len(cat_names), n_entries)
+    out += entries
+    return bytes(out)
+
+
+def _build_tree_node_bytes(node: dict) -> bytes:
+    """LightGBMの木構造（dump_model()の1ノード）を再帰的にバイト列へ変換する。"""
+    if "leaf_value" in node:
+        return struct.pack("<Bf", 0, float(node["leaf_value"]))
+
+    if node.get("decision_type") != "==":
+        raise ValueError(
+            "カテゴリカル分岐(decision_type='==')以外の分岐には対応していません: "
+            f"decision_type={node.get('decision_type')!r}, split_feature={node.get('split_feature')}"
+        )
+    cats = sorted(int(c) for c in str(node["threshold"]).split("||"))
+
+    out = bytearray()
+    out.append(1)  # node_tag: split
+    out += struct.pack("<I", int(node["split_feature"]))
+    out.append(1 if node.get("default_left") else 0)
+    out += struct.pack("<I", len(cats))
+    for c in cats:
+        out += struct.pack("<I", c)
+    out += _build_tree_node_bytes(node["left_child"])
+    out += _build_tree_node_bytes(node["right_child"])
+    return bytes(out)
+
+
+def _build_boundary_tree_bytes(booster) -> bytes:
+    """LightGBM Boosterの全木を再帰的にバイト列へ変換する。"""
+    tree_info = booster.dump_model()["tree_info"]
+    out = bytearray()
+    out += struct.pack("<I", len(tree_info))
+    for tree in tree_info:
+        out += _build_tree_node_bytes(tree["tree_structure"])
+    return bytes(out)
+
+
+def _build_boundary_bytes(bundle: Any, quantize: bool) -> bytes:
+    """境界モデルセクション（algo_tagプレフィックス付き）を構築する。
+
+    quantize=True: .mbm 用（線形モデルはint8量子化）。
+    quantize=False: .mbmf 用（線形モデルもfloat32のまま）。
+    GBDT（木）は quantize に関わらず同一バイト列（量子化しない。leaf値・カテゴリ
+    コードは元々小さい/離散的で量子化の対象にならないため）。
     """
     algo = getattr(bundle, "boundary_algo", "sgd")
-    if algo != "sgd":
-        raise ValueError(
-            f"境界モデルが boundary_algo={algo!r} のため .mbm/.mbmf を書き出せません"
-            "（momors-core が木のアンサンブル推論に対応するまでは 'sgd' のバンドルのみ対応）。"
-        )
+
+    if algo == "sgd":
+        model_b = bundle.model_boundary  # SGDClassifier
+        # coef_ は (1, n_features) または (2, n_features)。modified_huber の2値分類
+        # では coef_[0] がクラス1の重みベクトル。
+        b_coef = model_b.coef_.astype(np.float32)
+        if b_coef.ndim == 2:
+            b_coef = b_coef[0]
+        b_intercept = model_b.intercept_.astype(np.float32)  # shape: (2,) or (1,)
+        if b_intercept.shape[0] == 1:
+            # 2値分類で intercept が1要素のことがある
+            b_intercept = np.array([0.0, float(b_intercept[0])], dtype=np.float32)
+
+        out = bytearray()
+        out.append(BOUNDARY_ALGO_LINEAR)
+        if quantize:
+            scale_b, b_int8 = quantize_to_int8(b_coef)
+            out += struct.pack("<f", scale_b)
+            out += bytes(b_int8.tobytes())
+        else:
+            out += bytes(b_coef.tobytes())
+        out += struct.pack("<ff", b_intercept[0], b_intercept[1])
+        return bytes(out)
+
+    if algo == "gbdt":
+        out = bytearray()
+        out.append(BOUNDARY_ALGO_TREE)
+        out += _build_boundary_cat_vocab_bytes(bundle.boundary_cat_names, bundle.boundary_cat_vocabs)
+        out += _build_boundary_tree_bytes(bundle.model_boundary.booster_)
+        return bytes(out)
+
+    raise ValueError(f"未知の boundary_algo です: {algo!r}")
 
 
 # =====================================================================
@@ -702,13 +839,12 @@ def export(zip_path: str, out_path: str) -> None:
     """
     print(f"📦 モデル読み込み中: {zip_path}")
     bundle, name_entries, single_kanji_text = _load_bundle(zip_path)
-    _require_linear_boundary(bundle)
 
     vocab = bundle.vectorizer_read.vocabulary_  # {key_str: feature_id}
     coef_sparse = bundle.coef_read_sparse  # CSR (n_classes × n_features)
     intercept_r = bundle.intercept_read  # float32 (n_classes,)
     read_classes = bundle.read_classes  # str array (n_classes,)
-    model_b = bundle.model_boundary  # SGDClassifier
+    boundary_algo = getattr(bundle, "boundary_algo", "sgd")
 
     n_classes = len(read_classes)
     n_features = len(vocab)
@@ -735,23 +871,9 @@ def export(zip_path: str, out_path: str) -> None:
     intercept_r_f32 = intercept_r.astype(np.float32)
     intercept_r_bytes = intercept_r_f32.tobytes()  # float32 × n_classes
 
-    # --- 境界モデル重み（int8量子化）---
-    print("🔨 境界モデル重み量子化中...")
-    # SGDClassifier の coef_ は (1, n_features) または (2, n_features)
-    # modified_huber の2値分類では coef_[0] がクラス1の重みベクトル
-    b_coef = model_b.coef_.astype(np.float32)
-    if b_coef.ndim == 2:
-        b_coef = b_coef[0]  # shape: (n_features,)
-    scale_b, b_int8 = quantize_to_int8(b_coef)
-    b_intercept = model_b.intercept_.astype(np.float32)  # shape: (2,) or (1,)
-    if b_intercept.shape[0] == 1:
-        # 2値分類で intercept が1要素のことがある
-        b_intercept = np.array([0.0, float(b_intercept[0])], dtype=np.float32)
-
-    boundary_bytes = bytearray()
-    boundary_bytes += struct.pack("<f", scale_b)
-    boundary_bytes += bytes(b_int8.tobytes())
-    boundary_bytes += struct.pack("<ff", b_intercept[0], b_intercept[1])
+    # --- 境界モデル（線形はint8量子化、GBDTは量子化なし）---
+    print(f"🔨 境界モデル変換中... (algo={boundary_algo})")
+    boundary_bytes = _build_boundary_bytes(bundle, quantize=True)
 
     print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
     name_dict_bytes = _build_name_dict_bytes(name_entries)
@@ -793,7 +915,7 @@ def export(zip_path: str, out_path: str) -> None:
         f"   読みモデル重み: {len(read_weight_bytes):>10,} bytes  (scale: min={scales_r.min():.6f} max={scales_r.max():.6f})"
     )
     print(f"   読み intercept: {len(intercept_r_bytes):>10,} bytes")
-    print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (scale={scale_b:.6f})")
+    print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (algo={boundary_algo})")
     print(
         f"   人名辞書      : {len(name_dict_bytes):>10,} bytes  ({len(name_entries)} エントリ)"
     )
@@ -812,13 +934,12 @@ def export_float(zip_path: str, out_path: str) -> None:
     """
     print(f"📦 モデル読み込み中: {zip_path}")
     bundle, name_entries, single_kanji_text = _load_bundle(zip_path)
-    _require_linear_boundary(bundle)
 
     vocab = bundle.vectorizer_read.vocabulary_
     coef_sparse = bundle.coef_read_sparse
     intercept_r = bundle.intercept_read
     read_classes = bundle.read_classes
-    model_b = bundle.model_boundary
+    boundary_algo = getattr(bundle, "boundary_algo", "sgd")
 
     n_classes = len(read_classes)
     n_features = len(vocab)
@@ -843,18 +964,9 @@ def export_float(zip_path: str, out_path: str) -> None:
     intercept_r_f32 = intercept_r.astype(np.float32)
     intercept_r_bytes = intercept_r_f32.tobytes()
 
-    # --- 境界モデル重み（float32・量子化なし）---
-    print("🔨 境界モデル重み変換中 (float32、量子化なし)...")
-    b_coef = model_b.coef_.astype(np.float32)
-    if b_coef.ndim == 2:
-        b_coef = b_coef[0]
-    b_intercept = model_b.intercept_.astype(np.float32)
-    if b_intercept.shape[0] == 1:
-        b_intercept = np.array([0.0, float(b_intercept[0])], dtype=np.float32)
-
-    boundary_bytes = bytearray()
-    boundary_bytes += bytes(b_coef.tobytes())
-    boundary_bytes += struct.pack("<ff", b_intercept[0], b_intercept[1])
+    # --- 境界モデル（線形はfloat32・量子化なし、GBDTは元々量子化なし）---
+    print(f"🔨 境界モデル変換中... (algo={boundary_algo})")
+    boundary_bytes = _build_boundary_bytes(bundle, quantize=False)
 
     print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
     name_dict_bytes = _build_name_dict_bytes(name_entries)
@@ -894,7 +1006,7 @@ def export_float(zip_path: str, out_path: str) -> None:
         f"   読みモデル重み: {len(read_weight_bytes):>10,} bytes  (float32、量子化なし)"
     )
     print(f"   読み intercept: {len(intercept_r_bytes):>10,} bytes")
-    print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (float32、量子化なし)")
+    print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (algo={boundary_algo}、量子化なし)")
     print(
         f"   人名辞書      : {len(name_dict_bytes):>10,} bytes  ({len(name_entries)} エントリ)"
     )

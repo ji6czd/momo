@@ -61,9 +61,10 @@ def build_read_weights_float() -> bytes:
 
 
 def build_boundary_float() -> bytes:
-    """境界モデル重み（量子化なし）: data(f32 × n_features) + intercept(f32 × 2)"""
+    """境界モデル（algo_tag=線形、量子化なし）: data(f32 × n_features) + intercept(f32 × 2)"""
     data = [v * base.QUANT_SCALE_BOUNDARY for v in base.BOUNDARY_DATA]
     buf = bytearray()
+    buf.append(base.BOUNDARY_ALGO_LINEAR)
     buf += struct.pack(f'<{base.N_FEATURES}f', *data)
     buf += struct.pack('<ff', *base.BOUNDARY_INTERCEPT)
     return bytes(buf)

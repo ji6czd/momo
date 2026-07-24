@@ -561,6 +561,7 @@ def train(
     use_svc: bool = True,
     n_jobs: int = 4,
     name_dict: str | None = None,
+    boundary_algo: str = "sgd",
 ) -> None:
     """
     TSVから読みモデルと境界モデル（SGDClassifier）を学習し、1つのZIPにまとめる。
@@ -569,9 +570,15 @@ def train(
         読みモデル  : LinearSVC (use_svc=True) または SGDClassifier/hinge (use_svc=False)
             - LinearSVC: 精度優先。メモリが (クラス数×特徴量次元)×float64 必要
             - SGDClassifier: メモリ節約。大規模データで LinearSVC がOOMになる場合に使用
-        境界モデル  : SGDClassifier(loss='modified_huber')
-            - 2値分類（0/1）
-            - predict_proba が使える（漢数字フォールバック判定に使用）
+        境界モデル  : boundary_algo で切り替え
+            - "sgd"  (既定) : SGDClassifier(loss='modified_huber')。2値分類（0/1）、
+                              predict_proba が使える（漢数字フォールバック判定に使用）。
+                              exporter が .mbm/.mbmf に量子化して書き出せる。
+            - "gbdt"        : LGBMClassifier + カテゴリカル特徴量（momo_py.categorical）。
+                              線形モデルが表現しづらい「複数文字の組み合わせ」条件付き境界
+                              判定で精度が上回ることを実験で確認済み（utilities/gbdt_boundary_experiment.py）。
+                              momors-core が木のアンサンブル推論に未対応のため、exporter は
+                              .mbm/.mbmf の書き出しをスキップする（.zip読み込みでの評価専用、実運用未対応）。
 
     人名特徴量:
         name_dict に人名辞書のパスを指定すると（None のときは tsvdata と同じ
@@ -692,25 +699,49 @@ def train(
     print("💾 [読みモデル] 学習完了")
 
     # ==========================================
-    # 境界モデル: SGDClassifier
+    # 境界モデル: boundary_algo で切り替え
     # ==========================================
-    print("\n🏋️  [境界モデル] ベクトル化中...")
-    vect_boundary = DictVectorizer(sparse=True)
-    X_boundary = vect_boundary.fit_transform(X_dicts)
-    X_boundary.data = X_boundary.data.astype(np.float32, copy=False)  # type: ignore[union-attr]
-    X_boundary.indices = X_boundary.indices.astype(np.int32, copy=False)  # type: ignore[union-attr]
-    X_boundary.indptr = X_boundary.indptr.astype(np.int32, copy=False)  # type: ignore[union-attr]
+    if boundary_algo not in ("sgd", "gbdt"):
+        raise ValueError(f"boundary_algo は 'sgd' か 'gbdt' でなければなりません: {boundary_algo!r}")
 
-    print("🏋️  [境界モデル] 学習中 (SGDClassifier)...")
-    model_boundary = SGDClassifier(
-        loss="modified_huber",  # predict_proba が使える
-        max_iter=200,
-        random_state=42,
-        verbose=0,
-    )
-    model_boundary.fit(X_boundary, Y_boundary)
-    model_boundary.coef_ = model_boundary.coef_.astype(np.float32)
-    model_boundary.intercept_ = model_boundary.intercept_.astype(np.float32)
+    vect_boundary = None
+    boundary_cat_names = None
+    boundary_cat_vocabs = None
+
+    if boundary_algo == "sgd":
+        print("\n🏋️  [境界モデル] ベクトル化中...")
+        vect_boundary = DictVectorizer(sparse=True)
+        X_boundary = vect_boundary.fit_transform(X_dicts)
+        X_boundary.data = X_boundary.data.astype(np.float32, copy=False)  # type: ignore[union-attr]
+        X_boundary.indices = X_boundary.indices.astype(np.int32, copy=False)  # type: ignore[union-attr]
+        X_boundary.indptr = X_boundary.indptr.astype(np.int32, copy=False)  # type: ignore[union-attr]
+
+        print("🏋️  [境界モデル] 学習中 (SGDClassifier)...")
+        model_boundary = SGDClassifier(
+            loss="modified_huber",  # predict_proba が使える
+            max_iter=200,
+            random_state=42,
+            verbose=0,
+        )
+        model_boundary.fit(X_boundary, Y_boundary)
+        model_boundary.coef_ = model_boundary.coef_.astype(np.float32)
+        model_boundary.intercept_ = model_boundary.intercept_.astype(np.float32)
+    else:  # "gbdt"
+        from lightgbm import LGBMClassifier
+
+        from .categorical import fit_categorical
+
+        print("\n🏋️  [境界モデル] カテゴリカル特徴量に変換中...")
+        X_boundary_cat, boundary_cat_names, boundary_cat_vocabs = fit_categorical(X_dicts)
+        print(f"   カテゴリカル列数: {len(boundary_cat_names)}")
+
+        print("🏋️  [境界モデル] 学習中 (LGBMClassifier)...")
+        model_boundary = LGBMClassifier(
+            n_estimators=300, num_leaves=31, random_state=42, verbose=-1
+        )
+        model_boundary.fit(
+            X_boundary_cat, Y_boundary, categorical_feature=list(range(len(boundary_cat_names)))
+        )
     print("💾 [境界モデル] 学習完了")
 
     # ==========================================
@@ -738,12 +769,16 @@ def train(
         vectorizer_boundary=vect_boundary,
         model_boundary=model_boundary,
         version_info={},
+        boundary_algo=boundary_algo,
+        boundary_cat_names=boundary_cat_names,
+        boundary_cat_vocabs=boundary_cat_vocabs,
     )
 
+    boundary_algo_label = "SGDClassifier" if boundary_algo == "sgd" else "LGBMClassifier(categorical)"
     version_info = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "model_bundle": bundle_name,
-        "algorithm": "LinearSVC+SGD",
+        "algorithm": f"LinearSVC+{boundary_algo_label}",
         "window_size": window,
         "name_dict_entries": name_dict_entries,
     }
@@ -783,6 +818,14 @@ def train(
         print(f"   ├ {NAME_DICT_FILENAME}")
     print(f"   ├ {SINGLE_KANJI_DICT_FILENAME}")
     print(f"   └ version_info.json")
+
+    if boundary_algo == "gbdt":
+        print(
+            "\n⚠️  境界モデルが 'gbdt' のため .mbm/.mbmf の書き出しをスキップします"
+            "（momors-core は木のアンサンブル推論に未対応。.zip からの評価のみ可能）。"
+        )
+        return
+
     export(zip_path, mbm_path)
     print(f"量子化モデル (MBM) エクスポート完了: {mbm_path}")
 

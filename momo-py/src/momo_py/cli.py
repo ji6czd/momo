@@ -60,6 +60,14 @@ def main():
         default=None,
         help="人名辞書ファイルのパス（省略時はTSVと同じディレクトリの person_name_dic.tsv を自動検出）",
     )
+    trainer_parser.add_argument(
+        "--boundary-algo",
+        dest="boundary_algo",
+        default="sgd",
+        choices=["sgd", "gbdt"],
+        help="境界モデルのアルゴリズム（sgd: 現行のSGDClassifier、"
+        "gbdt: LGBMClassifier+カテゴリカル特徴量。gbdtは.mbm/.mbmf書き出し未対応で評価専用）",
+    )
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -82,6 +90,7 @@ def main():
             use_svc=not args.sgd,
             n_jobs=args.jobs,
             name_dict=args.name_dict,
+            boundary_algo=args.boundary_algo,
         )
 
 

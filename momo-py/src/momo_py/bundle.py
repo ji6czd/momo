@@ -21,12 +21,25 @@ SINGLE_KANJI_DICT_FILENAME = "single_character_dic.tsv"
 
 @dataclass
 class LRModelBundle:
-    """ZIPに格納するモデル一式"""
+    """ZIPに格納するモデル一式。
+
+    境界モデルは boundary_algo で2方式を切り替える:
+      "sgd"  (既定) : vectorizer_boundary (DictVectorizer) + model_boundary (SGDClassifier)
+                       線形モデル。exporter が .mbm/.mbmf に量子化して書き出せる。
+      "gbdt"        : model_boundary (LGBMClassifier) + boundary_cat_names/boundary_cat_vocabs
+                       （momo_py.categorical の列名・語彙表）によるカテゴリカル特徴量。
+                       momors-core がまだ木のアンサンブル推論に対応していないため、
+                       exporter は .mbm/.mbmf の書き出しをスキップする（.zip読み込みでの
+                       精度検証のみ可能）。
+    """
 
     vectorizer_read: DictVectorizer
     coef_read_sparse: Any
     intercept_read: Any
     read_classes: Any
-    vectorizer_boundary: DictVectorizer
-    model_boundary: SGDClassifier
+    vectorizer_boundary: DictVectorizer | None
+    model_boundary: SGDClassifier | Any
     version_info: dict
+    boundary_algo: str = "sgd"
+    boundary_cat_names: list | None = None
+    boundary_cat_vocabs: dict | None = None

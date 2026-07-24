@@ -7,7 +7,14 @@ authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]
 requires-python = ">=3.13"
 # 学習・エクスポートで直接 import するものを明示する
 # （scikit-learn の推移的依存に頼らない）。
-dependencies = ["scikit-learn", "joblib", "numpy", "scipy"]
+dependencies = [
+    "scikit-learn",
+    "joblib",
+    "numpy",
+    "scipy",
+    "momors-py",
+    "lightgbm>=4.7.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]
@@ -20,5 +27,10 @@ makedic = "momo_py.makedic:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.uv.sources]
+momors-py = { path = "../dist/momors_py-0.8.12-cp313-abi3-win_amd64.whl" }
+
 [dependency-groups]
-dev = ["pytest>=9.0.2"]
+dev = [
+    "pytest>=9.0.2",
+]

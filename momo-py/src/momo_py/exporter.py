@@ -565,6 +565,22 @@ def _load_bundle(zip_path: str) -> Tuple[Any, list, str]:
     return bundle, name_entries, single_kanji_text
 
 
+def _require_linear_boundary(bundle: Any) -> None:
+    """境界モデルが線形（sgd）であることを確認する。
+
+    .mbm/.mbmf の境界モデルセクションは coef_/intercept_ を持つ線形モデル前提の
+    バイナリレイアウトで固定されている。momors-core はまだ木のアンサンブル推論に
+    対応していないため、boundary_algo="gbdt" のバンドルは今はエクスポートできない
+    （trainer.train() 側もこのケースでは export() を呼ばずスキップする）。
+    """
+    algo = getattr(bundle, "boundary_algo", "sgd")
+    if algo != "sgd":
+        raise ValueError(
+            f"境界モデルが boundary_algo={algo!r} のため .mbm/.mbmf を書き出せません"
+            "（momors-core が木のアンサンブル推論に対応するまでは 'sgd' のバンドルのみ対応）。"
+        )
+
+
 # =====================================================================
 # セクションのバイナリ構築（.mbm / .mbmf 共通）
 # =====================================================================
@@ -686,6 +702,7 @@ def export(zip_path: str, out_path: str) -> None:
     """
     print(f"📦 モデル読み込み中: {zip_path}")
     bundle, name_entries, single_kanji_text = _load_bundle(zip_path)
+    _require_linear_boundary(bundle)
 
     vocab = bundle.vectorizer_read.vocabulary_  # {key_str: feature_id}
     coef_sparse = bundle.coef_read_sparse  # CSR (n_classes × n_features)
@@ -795,6 +812,7 @@ def export_float(zip_path: str, out_path: str) -> None:
     """
     print(f"📦 モデル読み込み中: {zip_path}")
     bundle, name_entries, single_kanji_text = _load_bundle(zip_path)
+    _require_linear_boundary(bundle)
 
     vocab = bundle.vectorizer_read.vocabulary_
     coef_sparse = bundle.coef_read_sparse

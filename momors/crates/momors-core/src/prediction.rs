@@ -1105,8 +1105,22 @@ impl<M: WeightModel> Predictor<M> {
                         &mut result,
                     );
                     parent_has_small_kana = true;
+                    continue;
                 }
-                // それ以外の CONTINUE は単純スキップ (親情報は更新しない)
+
+                // 4. 通常の CONTINUE（複合ユニットの非先頭文字、例:「今日」の「日」）:
+                //    読みは親（ユニット先頭文字）にまとめて出力済みだが、このユニット
+                //    直後のマスあけは自分の位置で学習されている（trainer.py の +S は
+                //    複合ユニット最終文字の行に付く）。ここで境界モデルを問い合わせず
+                //    単純スキップすると、学習された境界ラベルが推論から一切参照されず
+                //    「今日」「昨日」直後のマスあけが構造的に欠落する（要修正前の挙動）。
+                let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                if has_split {
+                    result.kana_text.push(' ');
+                    result.kana_to_src_index.push(entry.orig_idx as usize);
+                    result.confidences.push(conf);
+                    result.decision_sources.push(DecisionSource::Lr);
+                }
                 continue;
             }
 

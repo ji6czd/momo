@@ -554,17 +554,26 @@ impl<M: WeightModel> Predictor<M> {
     /// どちらも境界モデルのマスあけ判断には手を加えない。中身を抜いた本文は
     /// 括弧が無かったときの自然文そのものなので、その語境界がそのまま正解になる。
     ///
-    /// 入出力の座標系は引数 `text` 基準。括弧が無ければ [`predict_normalized`] を
-    /// そのまま呼ぶ（オーバーヘッドゼロ）。Aside の中身は本関数を再帰的に通すので、
-    /// 入れ子や中身の引用符も扱える。
+    /// 入出力の座標系は引数 `text` 基準。括弧が無ければ最終的に
+    /// [`predict_normalized_with_feature_text`] へオーバーヘッドゼロで届く。
+    /// Aside の中身は本関数を再帰的に通すので、入れ子や中身の引用符も扱える。
     ///
-    /// [`predict_normalized`]: Predictor::predict_normalized
+    /// [`predict_normalized_with_feature_text`]: Predictor::predict_normalized_with_feature_text
     fn predict_with_brackets(&self, text: &str) -> Result<PredictionResult> {
         // --- Aside span を本文から抜く ---
         let (outer, spans) = extract_aside_spans(text);
 
         // --- 本文（Inline 括弧はここで外す）を推論 ---
-        let mut result = self.predict_inline(&outer.text)?;
+        // spans が非空なら、特徴量計算専用ビュー（Aside span を ASIDE_TOKEN に
+        // 置換したテキスト）を作り、隣接文字の bigram/trigram/kanji_run 等が
+        // 「注釈がそこにあった」ことを認識できるようにする（出力・マスあけは
+        // 従来通り outer.text 基準のまま、一切変えない）。
+        let mut result = if spans.is_empty() {
+            self.predict_inline(&outer.text)?
+        } else {
+            let feature_text = replace_aside_spans_with_token(text, &spans);
+            self.predict_inline_with_feature_text(&outer.text, &feature_text)?
+        };
         if !spans.is_empty() {
             // outer 座標 → text 座標
             remap_result_to_source(&mut result, text, &outer.byte_map);
@@ -620,11 +629,30 @@ impl<M: WeightModel> Predictor<M> {
     /// 中身は本文と一緒にフラット化して推論し、括弧文字だけを開き=後続に密着 /
     /// 閉じ=前接に密着させて書き戻す。マスあけには触らない。
     fn predict_inline(&self, text: &str) -> Result<PredictionResult> {
+        self.predict_inline_with_feature_text(text, text)
+    }
+
+    /// [`predict_inline`] の特徴量専用ビュー対応版。`feature_text` は
+    /// [`predict_with_brackets`] が Aside span を ASIDE_TOKEN に置換した
+    /// テキストを渡すことがある（無ければ `text` と同じ）。
+    ///
+    /// [`predict_inline`]: Predictor::predict_inline
+    /// [`predict_with_brackets`]: Predictor::predict_with_brackets
+    fn predict_inline_with_feature_text(
+        &self,
+        text: &str,
+        feature_text: &str,
+    ) -> Result<PredictionResult> {
         let (stripped, atoms) = strip_bracket_chars(text);
+        // Inline 括弧（および対応の取れない単独括弧）を INLINE_OPEN_TOKEN/
+        // INLINE_CLOSE_TOKEN に置換する。feature_text 側にだけ適用し、
+        // strip_bracket_chars の除去（出力・マスあけ用）には触れない。
+        let feature_text = replace_inline_brackets_with_token(feature_text);
         if atoms.is_empty() {
-            return self.predict_normalized(text);
+            return self.predict_normalized_with_feature_text(text, &feature_text);
         }
-        let mut result = self.predict_normalized(&stripped.text)?;
+        let mut result =
+            self.predict_normalized_with_feature_text(&stripped.text, &feature_text)?;
         remap_result_to_source(&mut result, text, &stripped.byte_map);
         splice_atoms(&mut result, text, atoms);
         Ok(result)
@@ -633,7 +661,20 @@ impl<M: WeightModel> Predictor<M> {
     /// 正規化済みテキストに対する推論本体。
     ///
     /// 結果の source_text とインデックスは正規化後テキスト基準。
-    fn predict_normalized(&self, text: &str) -> Result<PredictionResult> {
+    ///
+    /// `feature_text` は `text` と同じ実文字を同じ相対順序で含むが、
+    /// 括弧の位置が完全に除去されるのではなく圧縮アイデンティティ・トークン
+    /// （bracket.rs参照）に置き換えられている場合がある。これにより
+    /// bigram/trigram/kanji_run/kanji_pos_first 等の特徴量が「括弧がそこに
+    /// あった」ことを認識できる。出力・マスあけの決定は常に `text` 基準
+    /// （このプレースホルダ自身の行は特徴量計算後にフィルタして除く）。
+    /// `feature_text == text` のとき（大多数のケース、括弧の無い通常入力）は
+    /// 従来と全く同じ経路を通る（オーバーヘッドゼロ）。
+    fn predict_normalized_with_feature_text(
+        &self,
+        text: &str,
+        feature_text: &str,
+    ) -> Result<PredictionResult> {
         // --- 初期化 ---
         let mut result = PredictionResult {
             source_text: text.to_string(),
@@ -656,10 +697,35 @@ impl<M: WeightModel> Predictor<M> {
         }
 
         // 人名辞書マッチ (B/I フラグ + ユニット別固定読み)。辞書なしモデルでは
-        // 全て O で、NameFlag* 特徴量は発火しない。
+        // 全て O で、NameFlag* 特徴量は発火しない。name_readings（読みの
+        // フォールバックに使う）は常に実文字ベースの source_seq から計算する。
         let (name_flags, name_readings) =
             crate::name_dict::compute_name_matches(&source_seq, self.model.name_dict());
-        let all_feat_keys = compute_source_features(&source_seq, &name_flags);
+
+        let all_feat_keys: Vec<Vec<FeatureKey>> = if feature_text == text {
+            compute_source_features(&source_seq, &name_flags)
+        } else {
+            // 特徴量専用ビュー: プレースホルダを含むsource_seqで特徴量を計算し、
+            // プレースホルダ位置の行だけをフィルタして除く。プレースホルダは
+            // 実文書に出現しない合成コードポイントなので、cp一致でのフィルタが
+            // そのまま実文字と1対1・同順序で対応する。
+            let feat_seq = to_source_seq(feature_text);
+            let (feat_name_flags, _) =
+                crate::name_dict::compute_name_matches(&feat_seq, self.model.name_dict());
+            let feat_keys = compute_source_features(&feat_seq, &feat_name_flags);
+            let filtered: Vec<Vec<FeatureKey>> = feat_seq
+                .iter()
+                .zip(feat_keys)
+                .filter(|(entry, _)| !crate::bracket::is_identity_token(entry.cp))
+                .map(|(_, keys)| keys)
+                .collect();
+            debug_assert_eq!(
+                filtered.len(),
+                n,
+                "特徴量専用ビューのフィルタ後の行数が実テキストの文字数と一致しません"
+            );
+            filtered
+        };
         let all_feat_ids: Vec<Vec<u32>> = all_feat_keys
             .iter()
             .map(|keys| lookup_feature_ids(keys, &self.model))
@@ -1639,6 +1705,51 @@ fn strip_bracket_chars(text: &str) -> (Removed, Vec<Atom>) {
     )
 }
 
+/// [`extract_aside_spans`] の特徴量専用ビュー版。span を完全に除去せず、
+/// 1個の ASIDE_TOKEN（bracket.rs参照）に置き換えたテキストを返す。
+///
+/// 出力・マスあけの決定には使わない（それは [`extract_aside_spans`] が
+/// 引き続き担う）。隣接する実文字の bigram/trigram/kanji_run/kanji_pos_first
+/// 等の特徴量が「注釈がそこにあった」ことを認識できるようにするためだけの
+/// テキストを作る。`spans` は `extract_aside_spans(text)` の戻り値をそのまま
+/// 渡すこと（同じ `text` に対して計算したものであること）。
+fn replace_aside_spans_with_token(text: &str, spans: &[AsideSpan]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut span_iter = spans.iter().peekable();
+    let mut b = 0usize;
+    while b < text.len() {
+        if let Some(sp) = span_iter.next_if(|sp| sp.pos == b) {
+            out.push(bracket::ASIDE_TOKEN);
+            b = sp.close_pos + sp.close.len_utf8();
+            continue;
+        }
+        let c = text[b..].chars().next().expect("char boundary");
+        out.push(c);
+        b += c.len_utf8();
+    }
+    out
+}
+
+/// [`strip_bracket_chars`] の特徴量専用ビュー版。括弧文字を完全に除去せず、
+/// INLINE_OPEN_TOKEN/INLINE_CLOSE_TOKEN（bracket.rs参照）に置き換えたテキスト
+/// を返す。出力・マスあけの決定には使わない（それは [`strip_bracket_chars`]
+/// が引き続き担う）。個々の括弧字形はbigram/trigram特徴量にとって希少すぎて
+/// 汎化しないため、圧縮トークンに置き換える。
+fn replace_inline_brackets_with_token(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if let Some((role, _)) = bracket::lookup(c) {
+            out.push(match role {
+                Role::Open => bracket::INLINE_OPEN_TOKEN,
+                Role::Close => bracket::INLINE_CLOSE_TOKEN,
+            });
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// かな列へ原子を挿入する。
 ///
 /// `result` は `text` 座標の推論結果。原子は本来の位置へ、[`Side`] に従って
@@ -2279,6 +2390,54 @@ mod tests {
         assert!(atoms.is_empty());
     }
 
+    // --- 特徴量専用ビュー（圧縮アイデンティティ・トークン） ---
+
+    #[test]
+    fn replace_inline_brackets_with_token_keeps_content_and_position() {
+        let out = replace_inline_brackets_with_token("a「b」c");
+        assert_eq!(
+            out,
+            format!(
+                "a{}b{}c",
+                bracket::INLINE_OPEN_TOKEN,
+                bracket::INLINE_CLOSE_TOKEN
+            )
+        );
+    }
+
+    #[test]
+    fn replace_inline_brackets_with_token_none_when_absent() {
+        let out = replace_inline_brackets_with_token("あいう");
+        assert_eq!(out, "あいう");
+    }
+
+    #[test]
+    fn replace_aside_spans_with_token_drops_content() {
+        let text = "週末（３連休）カラオケ";
+        let (_, spans) = extract_aside_spans(text);
+        let out = replace_aside_spans_with_token(text, &spans);
+        assert_eq!(out, format!("週末{}カラオケ", bracket::ASIDE_TOKEN));
+    }
+
+    #[test]
+    fn replace_aside_spans_with_token_combines_with_inline_replacement() {
+        // predict_with_brackets が実際に組み立てる順序（Aside→ASIDE_TOKEN、
+        // その後Inline→INLINE_*_TOKEN）を通しで確認する。
+        let text = "オケ（オーケストラ）の「団員」募集";
+        let (_, spans) = extract_aside_spans(text);
+        let feature_text = replace_aside_spans_with_token(text, &spans);
+        let feature_text = replace_inline_brackets_with_token(&feature_text);
+        assert_eq!(
+            feature_text,
+            format!(
+                "オケ{}の{}団員{}募集",
+                bracket::ASIDE_TOKEN,
+                bracket::INLINE_OPEN_TOKEN,
+                bracket::INLINE_CLOSE_TOKEN
+            )
+        );
+    }
+
     // --- 合成（splice_atoms） ---
 
     #[test]
@@ -2707,6 +2866,33 @@ mod tests {
         for text in &inputs {
             let _ = predictor.predict(text).expect("crash しないこと");
         }
+    }
+
+    #[test]
+    fn predict_with_brackets_uses_feature_view_without_crashing_on_old_model() {
+        // fixture.mbm は圧縮アイデンティティ・トークン（bracket.rs参照）の
+        // 語彙を持たない旧モデルだが、特徴量専用ビューの構築・フィルタ・
+        // lookup_feature_ids への受け渡しが、未知語彙（OOV）を無視するだけで
+        // クラッシュしないことを確認する（後方互換）。出力・マスあけは
+        // strip/Atom/splice経路のまま変わらないはず。
+        let config = PredictorConfig::new(fixture_model_path());
+        let predictor: Predictor = Predictor::load(config).unwrap();
+
+        // Inline（開き括弧の直後）
+        let inline = predictor.predict("a「b」c").expect("crash しないこと");
+        assert_eq!(inline.kana_text(), "a「b」c");
+
+        // Aside（span丸ごと）
+        let aside = predictor
+            .predict("週末（３連休）カラオケ")
+            .expect("crash しないこと");
+        assert!(!aside.kana_text().is_empty());
+
+        // 入れ子・複数括弧
+        let nested = predictor
+            .predict("オケ（オーケストラ）の「団員」募集")
+            .expect("crash しないこと");
+        assert!(!nested.kana_text().is_empty());
     }
 
     #[test]

@@ -5,11 +5,13 @@ trainer.py の単体テスト
   - KUTOUTEN 定数
 """
 import pytest
+from momo_py.bracket import ASIDE_TOKEN, INLINE_CLOSE_TOKEN, INLINE_OPEN_TOKEN, LABEL_CONTEXT_ONLY
 from momo_py.trainer import (
     KUTOUTEN,
     _check_japanese_reading,
     _check_non_ascii_identity,
     _load_sentences,
+    _tokenize_bracket_sentences,
     create_data,
     is_suspicious,
     process_line_to_tsv,
@@ -366,6 +368,58 @@ class TestCreateDataNameDict:
         out = tmp_path / "basic_data.tsv"
         create_data(str(raw), str(out))
         assert not (tmp_path / "person_name_dic.tsv").exists()
+
+
+# ------------------------------------------------------------------ #
+# 括弧のトークン化（学習/推論のstrip不一致解消。bracket.py参照）
+# ------------------------------------------------------------------ #
+class TestTokenizeBracketSentences:
+    def test_no_bracket_returns_single_sentence(self):
+        rows = process_line_to_tsv("東京だ。\tトー/キョー/ダ/。", 1)
+        sentences = _tokenize_bracket_sentences(rows)
+        assert len(sentences) == 1
+        assert sentences[0] == rows
+
+    def test_inline_bracket_becomes_token_not_removed(self):
+        rows = process_line_to_tsv("先「あ」だ。\tセン/「/ア/」/ダ/。", 1)
+        sentences = _tokenize_bracket_sentences(rows)
+        assert len(sentences) == 1
+        chars = [line.split("\t")[0] for line in sentences[0]]
+        assert chars == ["先", INLINE_OPEN_TOKEN, "あ", INLINE_CLOSE_TOKEN, "だ", "。"]
+
+    def test_aside_bracket_becomes_separate_sentence(self):
+        rows = process_line_to_tsv(
+            "東京（首都）です。\tトー/キョー/（/シュ/ト/）/デ/ス/。", 1
+        )
+        sentences = _tokenize_bracket_sentences(rows)
+        assert len(sentences) == 2
+        main_chars = [line.split("\t")[0] for line in sentences[0]]
+        sub_chars = [line.split("\t")[0] for line in sentences[1]]
+        assert main_chars == ["東", "京", ASIDE_TOKEN, "で", "す", "。"]
+        assert sub_chars == ["首", "都"]
+
+
+class TestCreateDataBracketTokenize:
+    def test_aside_content_written_as_separate_block(self, tmp_path):
+        raw = tmp_path / "basic_raw.tsv"
+        raw.write_text(
+            "東京（首都）です。\tトー/キョー/（/シュ/ト/）/デ/ス/。\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "basic_data.tsv"
+        create_data(str(raw), str(out))
+
+        sentences = _load_sentences(str(out))
+        assert len(sentences) == 2
+        assert [row[0] for row in sentences[0]] == ["東", "京", ASIDE_TOKEN, "で", "す", "。"]
+        assert [row[0] for row in sentences[1]] == ["首", "都"]
+        # プレースホルダ行のラベルはLABEL_CONTEXT_ONLY（学習対象から除外する目印）
+        aside_row = [row for row in sentences[0] if row[0] == ASIDE_TOKEN][0]
+        assert aside_row[1] == LABEL_CONTEXT_ONLY
+        # 括弧の実文字そのものは出力TSVに残らない（token化されている）
+        tsv = out.read_text(encoding="utf-8")
+        assert "（\t" not in tsv
+        assert "）\t" not in tsv
 
 
 # ------------------------------------------------------------------ #

@@ -94,6 +94,31 @@ pub(crate) fn is_pair(open: char, close: char) -> bool {
     )
 }
 
+/// 特徴量計算専用の圧縮アイデンティティ・トークン（Private Use Area）。
+///
+/// 個々の括弧字形（「『""''【 など）はbigram/trigram特徴量にとって希少すぎて
+/// 汎化しない。かといって完全にstripすると、隣接文字のkanji_run/kanji_pos_first/
+/// bigram/trigramが「括弧がそこにあった」ことを一切知りえず、区切りとして
+/// 認識できない（実測: momo-inspect trace で「、」が読み分けに効く主因は
+/// bi_p1_s/type_tri_p2_p1_s のような隣接ベースの特徴量だった）。
+///
+/// そこで、特徴量計算専用の系列（出力・マスあけを決めるstrip/Atom/splice経路とは
+/// 別）でだけ、括弧の位置をこの3値の圧縮トークンに置き換えて残す。ctypeは
+/// 既存のSymbolOpen/SymbolClose（get_char_type）のままでよい（役割はそちらで
+/// 十分圧縮済み）。この位置自体には読み/境界の予測はさせない。
+///
+/// momo-py/src/momo_py/bracket.py と同じコードポイントを使うこと。
+/// ずれるとモデルの語彙（char_s等の特徴量キー）がPython/Rustで食い違う。
+pub(crate) const INLINE_OPEN_TOKEN: char = '\u{E000}';
+pub(crate) const INLINE_CLOSE_TOKEN: char = '\u{E001}';
+pub(crate) const ASIDE_TOKEN: char = '\u{E002}';
+
+/// `cp` が上記3つの圧縮アイデンティティ・トークンのいずれかか。
+/// 特徴量専用ビューからプレースホルダ行をフィルタして除くのに使う。
+pub(crate) fn is_identity_token(cp: u32) -> bool {
+    cp == INLINE_OPEN_TOKEN as u32 || cp == INLINE_CLOSE_TOKEN as u32 || cp == ASIDE_TOKEN as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +162,24 @@ mod tests {
         assert_eq!(lookup('、'), None);
         assert_eq!(lookup('…'), None);
         assert_eq!(lookup('A'), None);
+    }
+
+    #[test]
+    fn is_identity_token_recognizes_all_three_and_nothing_else() {
+        assert!(is_identity_token(INLINE_OPEN_TOKEN as u32));
+        assert!(is_identity_token(INLINE_CLOSE_TOKEN as u32));
+        assert!(is_identity_token(ASIDE_TOKEN as u32));
+        assert!(!is_identity_token('「' as u32));
+        assert!(!is_identity_token('あ' as u32));
+    }
+
+    #[test]
+    fn identity_tokens_match_python_bracket_py() {
+        // momo-py/src/momo_py/bracket.py の INLINE_OPEN_TOKEN/INLINE_CLOSE_TOKEN/
+        // ASIDE_TOKEN と同じコードポイントであること（ずれるとモデルの語彙が
+        // Python/Rustで食い違う）。
+        assert_eq!(INLINE_OPEN_TOKEN as u32, 0xE000);
+        assert_eq!(INLINE_CLOSE_TOKEN as u32, 0xE001);
+        assert_eq!(ASIDE_TOKEN as u32, 0xE002);
     }
 }

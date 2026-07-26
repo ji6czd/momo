@@ -63,6 +63,15 @@ F_NAME_N1 = "name_n1"
 # 特徴量として発火させる人名フラグ値（O は発火させない）
 _NAME_ACTIVE_FLAGS = ("B", "I")
 
+# 括弧seam文脈フラグ（値は Role×Treatment の4値。utilities/bracket_boundary_experiment.py
+# の strip 変換が生成する。実験用、trainer.py本番経路では未使用＝常にNone）
+F_BRACKET_S = "bracket_s"
+F_BRACKET_P1 = "bracket_p1"
+F_BRACKET_N1 = "bracket_n1"
+
+# 特徴量として発火させる括弧フラグ値（"" は発火させない＝seamでない位置）
+_BRACKET_ACTIVE_FLAGS = ("INLINE_OPEN", "INLINE_CLOSE", "ASIDE_OPEN", "ASIDE_CLOSE")
+
 
 def get_units(text: str) -> List[Tuple[str, int, str]]:
     """
@@ -131,6 +140,7 @@ def compute_source_features(
     source_seq: List[SourceEntry],
     window: int = 7,
     name_flags: List[str] | None = None,
+    bracket_flags: List[str] | None = None,
 ) -> List[FeatureDict]:
     """
     ソース文字系列全体に対して、各文字の文脈特徴量を一括計算する。
@@ -144,12 +154,21 @@ def compute_source_features(
       None の場合は人名特徴量を出力しない（人名辞書なしの従来動作）。
       学習・推論とも name_dict.compute_name_flags() で生成すること
       （学習データの正解マークを直接渡してはならない）。
+    bracket_flags: 括弧seam文脈フラグ（INLINE_OPEN/INLINE_CLOSE/ASIDE_OPEN/
+      ASIDE_CLOSE、該当なしは ""）の系列。source_seq と同じ長さ。None の場合は
+      括弧文脈特徴量を出力しない（従来動作）。source_seq は括弧文字そのものを
+      strip 済みである前提（seam＝strip直前/直後の位置にフラグを立てる）。
     """
     if window not in (4, 5, 7):
         raise ValueError(f"window は 4, 5, 7 のいずれかでなければなりません: {window}")
     if name_flags is not None and len(name_flags) != len(source_seq):
         raise ValueError(
             f"name_flags の長さ（{len(name_flags)}）が "
+            f"source_seq（{len(source_seq)}）と一致しません"
+        )
+    if bracket_flags is not None and len(bracket_flags) != len(source_seq):
+        raise ValueError(
+            f"bracket_flags の長さ（{len(bracket_flags)}）が "
             f"source_seq（{len(source_seq)}）と一致しません"
         )
     result: List[FeatureDict] = []
@@ -295,6 +314,16 @@ def compute_source_features(
                 features[f"{F_NAME_P1}={name_flags[i - 1]}"] = 1.0
             if i < n - 1 and name_flags[i + 1] in _NAME_ACTIVE_FLAGS:
                 features[f"{F_NAME_N1}={name_flags[i + 1]}"] = 1.0
+
+        # 括弧seam文脈フラグ（自分・前1・後1）。stripされた括弧の直前/直後の
+        # 位置にRole×Treatmentの4値が立つ（人名フラグと同じ配置パターン）。
+        if bracket_flags is not None:
+            if bracket_flags[i] in _BRACKET_ACTIVE_FLAGS:
+                features[f"{F_BRACKET_S}={bracket_flags[i]}"] = 1.0
+            if i > 0 and bracket_flags[i - 1] in _BRACKET_ACTIVE_FLAGS:
+                features[f"{F_BRACKET_P1}={bracket_flags[i - 1]}"] = 1.0
+            if i < n - 1 and bracket_flags[i + 1] in _BRACKET_ACTIVE_FLAGS:
+                features[f"{F_BRACKET_N1}={bracket_flags[i + 1]}"] = 1.0
 
         result.append(features)
 

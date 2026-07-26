@@ -24,6 +24,7 @@ from .features import (
     FeatureDict,
     LABEL_CONTINUE,
     LABEL_SKIP,
+    MORA_SPLIT,
 )
 from .utils import (
     split_on_unescaped_slash,
@@ -42,6 +43,7 @@ from .name_dict import (
     name_flag_for_unit,
     parse_name_marks,
 )
+from .bracket import LABEL_CONTEXT_ONLY, tokenize_for_training
 from .bundle import LRModelBundle, SINGLE_KANJI_DICT_FILENAME
 from .exporter import export, export_float
 
@@ -396,6 +398,24 @@ def _extract_name_entries(rows: List[str]) -> List[tuple]:
 
 
 # ==========================================
+# 🌟 4.7 括弧のトークン化による文単位の分割
+# ==========================================
+def _tokenize_bracket_sentences(tsv_lines: List[str]) -> List[List[str]]:
+    """process_line_to_tsv() の出力を、bracket.py の圧縮アイデンティティ・
+    トークン方式（tokenize_for_training）で変換した「文単位のTSV行リスト」に
+    変換する（学習/推論の入力を揃えるため。bracket.py参照）。
+
+    ASIDE括弧（（）等）を含む場合、中身は独立した文として別要素になる
+    （Rust側の再帰独立推論と対応させる）。括弧を含まない場合はそのまま
+    1文として返す。
+    """
+    rows = [line.split("\t") for line in tsv_lines]
+    main_rows, sub_sentences = tokenize_for_training(rows)
+    sentences = [main_rows] + sub_sentences
+    return [["\t".join(row) for row in sentence] for sentence in sentences if sentence]
+
+
+# ==========================================
 # 🌟 5. メインルーチン
 # ==========================================
 def create_data(
@@ -416,8 +436,12 @@ def create_data(
             continue
         rows = process_line_to_tsv(line, i, stats)
         if rows:
-            all_tsv.extend(rows)
-            all_tsv.append("")
+            # 括弧をbracket.pyの圧縮アイデンティティ・トークン方式で変換し、
+            # Aside中身は独立した文へ分離する（学習/推論のstrip不一致が
+            # BOUNDARY誤りの原因だったため。bracket.py参照）。
+            for sentence_lines in _tokenize_bracket_sentences(rows):
+                all_tsv.extend(sentence_lines)
+                all_tsv.append("")
             success += 1
             # {…} マークから人名と読みを収集（辞書構築用）
             for surface, reading in _extract_name_entries(rows):
@@ -627,11 +651,18 @@ def train(
         features = compute_source_features(
             source_seq, window=window, name_flags=name_flags
         )
-        X_dicts.extend(features)
-
         y_read, y_boundary = _split_labels(raw_labels)
-        Y_read.extend(y_read)
-        Y_boundary.extend(y_boundary)
+
+        # LABEL_CONTEXT_ONLY（括弧の圧縮アイデンティティ・トークン、bracket.py参照）
+        # の行は、隣接文字のbigram/trigram/kanji_run計算にはsource_seq経由で
+        # 既に寄与済みだが、この行自体には読み/境界を学習させない
+        # （実際の出力・マスあけはRust推論側のstrip/Atom/splice経路が別途決める）。
+        for feat, yr, yb, raw in zip(features, y_read, y_boundary, raw_labels):
+            if raw.replace(MORA_SPLIT, "") == LABEL_CONTEXT_ONLY:
+                continue
+            X_dicts.append(feat)
+            Y_read.append(yr)
+            Y_boundary.append(yb)
 
     print(f"\n📊 学習サンプル数: {len(X_dicts)}")
 

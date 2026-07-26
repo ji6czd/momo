@@ -236,6 +236,17 @@ pub fn get_char_type(c: char) -> CharType {
         return CharType::Numeric;
     }
 
+    // --- 括弧の圧縮アイデンティティ・トークン（bracket.rs参照）---
+    // 実文書には出現しない合成コードポイント（Private Use Area）なので、
+    // Pythonの記号テーブル（tools/gen_char_type_rs.py で自動生成される
+    // symbol_type_lookup）には載せず、ここで直接分類する。
+    if c == crate::bracket::INLINE_OPEN_TOKEN || c == crate::bracket::ASIDE_TOKEN {
+        return CharType::SymbolOpen;
+    }
+    if c == crate::bracket::INLINE_CLOSE_TOKEN {
+        return CharType::SymbolClose;
+    }
+
     // --- 記号ルックアップ ---
     // Python は unicodedata.category() の P*/S* を先に判定する。
     // テーブルがその挙動を再現する。
@@ -464,6 +475,22 @@ mod tests {
         // その他の記号
         assert_eq!(get_char_type('+'), CharType::Symbol);
         assert_eq!(get_char_type('='), CharType::Symbol);
+    }
+
+    #[test]
+    fn bracket_identity_tokens_classify_as_symbol_open_close() {
+        assert_eq!(
+            get_char_type(crate::bracket::INLINE_OPEN_TOKEN),
+            CharType::SymbolOpen
+        );
+        assert_eq!(
+            get_char_type(crate::bracket::INLINE_CLOSE_TOKEN),
+            CharType::SymbolClose
+        );
+        assert_eq!(
+            get_char_type(crate::bracket::ASIDE_TOKEN),
+            CharType::SymbolOpen
+        );
     }
 
     #[test]

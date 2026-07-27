@@ -54,7 +54,6 @@ source = { editable = "." }
 dependencies = [
     { name = "joblib" },
     { name = "lightgbm" },
-    { name = "momors-py" },
     { name = "numpy" },
     { name = "scikit-learn" },
     { name = "scipy" },
@@ -69,7 +68,6 @@ dev = [
 requires-dist = [
     { name = "joblib" },
     { name = "lightgbm", specifier = ">=4.7.0" },
-    { name = "momors-py", path = "../dist/momors_py-0.8.12-cp313-abi3-win_amd64.whl" },
     { name = "numpy" },
     { name = "scikit-learn" },
     { name = "scipy" },
@@ -77,14 +75,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.2" }]
-
-[[package]]
-name = "momors-py"
-version = "0.8.12"
-source = { path = "../dist/momors_py-0.8.12-cp313-abi3-win_amd64.whl" }
-wheels = [
-    { filename = "momors_py-0.8.12-cp313-abi3-win_amd64.whl", hash = "sha256:539e20236e473c0243ebe6b4ff1137d16338195bd176a19e229d966ea47328b6" },
-]
 
 [[package]]
 name = "narwhals"

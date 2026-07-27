@@ -12,7 +12,6 @@ dependencies = [
     "joblib",
     "numpy",
     "scipy",
-    "momors-py",
     "lightgbm>=4.7.0",
 ]
 
@@ -26,9 +25,6 @@ makedic = "momo_py.makedic:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[tool.uv.sources]
-momors-py = { path = "../dist/momors_py-0.8.12-cp313-abi3-win_amd64.whl" }
 
 [dependency-groups]
 dev = [

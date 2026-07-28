@@ -27,7 +27,10 @@
 //!
 //! - 一桁（モデル）・漢数字ラン（既存の [`crate::numeric`] 経由）。
 //! - つ（多桁が実在しない＝ルール不関与。1〜9つ は全てモデル）。
-//! - 本・匹・回 等、連濁/促音の音韻規則で決まる助数詞（値の表にならない）。
+//! - 匹・階・本・版・分 等、連濁/促音の音韻規則で決まる助数詞はこの表
+//!   （[`CounterSpec`]、値そのものをキーにする）ではなく、末尾の数字だけを
+//!   キーにする [`PhonoSpec`]/[`resolve_phono`] で別扱いする（下の節）。
+//!   回のように点字上どの桁でも読みが変わらない助数詞は登録不要。
 
 use crate::char_type::CharType;
 use crate::featurize::SourceEntry;
@@ -129,6 +132,131 @@ pub(crate) fn resolve_multi(
         return None;
     }
     Some(spec.action(value))
+}
+
+// ============================================================
+// 音韻助数詞（連濁・促音）
+// ============================================================
+
+/// 音韻規則（連濁・半濁音化）で読みが決まる助数詞（匹・階…）。
+///
+/// 日/人と違い、値そのものではなく**末尾の数字（一の位）だけ**で読みが決まるため、
+/// 桁数に関係なく同じ表がそのまま使える（多桁専用の例外カードは不要）。
+/// 点字では数字は数符で綴られ発音上の促音（っ）は表れないので、ここで守るのは
+/// **助数詞側に残る子音の変化（半濁音化・連濁）だけ**でよい。
+/// 促音のみで子音が変わらない助数詞（回 等）はそもそも表が不要（発火させない）。
+/// 漢数字表記（三千匹 等）はここでは扱わない（既存の [`crate::numeric`] 経由）。
+///
+/// ## 一桁だけ意味が割れる助数詞（[`PhonoSpec::min_digits`]）
+///
+/// 分は「時間（フン）」と「歩合（ブ、割/分/厘の分）」で読みが違うが、歩合の分は
+/// 割/分/厘という一桁ずつの位取り表記の一桁（百分率の小数第2位）なので、
+/// **多桁の分は時間としか読めない**（曖昧さゼロ）。曖昧なのは一桁だけなので、
+/// `min_digits: 2` にして一桁では発火させず（読みはモデル＝学習データに委ねる）、
+/// 二桁以上だけこの表で確定させる。
+struct PhonoSpec {
+    /// 助数詞のコードポイント。
+    counter_cp: u32,
+    /// 例外の無い末尾（2・4・5・7・9…）での読み。
+    default_reading: &'static str,
+    /// (末尾の数字 0..=9, その読み) の完全表。`0` は「十の位由来」の意（値そのものが
+    /// 0 のときは対象外・[`resolve_phono`] 側でガードする）。
+    overrides: &'static [(u32, &'static str)],
+    /// 発火に必要な最小桁数。ほとんどは1（一桁からでも発火）。分だけ2
+    /// （一桁は歩合と衝突するため発火させず、モデル任せにする）。
+    min_digits: usize,
+}
+
+const PHONO_COUNTERS: &[PhonoSpec] = &[
+    // 匹: は行なので半濁音化(ぴ)が生き残る。1/6/8/十の位→ピキ・3→ビキ・他ヒキ。
+    PhonoSpec {
+        counter_cp: '匹' as u32,
+        default_reading: "ヒキ",
+        overrides: &[
+            (1, "ピキ"),
+            (6, "ピキ"),
+            (8, "ピキ"),
+            (0, "ピキ"),
+            (3, "ビキ"),
+        ],
+        min_digits: 1,
+    },
+    // 階: か行に半濁音は無く促音も点字では消えるため、変化として残るのは3の連濁だけ。
+    // （回は階と同じか行だが3も連濁しないため、点字上は常にカイ→登録不要。）
+    PhonoSpec {
+        counter_cp: '階' as u32,
+        default_reading: "カイ",
+        overrides: &[(3, "ガイ")],
+        min_digits: 1,
+    },
+    // 本: 匹と同型（は行）。1/6/8/十の位→ポン・3→ボン・他ホン。
+    PhonoSpec {
+        counter_cp: '本' as u32,
+        default_reading: "ホン",
+        overrides: &[
+            (1, "ポン"),
+            (6, "ポン"),
+            (8, "ポン"),
+            (0, "ポン"),
+            (3, "ボン"),
+        ],
+        min_digits: 1,
+    },
+    // 分: 歩合（割/分/厘の分＝ブ）は定義上つねに一桁なので、一桁は曖昧（時間フンとの
+    // 衝突）。多桁の分は時間としか読めないので min_digits: 2 にして一桁を除外する。
+    // 一桁の読み分け（フン/ブ）は学習データ（隣接する「割」等の文脈）に委ねる。
+    PhonoSpec {
+        counter_cp: '分' as u32,
+        default_reading: "フン",
+        overrides: &[
+            (1, "プン"),
+            (3, "プン"),
+            (4, "プン"),
+            (6, "プン"),
+            (8, "プン"),
+            (0, "プン"),
+        ],
+        min_digits: 2,
+    },
+    // 版: は行だが匹/本と違い3も連濁せず半濁音のまま（さんぱん、さんばんではない）。
+    // 実例: 第一版=だいいっぱん・第二版=だいにはん・第三版=だいさんぱん。
+    PhonoSpec {
+        counter_cp: '版' as u32,
+        default_reading: "ハン",
+        overrides: &[
+            (1, "パン"),
+            (6, "パン"),
+            (8, "パン"),
+            (0, "パン"),
+            (3, "パン"),
+        ],
+        min_digits: 1,
+    },
+];
+
+/// 音韻助数詞 `counter_cp` の、数字ラン値 `value`（桁数 `digit_count`）に対する読みを返す。
+///
+/// 未登録の助数詞、または `digit_count` が [`PhonoSpec::min_digits`] に満たない
+/// （＝分の一桁のように意味が割れる）場合は `None`（＝通常経路・モデルに委ねる）。
+pub(crate) fn resolve_phono(
+    counter_cp: u32,
+    value: u32,
+    digit_count: usize,
+) -> Option<&'static str> {
+    let spec = PHONO_COUNTERS.iter().find(|s| s.counter_cp == counter_cp)?;
+    if digit_count < spec.min_digits {
+        return None;
+    }
+    if value == 0 {
+        // 値そのものが0（"0匹"）は十の位由来ではないので対象外・既定読みへ。
+        return Some(spec.default_reading);
+    }
+    Some(
+        match spec.overrides.iter().find(|(d, _)| *d == value % 10) {
+            Some((_, reading)) => reading,
+            None => spec.default_reading,
+        },
+    )
 }
 
 /// 算用数字（半角/全角）1文字のコードポイントを 0..=9 に変換。数字でなければ `None`。
@@ -267,5 +395,135 @@ mod tests {
         assert_eq!(arabic_run(&s, 0), Some((3, 1)));
         let s = to_source_seq("日");
         assert_eq!(arabic_run(&s, 0), None);
+    }
+
+    // --- resolve_phono（音韻助数詞） ---
+
+    /// 値 `v` の桁数（テスト用: `resolve_phono` の `digit_count` 引数に渡す）。
+    fn digits(v: u32) -> usize {
+        v.to_string().len()
+    }
+
+    #[test]
+    fn phono_hiki_classes() {
+        // 半濁音化: 1・6・8・十の位
+        for v in [1, 6, 8, 10, 16, 18, 20, 100] {
+            assert_eq!(
+                resolve_phono('匹' as u32, v, digits(v)),
+                Some("ピキ"),
+                "v={v}"
+            );
+        }
+        // 連濁: 3
+        for v in [3, 13, 23] {
+            assert_eq!(
+                resolve_phono('匹' as u32, v, digits(v)),
+                Some("ビキ"),
+                "v={v}"
+            );
+        }
+        // 無変化
+        for v in [2, 4, 5, 7, 9, 12, 24] {
+            assert_eq!(
+                resolve_phono('匹' as u32, v, digits(v)),
+                Some("ヒキ"),
+                "v={v}"
+            );
+        }
+    }
+
+    #[test]
+    fn phono_zero_is_not_juu() {
+        // 値そのものが0（"0匹"）は十の位由来ではないので既定読みへ。
+        assert_eq!(resolve_phono('匹' as u32, 0, 1), Some("ヒキ"));
+    }
+
+    #[test]
+    fn phono_kai_only_rendaku_at_three() {
+        assert_eq!(resolve_phono('階' as u32, 3, 1), Some("ガイ"));
+        assert_eq!(resolve_phono('階' as u32, 13, 2), Some("ガイ"));
+        // 促音のみのクラスは点字では既定読みに潰れる。
+        for v in [1, 6, 8, 10] {
+            assert_eq!(
+                resolve_phono('階' as u32, v, digits(v)),
+                Some("カイ"),
+                "v={v}"
+            );
+        }
+        for v in [2, 4, 5, 7, 9] {
+            assert_eq!(resolve_phono('階' as u32, v, 1), Some("カイ"), "v={v}");
+        }
+    }
+
+    #[test]
+    fn phono_unregistered_counter() {
+        // 回は連濁も無いため未登録（常に既定読みでよい＝表を持たない）。
+        assert_eq!(resolve_phono('回' as u32, 3, 1), None);
+        assert_eq!(resolve_phono('日' as u32, 1, 1), None);
+    }
+
+    #[test]
+    fn phono_hon_classes() {
+        // 匹と同型: 半濁音化(1・6・8・十の位)と連濁(3)が両方ある。
+        for v in [1, 6, 8, 10, 16, 18] {
+            assert_eq!(
+                resolve_phono('本' as u32, v, digits(v)),
+                Some("ポン"),
+                "v={v}"
+            );
+        }
+        for v in [3, 13, 23] {
+            assert_eq!(
+                resolve_phono('本' as u32, v, digits(v)),
+                Some("ボン"),
+                "v={v}"
+            );
+        }
+        for v in [2, 4, 5, 7, 9] {
+            assert_eq!(resolve_phono('本' as u32, v, 1), Some("ホン"), "v={v}");
+        }
+    }
+
+    #[test]
+    fn phono_han_three_stays_semivoiced() {
+        // 版は本/匹と違い3も連濁しない（さんぱん、さんばんではない）。
+        assert_eq!(resolve_phono('版' as u32, 3, 1), Some("パン"));
+        for v in [1, 6, 8, 10] {
+            assert_eq!(
+                resolve_phono('版' as u32, v, digits(v)),
+                Some("パン"),
+                "v={v}"
+            );
+        }
+        for v in [2, 4, 5, 7, 9] {
+            assert_eq!(resolve_phono('版' as u32, v, 1), Some("ハン"), "v={v}");
+        }
+    }
+
+    #[test]
+    fn phono_fun_single_digit_deferred_to_model() {
+        // 分の一桁は歩合（ブ）と衝突するので発火しない（min_digits: 2）。
+        for v in 0..=9 {
+            assert_eq!(resolve_phono('分' as u32, v, 1), None, "v={v}");
+        }
+    }
+
+    #[test]
+    fn phono_fun_multi_digit_is_unambiguous() {
+        // 歩合の分は定義上つねに一桁なので、多桁は時間（フン/プン）としか読めない。
+        for v in [11, 13, 14, 16, 18, 20, 100] {
+            assert_eq!(
+                resolve_phono('分' as u32, v, digits(v)),
+                Some("プン"),
+                "v={v}"
+            );
+        }
+        for v in [12, 15, 17, 19, 22] {
+            assert_eq!(
+                resolve_phono('分' as u32, v, digits(v)),
+                Some("フン"),
+                "v={v}"
+            );
+        }
     }
 }

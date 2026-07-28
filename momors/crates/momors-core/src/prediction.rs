@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use crate::Result;
 use crate::bracket::{self, Role, Treatment};
 use crate::char_type::{CharType, get_char_type};
-use crate::counter::{CounterAction, arabic_run, counter_needs_gate, resolve_multi};
+use crate::counter::{CounterAction, arabic_run, counter_needs_gate, resolve_multi, resolve_phono};
 use crate::feature::FeatureKey;
 use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
 use crate::model::MomoModel;
@@ -920,6 +920,62 @@ impl<M: WeightModel> Predictor<M> {
                     skip_until = run_end + 1;
                     continue;
                 }
+            }
+
+            // ============================================================
+            // 音韻助数詞パス: 「算用数字ラン＋匹/階/本/版/分」の読みを末尾の数字から確定する
+            //
+            // 日/人と違い一桁からも発火する（学習データを桁数分書かずに済ませるのが
+            // 狙い）。ゲートは無い（「2024日本」のような衝突語がこれらの助数詞には
+            // 実質無いため）。数字自体の読みには触れない（点字は数符で綴るため）。
+            // 分だけは一桁が歩合（ブ）と衝突するため min_digits により一桁で
+            // 発火しない（resolve_phono 側でガード、モデル＝学習データに委ねる）。
+            // ============================================================
+            if entry.ctype == CharType::Numeric
+                && (i == 0 || source_seq[i - 1].ctype != CharType::Numeric)
+                && let Some((value, run_end)) = arabic_run(&source_seq, i)
+                && run_end < n
+                && let Some(reading) = resolve_phono(source_seq[run_end].cp, value, run_end - i)
+            {
+                let has_split =
+                    self.boundary_has_split(&all_feat_keys[run_end], &source_seq, run_end);
+
+                for digit in &source_seq[i..run_end] {
+                    self.emit_char_passthrough(
+                        digit,
+                        1.0,
+                        DecisionSource::FallbackCounter,
+                        &mut result,
+                    );
+                }
+                self.emit_label(
+                    &source_seq[run_end],
+                    reading,
+                    1.0,
+                    DecisionSource::FallbackCounter,
+                    &mut result,
+                );
+
+                parent_src_idx = Some(run_end);
+                parent_is_bypass = false;
+                parent_is_kanji = false;
+                parent_has_small_kana = false;
+                parent_kana_byte_end = result.kana_text.len();
+                last_fallback.clear();
+
+                if has_split {
+                    result.kana_text.push(' ');
+                    result
+                        .kana_to_src_index
+                        .push(source_seq[run_end].orig_idx as usize);
+                    result.confidences.push(1.0);
+                    result
+                        .decision_sources
+                        .push(DecisionSource::FallbackCounter);
+                }
+
+                skip_until = run_end + 1;
+                continue;
             }
 
             // ============================================================

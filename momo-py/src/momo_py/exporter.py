@@ -159,7 +159,7 @@ import numpy as np
 from scipy import sparse
 
 from .name_dict import NAME_DICT_FILENAME, parse_name_dict_text
-from .utils import parse_kanji_dict_tsv
+from .utils import parse_single_char_dict_tsv
 
 
 # =====================================================================
@@ -564,15 +564,15 @@ def _build_csc_weight_bytes(csr, data, n_classes: int, n_features: int) -> bytea
 
 def _load_bundle(zip_path: str) -> Tuple[Any, list, str]:
     """
-    momo の .zip モデルから joblib バンドル・人名辞書・単一漢字辞書を読み込む。
+    momo の .zip モデルから joblib バンドル・人名辞書・単一文字辞書を読み込む。
 
-    戻り値: (bundle, name_entries, single_kanji_text)
+    戻り値: (bundle, name_entries, single_char_text)
       bundle            : joblib でロードした LRModelBundle
       name_entries      : [(表層形, ユニット別読み or None), ...]（辞書なしモデルは空）
-      single_kanji_text : 単一漢字辞書 TSV の生テキスト
+      single_char_text  : 単一文字辞書 TSV の生テキスト
     """
-    # 単一漢字辞書のファイル名（モデルZIPへの同梱名・パッケージリソース名と共通）
-    SINGLE_KANJI_DICT_FILENAME = "single_character_dic.tsv"
+    # 単一文字辞書のファイル名（モデルZIPへの同梱名・パッケージリソース名と共通）
+    SINGLE_CHAR_DICT_FILENAME = "single_character_dic.tsv"
     tmp_dir = tempfile.mkdtemp()
     name_entries: list = []
     try:
@@ -587,25 +587,25 @@ def _load_bundle(zip_path: str) -> Tuple[Any, list, str]:
                 name_entries = parse_name_dict_text(
                     zf.read(NAME_DICT_FILENAME).decode("utf-8")
                 )
-            # 学習時に同梱された単一漢字辞書（旧ZIPで無い場合はパッケージ内蔵で代替）
-            if SINGLE_KANJI_DICT_FILENAME in zf.namelist():
-                single_kanji_text = zf.read(SINGLE_KANJI_DICT_FILENAME).decode("utf-8")
+            # 学習時に同梱された単一文字辞書（旧ZIPで無い場合はパッケージ内蔵で代替）
+            if SINGLE_CHAR_DICT_FILENAME in zf.namelist():
+                single_char_text = zf.read(SINGLE_CHAR_DICT_FILENAME).decode("utf-8")
             else:
                 from importlib import resources
 
-                single_kanji_text = (
+                single_char_text = (
                     resources.files("momo_py")
-                    / f"resources/{SINGLE_KANJI_DICT_FILENAME}"
+                    / f"resources/{SINGLE_CHAR_DICT_FILENAME}"
                 ).read_text(encoding="utf-8")
                 print(
-                    "⚠️  ZIPに単一漢字辞書が同梱されていないため、パッケージ内蔵の辞書を使用します。"
+                    "⚠️  ZIPに単一文字辞書が同梱されていないため、パッケージ内蔵の辞書を使用します。"
                 )
         bundle = joblib.load(os.path.join(tmp_dir, bundle_name))
     finally:
         import shutil
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    return bundle, name_entries, single_kanji_text
+    return bundle, name_entries, single_char_text
 
 
 def _build_boundary_cat_vocab_bytes(cat_names: list, cat_vocabs: dict) -> bytes:
@@ -785,24 +785,24 @@ def _build_name_dict_bytes(name_entries) -> bytes:
     return bytes(name_dict_bytes)
 
 
-def _build_kanji_dict_bytes(single_kanji_dict: dict) -> bytes:
-    """単一漢字辞書テーブルのバイト列を構築する。"""
-    kanji_dict_bytes = bytearray()
-    kanji_dict_bytes += struct.pack("<I", len(single_kanji_dict))
-    for kanji in sorted(single_kanji_dict):
-        readings = single_kanji_dict[kanji]
-        encoded = kanji.encode("utf-8")
-        assert len(encoded) <= 255, f"漢字キーが長すぎます: {kanji!r}"
-        kanji_dict_bytes.append(len(encoded))
-        kanji_dict_bytes += encoded
-        assert len(readings) <= 255, f"読みが多すぎます: {kanji!r}"
-        kanji_dict_bytes.append(len(readings))
+def _build_single_char_dict_bytes(single_char_dict: dict) -> bytes:
+    """単一文字辞書テーブルのバイト列を構築する。"""
+    single_char_dict_bytes = bytearray()
+    single_char_dict_bytes += struct.pack("<I", len(single_char_dict))
+    for ch in sorted(single_char_dict):
+        readings = single_char_dict[ch]
+        encoded = ch.encode("utf-8")
+        assert len(encoded) <= 255, f"文字キーが長すぎます: {ch!r}"
+        single_char_dict_bytes.append(len(encoded))
+        single_char_dict_bytes += encoded
+        assert len(readings) <= 255, f"読みが多すぎます: {ch!r}"
+        single_char_dict_bytes.append(len(readings))
         for reading in readings:
             r_enc = reading.encode("utf-8")
             assert len(r_enc) <= 255, f"読みが長すぎます: {reading!r}"
-            kanji_dict_bytes.append(len(r_enc))
-            kanji_dict_bytes += r_enc
-    return bytes(kanji_dict_bytes)
+            single_char_dict_bytes.append(len(r_enc))
+            single_char_dict_bytes += r_enc
+    return bytes(single_char_dict_bytes)
 
 
 def _write_sections(
@@ -814,7 +814,7 @@ def _write_sections(
     intercept_r_bytes: bytes,
     boundary_bytes: bytes,
     name_dict_bytes: bytes,
-    kanji_dict_bytes: bytes,
+    single_char_dict_bytes: bytes,
 ) -> None:
     print(f"💾 書き出し中: {out_path}")
     with open(out_path, "wb") as f:
@@ -825,7 +825,7 @@ def _write_sections(
         f.write(intercept_r_bytes)
         f.write(boundary_bytes)
         f.write(name_dict_bytes)
-        f.write(kanji_dict_bytes)
+        f.write(single_char_dict_bytes)
 
 
 # =====================================================================
@@ -838,7 +838,7 @@ def export(zip_path: str, out_path: str) -> None:
     momo の .zip モデルを C++/Rust 向け量子化バイナリ (.mbm) に変換して書き出す。
     """
     print(f"📦 モデル読み込み中: {zip_path}")
-    bundle, name_entries, single_kanji_text = _load_bundle(zip_path)
+    bundle, name_entries, single_char_text = _load_bundle(zip_path)
 
     vocab = bundle.vectorizer_read.vocabulary_  # {key_str: feature_id}
     coef_sparse = bundle.coef_read_sparse  # CSR (n_classes × n_features)
@@ -878,12 +878,12 @@ def export(zip_path: str, out_path: str) -> None:
     print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
     name_dict_bytes = _build_name_dict_bytes(name_entries)
 
-    single_kanji_dict = parse_kanji_dict_tsv(single_kanji_text)
-    print(f"🔨 単一漢字辞書テーブル変換中... ({len(single_kanji_dict)} エントリ)")
-    kanji_dict_bytes = _build_kanji_dict_bytes(single_kanji_dict)
+    single_char_dict = parse_single_char_dict_tsv(single_char_text)
+    print(f"🔨 単一文字辞書テーブル変換中... ({len(single_char_dict)} エントリ)")
+    single_char_dict_bytes = _build_single_char_dict_bytes(single_char_dict)
 
     # version 0x04: 人名辞書テーブルにユニット別読みを追加
-    #               （アルファ期間中に単一漢字辞書テーブルも追加、番号据え置き）
+    #               （アルファ期間中に単一文字辞書テーブルも追加、番号据え置き）
     header = struct.pack(
         "<4sBBBBII",
         MAGIC_MBM,
@@ -904,7 +904,7 @@ def export(zip_path: str, out_path: str) -> None:
         intercept_r_bytes,
         boundary_bytes,
         name_dict_bytes,
-        kanji_dict_bytes,
+        single_char_dict_bytes,
     )
 
     size_mb = os.path.getsize(out_path) / 1024 / 1024
@@ -920,7 +920,7 @@ def export(zip_path: str, out_path: str) -> None:
         f"   人名辞書      : {len(name_dict_bytes):>10,} bytes  ({len(name_entries)} エントリ)"
     )
     print(
-        f"   単一漢字辞書  : {len(kanji_dict_bytes):>10,} bytes  ({len(single_kanji_dict)} エントリ)"
+        f"   単一文字辞書  : {len(single_char_dict_bytes):>10,} bytes  ({len(single_char_dict)} エントリ)"
     )
 
 
@@ -933,7 +933,7 @@ def export_float(zip_path: str, out_path: str) -> None:
     だけ quant_scale を持たず、int8 の代わりに float32 でそのまま格納する。
     """
     print(f"📦 モデル読み込み中: {zip_path}")
-    bundle, name_entries, single_kanji_text = _load_bundle(zip_path)
+    bundle, name_entries, single_char_text = _load_bundle(zip_path)
 
     vocab = bundle.vectorizer_read.vocabulary_
     coef_sparse = bundle.coef_read_sparse
@@ -971,9 +971,9 @@ def export_float(zip_path: str, out_path: str) -> None:
     print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
     name_dict_bytes = _build_name_dict_bytes(name_entries)
 
-    single_kanji_dict = parse_kanji_dict_tsv(single_kanji_text)
-    print(f"🔨 単一漢字辞書テーブル変換中... ({len(single_kanji_dict)} エントリ)")
-    kanji_dict_bytes = _build_kanji_dict_bytes(single_kanji_dict)
+    single_char_dict = parse_single_char_dict_tsv(single_char_text)
+    print(f"🔨 単一文字辞書テーブル変換中... ({len(single_char_dict)} エントリ)")
+    single_char_dict_bytes = _build_single_char_dict_bytes(single_char_dict)
 
     header = struct.pack(
         "<4sBBBBII",
@@ -995,7 +995,7 @@ def export_float(zip_path: str, out_path: str) -> None:
         intercept_r_bytes,
         boundary_bytes,
         name_dict_bytes,
-        kanji_dict_bytes,
+        single_char_dict_bytes,
     )
 
     size_mb = os.path.getsize(out_path) / 1024 / 1024
@@ -1011,7 +1011,7 @@ def export_float(zip_path: str, out_path: str) -> None:
         f"   人名辞書      : {len(name_dict_bytes):>10,} bytes  ({len(name_entries)} エントリ)"
     )
     print(
-        f"   単一漢字辞書  : {len(kanji_dict_bytes):>10,} bytes  ({len(single_kanji_dict)} エントリ)"
+        f"   単一文字辞書  : {len(single_char_dict_bytes):>10,} bytes  ({len(single_char_dict)} エントリ)"
     )
 
 

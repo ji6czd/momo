@@ -211,8 +211,8 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     let names = read_name_dict(reader, path)?;
     model.name_dict = crate::name_dict::build_name_index(&names);
 
-    // ---- 単一漢字辞書テーブル (version 0x04 途中で追加) ----
-    model.kanji_dict = read_kanji_dict(reader, path)?;
+    // ---- 単一文字辞書テーブル (version 0x04 途中で追加) ----
+    model.single_char_dict = read_single_char_dict(reader, path)?;
 
     // ---- 後処理: vocab を Rust の Ord で再ソート ----
     // C++ 版とソート順が異なるため、binary_search できるように改めて整列する。
@@ -417,20 +417,20 @@ pub(crate) fn read_name_dict<R: Read>(
     Ok(names)
 }
 
-/// 単一漢字辞書テーブルを読む。
+/// 単一文字辞書テーブルを読む。
 ///
 /// 読みモデルの候補制約に使う必須データ。旧 0x04 ファイル（テーブル追加前）は
 /// ここで EOF になるため、再エクスポートを促すエラーメッセージに変換する。
 ///
 /// `.mbm` / `.mbmf` 共通のセクション読み込みヘルパー。
-pub(crate) fn read_kanji_dict<R: Read>(
+pub(crate) fn read_single_char_dict<R: Read>(
     reader: &mut R,
     path: &Path,
 ) -> Result<Vec<(char, Vec<String>)>> {
     let n_entries = reader.read_u32::<LittleEndian>().map_err(|e| {
         if e.kind() == std::io::ErrorKind::UnexpectedEof {
             Error::CorruptModel {
-                reason: "単一漢字辞書テーブルがありません（同テーブル追加前の旧 0x04 ファイル\
+                reason: "単一文字辞書テーブルがありません（同テーブル追加前の旧 0x04 ファイル\
                          の可能性があります。モデルを再エクスポートしてください）"
                     .to_string(),
             }
@@ -444,7 +444,7 @@ pub(crate) fn read_kanji_dict<R: Read>(
     if n_entries > MAX_REASONABLE_COUNT {
         return Err(Error::CorruptModel {
             reason: format!(
-                "単一漢字辞書の n_entries={n_entries} が大きすぎます（上限 {MAX_REASONABLE_COUNT}）"
+                "単一文字辞書の n_entries={n_entries} が大きすぎます（上限 {MAX_REASONABLE_COUNT}）"
             ),
         });
     }
@@ -465,10 +465,10 @@ pub(crate) fn read_kanji_dict<R: Read>(
         for _ in 0..n_readings {
             readings.push(read_str(reader, &mut buf)?);
         }
-        // キーは1文字の漢字。複数文字や空のキーは安全側に倒してスキップする。
+        // キーは1文字（漢字・数字など）。複数文字や空のキーは安全側に倒してスキップする。
         let mut chars = surface.chars();
         match (chars.next(), chars.next()) {
-            (Some(kanji), None) if !readings.is_empty() => dict.push((kanji, readings)),
+            (Some(ch), None) if !readings.is_empty() => dict.push((ch, readings)),
             _ => {}
         }
     }
@@ -776,21 +776,21 @@ mod tests {
     }
 
     #[test]
-    fn load_fixture_kanji_dict() {
+    fn load_fixture_single_char_dict() {
         let model = load(fixture_path()).unwrap();
-        // gen_fixture_mbm.py の KANJI_DICT = [("漢", ["カン"]), ("字", ["ジ", "アザ"])]
+        // gen_fixture_mbm.py の SINGLE_CHAR_DICT = [("漢", ["カン"]), ("字", ["ジ", "アザ"])]
         // char でソート済み（字 U+5B57 < 漢 U+6F22）
-        assert_eq!(model.kanji_dict.len(), 2);
-        assert_eq!(model.kanji_dict[0].0, '字');
-        assert_eq!(model.kanji_dict[0].1, vec!["ジ", "アザ"]);
-        assert_eq!(model.kanji_dict[1].0, '漢');
-        assert_eq!(model.kanji_dict[1].1, vec!["カン"]);
+        assert_eq!(model.single_char_dict.len(), 2);
+        assert_eq!(model.single_char_dict[0].0, '字');
+        assert_eq!(model.single_char_dict[0].1, vec!["ジ", "アザ"]);
+        assert_eq!(model.single_char_dict[1].0, '漢');
+        assert_eq!(model.single_char_dict[1].1, vec!["カン"]);
     }
 
     #[test]
-    fn missing_kanji_dict_section_returns_corrupt_model() {
-        // 単一漢字辞書テーブル追加前の旧 0x04 ファイルを模擬:
-        // fixture.mbm から同テーブル（gen_fixture_mbm.py の build_kanji_dict = 32 bytes）
+    fn missing_single_char_dict_section_returns_corrupt_model() {
+        // 単一文字辞書テーブル追加前の旧 0x04 ファイルを模擬:
+        // fixture.mbm から同テーブル（gen_fixture_mbm.py の build_single_char_dict = 32 bytes）
         // を末尾から削る。
         let bytes = std::fs::read(fixture_path()).unwrap();
         let truncated = &bytes[..bytes.len() - 32];

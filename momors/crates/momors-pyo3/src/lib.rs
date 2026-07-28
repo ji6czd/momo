@@ -88,15 +88,19 @@ impl Predictor {
     ///
     /// Args:
     ///     model_path: `.mbm` モデルファイルのパス
-    ///     kanji_dict: 漢字辞書 TSV のパス（省略可）
+    ///     single_char_dict: 単一文字辞書 TSV のパス（省略可）
     ///     numeric_threshold: 数字ルールベース変換を発動させる自信度の上限（デフォルト 0.5）
     #[new]
-    #[pyo3(signature = (model_path, *, kanji_dict=None, numeric_threshold=0.5))]
-    fn new(model_path: &str, kanji_dict: Option<&str>, numeric_threshold: f32) -> PyResult<Self> {
+    #[pyo3(signature = (model_path, *, single_char_dict=None, numeric_threshold=0.5))]
+    fn new(
+        model_path: &str,
+        single_char_dict: Option<&str>,
+        numeric_threshold: f32,
+    ) -> PyResult<Self> {
         let mut config =
             PredictorConfig::new(model_path).with_numeric_confidence_threshold(numeric_threshold);
-        if let Some(path) = kanji_dict {
-            config = config.with_kanji_dict_path(path);
+        if let Some(path) = single_char_dict {
+            config = config.with_single_char_dict_path(path);
         }
         let inner =
             RustPredictor::load(config).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -116,14 +120,14 @@ impl Predictor {
     ///
     /// Args:
     ///     window: コンテキストウィンドウサイズ（4, 5, 7）。デフォルトは 7。
-    ///     kanji_dict: 漢字辞書 TSV のパス（省略可）
+    ///     single_char_dict: 単一文字辞書 TSV のパス（省略可）
     ///     numeric_threshold: 数字ルールベース変換を発動させる自信度の上限
     #[classmethod]
-    #[pyo3(signature = (window=7, *, kanji_dict=None, numeric_threshold=0.5))]
+    #[pyo3(signature = (window=7, *, single_char_dict=None, numeric_threshold=0.5))]
     fn from_bundled(
         cls: &Bound<'_, PyType>,
         window: u32,
-        kanji_dict: Option<&str>,
+        single_char_dict: Option<&str>,
         numeric_threshold: f32,
     ) -> PyResult<Self> {
         if !matches!(window, 4 | 5 | 7) {
@@ -145,8 +149,8 @@ impl Predictor {
         }
         let mut config =
             PredictorConfig::new(&model_path).with_numeric_confidence_threshold(numeric_threshold);
-        if let Some(path) = kanji_dict {
-            config = config.with_kanji_dict_path(path);
+        if let Some(path) = single_char_dict {
+            config = config.with_single_char_dict_path(path);
         }
         let inner =
             RustPredictor::load(config).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;

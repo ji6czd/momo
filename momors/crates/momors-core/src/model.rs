@@ -93,11 +93,11 @@ pub struct MomoModel {
     /// [`compute_name_matches`]: crate::name_dict::compute_name_matches
     pub(crate) name_dict: NameIndex,
 
-    // --- 単一漢字辞書 (version 0x04 途中で追加) ---
-    /// 読みモデルの候補制約に使う単一漢字辞書（漢字→既知の読みリスト）。
+    // --- 単一文字辞書 (version 0x04 途中で追加) ---
+    /// 読みモデルの候補制約に使う単一文字辞書（漢字・数字1文字→既知の読みリスト）。
     /// char でソート済み（binary_search 用）。
-    /// `PredictorConfig::kanji_dict_path` の明示指定があればそちらが優先される。
-    pub(crate) kanji_dict: Vec<(char, Vec<String>)>,
+    /// `PredictorConfig::single_char_dict_path` の明示指定があればそちらが優先される。
+    pub(crate) single_char_dict: Vec<(char, Vec<String>)>,
 
     // --- サイズ情報 ---
     pub(crate) n_classes: u32,
@@ -165,7 +165,7 @@ impl Default for MomoModel {
             intercept_read: Vec::new(),
             boundary: Boundary::default(),
             name_dict: NameIndex::new(),
-            kanji_dict: Vec::new(),
+            single_char_dict: Vec::new(),
             n_classes: 0,
             n_features: 0,
         }
@@ -217,8 +217,8 @@ impl WeightModel for MomoModel {
         &self.name_dict
     }
 
-    fn take_kanji_dict(&mut self) -> Vec<(char, Vec<String>)> {
-        std::mem::take(&mut self.kanji_dict)
+    fn take_single_char_dict(&mut self) -> Vec<(char, Vec<String>)> {
+        std::mem::take(&mut self.single_char_dict)
     }
 
     fn compute_read_scores(&self, feat_ids: &[u32], int_scores: &mut Vec<i32>, scores: &mut [f32]) {

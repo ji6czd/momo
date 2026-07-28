@@ -119,7 +119,7 @@ def main() -> None:
         'intercept_r': base.build_intercept_read(),
         'boundary': boundary,
         'name_dict': base.build_name_dict(),
-        'kanji_dict': base.build_kanji_dict(),
+        'single_char_dict': base.build_single_char_dict(),
     }
     OUT_MBM.write_bytes(b''.join(mbm_parts.values()))
     print(f'Generated: {OUT_MBM}')
@@ -136,7 +136,7 @@ def main() -> None:
         'intercept_r': base.build_intercept_read(),
         'boundary': boundary,
         'name_dict': base.build_name_dict(),
-        'kanji_dict': base.build_kanji_dict(),
+        'single_char_dict': base.build_single_char_dict(),
     }
     OUT_MBMF.write_bytes(b''.join(mbmf_parts.values()))
     print(f'Generated: {OUT_MBMF}')

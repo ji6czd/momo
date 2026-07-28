@@ -30,18 +30,20 @@ JAPANESE_NUMERIC_CHARS = frozenset("〇一二三四五六七八九")
 
 # ゼロ幅文字・フォーマット制御文字など、仮名・点字出力には現れるべきでないスキップ文字。
 # 可視スペース系（NBSP 等）は isspace() == True のため SPACE に分類される（ここに含めない）。
-_SKIP_CHARS = frozenset({
-    "­",  # SOFT HYPHEN
-    "​",  # ZERO WIDTH SPACE
-    "‌",  # ZERO WIDTH NON-JOINER
-    "‍",  # ZERO WIDTH JOINER
-    "⁠",  # WORD JOINER
-    "⁡",  # FUNCTION APPLICATION
-    "⁢",  # INVISIBLE TIMES
-    "⁣",  # INVISIBLE SEPARATOR
-    "⁤",  # INVISIBLE PLUS
-    "﻿",  # ZERO WIDTH NO-BREAK SPACE (BOM)
-})
+_SKIP_CHARS = frozenset(
+    {
+        "­",  # SOFT HYPHEN
+        "​",  # ZERO WIDTH SPACE
+        "‌",  # ZERO WIDTH NON-JOINER
+        "‍",  # ZERO WIDTH JOINER
+        "⁠",  # WORD JOINER
+        "⁡",  # FUNCTION APPLICATION
+        "⁢",  # INVISIBLE TIMES
+        "⁣",  # INVISIBLE SEPARATOR
+        "⁤",  # INVISIBLE PLUS
+        "﻿",  # ZERO WIDTH NO-BREAK SPACE (BOM)
+    }
+)
 
 # 隣接文脈次第で JAPANESE_NUMERIC に昇格する位取り文字
 KURAI_CHARS = frozenset("十百千万億兆")
@@ -86,6 +88,8 @@ def get_basic_char_category(c: str) -> CharType:
         or 0xFF41 <= cp <= 0xFF5A
     ):
         return CharType.ALPHA
+    if 0x30 <= cp <= 0x39 or 0xFF10 <= cp <= 0xFF19:
+        return CharType.NUMERIC
     return CharType.OTHER
 
 
@@ -175,8 +179,7 @@ _EXPANSION_RANGES: Dict[str, List[Tuple[int, int]]] = {
 }
 
 _ALL_NORMALIZE_RANGES: List[Tuple[int, int]] = sorted(
-    _ONE_TO_ONE_RANGES
-    + [r for ranges in _EXPANSION_RANGES.values() for r in ranges]
+    _ONE_TO_ONE_RANGES + [r for ranges in _EXPANSION_RANGES.values() for r in ranges]
 )
 
 
@@ -348,9 +351,9 @@ def has_vowel(char: str, vowel: str) -> bool:
     return char_vowel == vowel_kata
 
 
-def parse_kanji_dict_tsv(text: str) -> Dict[str, List[str]]:
-    """TSVテキストを単一漢字辞書に変換する。
-    フォーマット: 漢字[TAB]読み1[TAB]読み2[TAB]...
+def parse_single_char_dict_tsv(text: str) -> Dict[str, List[str]]:
+    """TSVテキストを単一文字辞書に変換する。
+    フォーマット: 文字[TAB]読み1[TAB]読み2[TAB]...
     """
     result: Dict[str, List[str]] = {}
     for line in text.splitlines():

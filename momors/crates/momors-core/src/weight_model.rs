@@ -54,8 +54,8 @@ pub trait WeightModel: Sized {
     /// 人名辞書の照合用インデックス。
     fn name_dict(&self) -> &NameIndex;
 
-    /// 単一漢字辞書を所有権ごと取り出す（`Predictor::load` が一度だけ呼ぶ）。
-    fn take_kanji_dict(&mut self) -> Vec<(char, Vec<String>)>;
+    /// 単一文字辞書を所有権ごと取り出す（`Predictor::load` が一度だけ呼ぶ）。
+    fn take_single_char_dict(&mut self) -> Vec<(char, Vec<String>)>;
 
     /// `scores[cls]` を「intercept + 特徴量重みの合計」で上書きする。
     ///

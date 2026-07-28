@@ -5,7 +5,7 @@
 //! Rust 側で量子化による予測結果の劣化を直接検証できるようにする。
 //! `.mbm` と `.mbmf` は同じ `.zip` から `momo_py.exporter.export()` /
 //! `export_float()` で書き出されたペアであることを前提とする
-//! （語彙・ラベル・人名辞書・単一漢字辞書は共通、重みだけが
+//! （語彙・ラベル・人名辞書・単一文字辞書は共通、重みだけが
 //! 量子化されているかどうかが異なる）。
 //!
 //! 標準入力（または `--input`）から1行ずつ読み、量子化版・非量子化版
@@ -178,12 +178,13 @@ impl Stats {
         if !self.conf_abs_diffs.is_empty() {
             let n = self.conf_abs_diffs.len() as f64;
             let mean = self.conf_abs_diffs.iter().map(|&d| d as f64).sum::<f64>() / n;
-            let max = self
-                .conf_abs_diffs
-                .iter()
-                .cloned()
-                .fold(0f32, f32::max);
-            writeln!(out, "自信度差分   : 平均={mean:.6} 最大={max:.6} (一致行のみ、{} バイト)", self.conf_abs_diffs.len()).ok();
+            let max = self.conf_abs_diffs.iter().cloned().fold(0f32, f32::max);
+            writeln!(
+                out,
+                "自信度差分   : 平均={mean:.6} 最大={max:.6} (一致行のみ、{} バイト)",
+                self.conf_abs_diffs.len()
+            )
+            .ok();
         }
     }
 }

@@ -33,8 +33,8 @@ def makedic(tsv_file: str, dic_file: str) -> None:
                 if not reading:
                     continue
                 category = get_basic_char_category(surface[0])
-                # 漢字のみを対象とする
-                if category == CharType.KANJI:
+                # 漢字と数字を対象とする
+                if category == CharType.KANJI or category == CharType.NUMERIC:
                     dic[surface][reading] += 1
     except FileNotFoundError:
         print(f"Error: The file '{tsv_file}' was not found.")

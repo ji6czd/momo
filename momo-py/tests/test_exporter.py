@@ -51,7 +51,7 @@ class TestParseNameFlagKeys:
 # ------------------------------------------------------------------ #
 # export（人名辞書テーブル）
 # ------------------------------------------------------------------ #
-def _make_model_zip(tmp_path, name_dict_text=None, kanji_dict_text="漢\tカン\tゲン\n"):
+def _make_model_zip(tmp_path, name_dict_text=None, single_char_dict_text="漢\tカン\tゲン\n"):
     """人名フラグ特徴量を含む最小のモデルZIPを組み立てる。"""
     feats = [
         {"bias": 1.0, "char_s=佐": 1.0, "name_s=B": 1.0, "name_n1=I": 1.0},
@@ -89,13 +89,13 @@ def _make_model_zip(tmp_path, name_dict_text=None, kanji_dict_text="漢\tカン\
         )
         if name_dict_text is not None:
             zf.writestr("person_name_dic.tsv", name_dict_text)
-        if kanji_dict_text is not None:
-            zf.writestr("single_character_dic.tsv", kanji_dict_text)
+        if single_char_dict_text is not None:
+            zf.writestr("single_character_dic.tsv", single_char_dict_text)
     return zip_path
 
 
-def _expected_kanji_section() -> bytes:
-    """フィクスチャの単一漢字辞書（漢→カン,ゲン）に対応するテーブルバイト列。"""
+def _expected_single_char_section() -> bytes:
+    """フィクスチャの単一文字辞書（漢→カン,ゲン）に対応するテーブルバイト列。"""
     expected = bytearray(struct.pack("<I", 1))
     encoded = "漢".encode("utf-8")
     expected.append(len(encoded))
@@ -121,7 +121,7 @@ class TestExportNameDict:
         assert data[:4] == b"MOMO"
         assert data[4] == 0x05  # version
 
-        # 人名辞書テーブル（表層形 + ユニット別読み）+ 末尾に単一漢字辞書テーブル
+        # 人名辞書テーブル（表層形 + ユニット別読み）+ 末尾に単一文字辞書テーブル
         expected = bytearray(struct.pack("<I", 2))
         # 佐藤: 読みあり（サ, トー）
         encoded = "佐藤".encode("utf-8")
@@ -137,7 +137,7 @@ class TestExportNameDict:
         expected.append(len(encoded))
         expected += encoded
         expected.append(0)  # n_readings = 0
-        expected += _expected_kanji_section()
+        expected += _expected_single_char_section()
         assert data.endswith(bytes(expected))
 
     def test_without_name_dict(self, tmp_path):
@@ -147,8 +147,8 @@ class TestExportNameDict:
 
         data = out.read_bytes()
         assert data[4] == 0x05
-        # 辞書なしモデルは n_names = 0、続けて単一漢字辞書テーブル
-        assert data.endswith(struct.pack("<I", 0) + _expected_kanji_section())
+        # 辞書なしモデルは n_names = 0、続けて単一文字辞書テーブル
+        assert data.endswith(struct.pack("<I", 0) + _expected_single_char_section())
 
 
 # ------------------------------------------------------------------ #

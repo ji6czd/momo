@@ -79,7 +79,7 @@ def main() -> None:
         'intercept_r'   : base.build_intercept_read(),
         'boundary'      : build_boundary_float(),
         'name_dict'     : base.build_name_dict(),
-        'kanji_dict'    : base.build_kanji_dict(),
+        'single_char_dict': base.build_single_char_dict(),
     }
 
     blob = b''.join(parts.values())

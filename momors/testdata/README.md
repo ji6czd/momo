@@ -13,7 +13,7 @@ loader のテストで使用するモデルファイル。
 
 - `fixture.mbmf` — `testdata/gen_fixture_mbmf.py` で生成された、`fixture.mbm`
   の量子化前 (float32) 版。`gen_fixture_mbm.py` の語彙・ラベル・人名辞書・
-  単一漢字辞書・量子化スケールをそのまま再利用し、重みを `int8_val * scale`
+  単一文字辞書・量子化スケールをそのまま再利用し、重みを `int8_val * scale`
   で機械的に導出しているため、`fixture.mbm` と厳密に同じ実値を持つ
   （`MomoModel` と `FloatMomoModel` の `predict()` 結果が完全一致することの
   クロスチェックに使う）。再生成するには:

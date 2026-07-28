@@ -15,8 +15,8 @@ from typing import Any
 from sklearn.linear_model import SGDClassifier
 from sklearn.feature_extraction import DictVectorizer
 
-# 単一漢字辞書のファイル名（モデルZIPへの同梱名・パッケージリソース名と共通）
-SINGLE_KANJI_DICT_FILENAME = "single_character_dic.tsv"
+# 単一文字辞書のファイル名（モデルZIPへの同梱名・パッケージリソース名と共通）
+SINGLE_CHAR_DICT_FILENAME = "single_character_dic.tsv"
 
 
 @dataclass

@@ -55,7 +55,7 @@ const LR_LOW_THRESHOLD: f32 = 0.5;
 /// 1文字ごとの読み決定の根拠。trace（`momo-inspect trace`）の色分け・タグ表示に使う。
 ///
 /// Python 版 `predictor.DecisionSource` のうち、Rust core の推論経路が実際に生成する
-/// ものだけを持つ（カスタム辞書経路が無いため `DICT` は無い。漢字辞書は argmax の
+/// ものだけを持つ（カスタム辞書経路が無いため `DICT` は無い。単一文字辞書は argmax の
 /// 候補制約であって低自信度フォールバックではないため `FALLBACK_KANJI` も無い）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionSource {
@@ -150,7 +150,7 @@ pub struct TraceResult {
 #[derive(Debug, Clone)]
 pub struct PredictorConfig {
     pub(crate) model_path: PathBuf,
-    pub(crate) kanji_dict_path: Option<PathBuf>,
+    pub(crate) single_char_dict_path: Option<PathBuf>,
     pub(crate) numeric_confidence_threshold: f32,
 }
 
@@ -160,7 +160,7 @@ impl PredictorConfig {
         Self {
             model_path: model_path.as_ref().to_path_buf(),
             numeric_confidence_threshold: 0.5,
-            kanji_dict_path: None,
+            single_char_dict_path: None,
         }
     }
 
@@ -170,10 +170,10 @@ impl PredictorConfig {
         self
     }
 
-    /// 漢字辞書ファイル (.tsv) のパスを設定する。
-    /// 設定すると推論時に辞書の読みに候補が制約される。
-    pub fn with_kanji_dict_path(mut self, path: impl AsRef<Path>) -> Self {
-        self.kanji_dict_path = Some(path.as_ref().to_path_buf());
+    /// 単一文字辞書ファイル (.tsv) のパスを設定する。
+    /// 設定すると推論時に辞書の読みに候補が制約される（漢字・算用数字）。
+    pub fn with_single_char_dict_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.single_char_dict_path = Some(path.as_ref().to_path_buf());
         self
     }
 
@@ -460,45 +460,45 @@ impl PredictionResult {
 pub struct Predictor<M: WeightModel = MomoModel> {
     config: PredictorConfig,
     model: M,
-    /// ソート済み漢字辞書。binary_search でルックアップする。
-    kanji_dict: Vec<(char, Vec<String>)>,
+    /// ソート済み単一文字辞書（漢字・算用数字）。binary_search でルックアップする。
+    single_char_dict: Vec<(char, Vec<String>)>,
 }
 
 impl<M: WeightModel> Predictor<M> {
     /// 設定からモデルを読み込んで予測器を構築する。
     ///
-    /// 単一漢字辞書は `kanji_dict_path` の明示指定があればそれを使い、
+    /// 単一文字辞書は `single_char_dict_path` の明示指定があればそれを使い、
     /// なければモデルファイルに同梱された辞書（学習時と同一）を使う。
     pub fn load(config: PredictorConfig) -> Result<Self> {
         let mut model = M::load(config.model_path())?;
-        let kanji_dict = if let Some(ref path) = config.kanji_dict_path {
-            load_kanji_dict(path)?
+        let single_char_dict = if let Some(ref path) = config.single_char_dict_path {
+            load_single_char_dict(path)?
         } else {
-            model.take_kanji_dict()
+            model.take_single_char_dict()
         };
         Ok(Self {
             config,
             model,
-            kanji_dict,
+            single_char_dict,
         })
     }
 
     /// バイト列からモデルを読み込んで予測器を構築する (WASM / インメモリ用)。
     ///
     /// デフォルト設定 (numeric_confidence_threshold=0.5) を使用する。
-    /// 単一漢字辞書はモデルファイルに同梱されたものを使う。
+    /// 単一文字辞書はモデルファイルに同梱されたものを使う。
     pub fn from_model_bytes(bytes: &[u8]) -> Result<Self> {
         let mut model = M::load_from_bytes(bytes)?;
         let config = PredictorConfig {
             model_path: PathBuf::from("<memory>"),
             numeric_confidence_threshold: 0.5,
-            kanji_dict_path: None,
+            single_char_dict_path: None,
         };
-        let kanji_dict = model.take_kanji_dict();
+        let single_char_dict = model.take_single_char_dict();
         Ok(Self {
             config,
             model,
-            kanji_dict,
+            single_char_dict,
         })
     }
 
@@ -923,7 +923,7 @@ impl<M: WeightModel> Predictor<M> {
             }
 
             // ============================================================
-            // スコア計算 + argmax（漢字辞書制約付き）
+            // スコア計算 + argmax（単一文字辞書制約付き）
             // ============================================================
             let (best_cls, best_score) =
                 self.read_argmax(entry, &all_feat_ids[i], &mut read_scratch, &mut scores);
@@ -1230,7 +1230,7 @@ impl<M: WeightModel> Predictor<M> {
     // private helpers
     // ============================================================
 
-    /// 1文字分の読みスコアを計算し、（漢字辞書制約付き）argmax のクラスとスコアを返す。
+    /// 1文字分の読みスコアを計算し、（単一文字辞書制約付き）argmax のクラスとスコアを返す。
     /// `scratch` / `scores` はスクラッチバッファ（呼び出しごとに上書きされる）。
     fn read_argmax(
         &self,
@@ -1241,10 +1241,14 @@ impl<M: WeightModel> Predictor<M> {
     ) -> (usize, f32) {
         self.model.compute_read_scores(feat_ids, scratch, scores);
 
-        // 漢字辞書制約付き argmax
-        if entry.ctype == CharType::Kanji && !self.kanji_dict.is_empty() {
+        // 単一文字辞書制約付き argmax（漢字・算用数字1文字が対象）。
+        // 算用数字は「1」→{"1","ヒト","ツイ"} のように辞書の候補外の読み
+        // （他の数字の読みの誤爆）を弾き、数の崩壊を防ぐ。
+        if matches!(entry.ctype, CharType::Kanji | CharType::Numeric)
+            && !self.single_char_dict.is_empty()
+        {
             if let Some(ch) = char::from_u32(entry.cp) {
-                if let Some(readings) = lookup_kanji_dict(&self.kanji_dict, ch) {
+                if let Some(readings) = lookup_single_char_dict(&self.single_char_dict, ch) {
                     // 辞書の読みが1つもモデルのクラスに存在しない場合は None。
                     // その場合は制約なし argmax にフォールバックする。
                     if let Some(result) =
@@ -2014,11 +2018,11 @@ fn constrained_argmax(
     best
 }
 
-/// 漢字辞書 TSV を読み込み、char でソートされた Vec を返す。
+/// 単一文字辞書 TSV を読み込み、char でソートされた Vec を返す。
 ///
-/// フォーマット: 漢字[TAB]読み1[TAB]読み2[TAB]...
+/// フォーマット: 文字(漢字・数字1文字)[TAB]読み1[TAB]読み2[TAB]...
 /// ロード後に sort_unstable_by_key でソートするので、TSV の行順は問わない。
-fn load_kanji_dict(path: &Path) -> Result<Vec<(char, Vec<String>)>> {
+fn load_single_char_dict(path: &Path) -> Result<Vec<(char, Vec<String>)>> {
     let content = std::fs::read_to_string(path).map_err(|e| Error::DictIo {
         path: path.to_path_buf(),
         source: e,
@@ -2028,8 +2032,8 @@ fn load_kanji_dict(path: &Path) -> Result<Vec<(char, Vec<String>)>> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .filter_map(|l| {
             let mut parts = l.splitn(2, '\t');
-            let kanji_str = parts.next()?;
-            let kanji = kanji_str.chars().next()?;
+            let ch_str = parts.next()?;
+            let ch = ch_str.chars().next()?;
             let readings: Vec<String> = parts
                 .next()
                 .unwrap_or("")
@@ -2040,16 +2044,16 @@ fn load_kanji_dict(path: &Path) -> Result<Vec<(char, Vec<String>)>> {
             if readings.is_empty() {
                 return None;
             }
-            Some((kanji, readings))
+            Some((ch, readings))
         })
         .collect();
     dict.sort_unstable_by_key(|(k, _)| *k);
     Ok(dict)
 }
 
-/// ソート済み漢字辞書から kanji をバイナリサーチで引く。
-fn lookup_kanji_dict<'a>(dict: &'a [(char, Vec<String>)], kanji: char) -> Option<&'a [String]> {
-    dict.binary_search_by_key(&kanji, |(k, _)| *k)
+/// ソート済み単一文字辞書から文字をバイナリサーチで引く。
+fn lookup_single_char_dict<'a>(dict: &'a [(char, Vec<String>)], ch: char) -> Option<&'a [String]> {
+    dict.binary_search_by_key(&ch, |(k, _)| *k)
         .ok()
         .map(|i| dict[i].1.as_slice())
 }
@@ -2600,13 +2604,14 @@ mod tests {
         // best_s=NEG_INFINITY のまま class 0 を返してはならず、
         // unconstrained_argmax と同じ結果にフォールバックすること。
         let dict_path = std::env::temp_dir().join(format!(
-            "momors_test_kanji_dict_no_match_{}.tsv",
+            "momors_test_single_char_dict_no_match_{}.tsv",
             std::process::id()
         ));
         // "漢" (U+6F22) の読みを、モデルに存在しない読みだけにする
         std::fs::write(&dict_path, "漢\tケ\tコ\n").unwrap();
 
-        let config = PredictorConfig::new(fixture_model_path()).with_kanji_dict_path(&dict_path);
+        let config =
+            PredictorConfig::new(fixture_model_path()).with_single_char_dict_path(&dict_path);
         let predictor: Predictor = Predictor::load(config).unwrap();
 
         let result = predictor.predict("漢").unwrap();
@@ -2614,6 +2619,39 @@ mod tests {
         // フォールバックが機能していれば、confidence は NEG_INFINITY 由来の
         // sigmoid(-inf)=0.0 ではなく、モデルの素の argmax に基づく値になる。
         assert!(result.confidences[0] > 0.0);
+    }
+
+    #[test]
+    fn read_argmax_constrains_numeric_char_using_single_char_dict() {
+        // fixture.mbm には算用数字向けの語彙 (char_s=1 等) が無いため、
+        // 数字 "1" では BIAS 特徴量しか発火せず、制約なし argmax は
+        // カ=0.6・キ=0.85・ク=0.0（intercept 込み）で常に「キ」になる。
+        // 辞書で "1" の候補を「ク」だけに絞ったとき、CharType::Kanji だけでなく
+        // CharType::Numeric でも同じ候補制約 argmax が効くことを確認する。
+        let dict_path = std::env::temp_dir().join(format!(
+            "momors_test_single_char_dict_numeric_{}.tsv",
+            std::process::id()
+        ));
+        std::fs::write(&dict_path, "1\tク\n").unwrap();
+
+        let config =
+            PredictorConfig::new(fixture_model_path()).with_single_char_dict_path(&dict_path);
+        let predictor: Predictor = Predictor::load(config).unwrap();
+        std::fs::remove_file(&dict_path).ok();
+
+        let source_seq = to_source_seq("1");
+        let (name_flags, _) =
+            crate::name_dict::compute_name_matches(&source_seq, predictor.model.name_dict());
+        let all_keys = compute_source_features(&source_seq, &name_flags);
+        let ids: Vec<u32> = all_keys[0]
+            .iter()
+            .filter_map(|k| predictor.model.vocab_find(k))
+            .collect();
+
+        let mut scratch = predictor.model.new_scratch();
+        let mut scores = vec![0f32; predictor.model.n_classes() as usize];
+        let (cls, _) = predictor.read_argmax(&source_seq[0], &ids, &mut scratch, &mut scores);
+        assert_eq!(predictor.model.read_class(cls as u32), Some("ク"));
     }
 
     #[test]

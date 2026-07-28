@@ -26,14 +26,14 @@ class Predictor:
         self,
         model_path: str,
         *,
-        kanji_dict: str | None = None,
+        single_char_dict: str | None = None,
         numeric_threshold: float = 0.5,
     ) -> None:
         """モデルファイルを読み込んで予測器を作成する。
 
         Args:
             model_path: `.mbm` モデルファイルのパス
-            kanji_dict: 漢字辞書 TSV のパス（省略可）
+            single_char_dict: 単一文字辞書 TSV のパス（省略可）
             numeric_threshold: 数字ルールベース変換を発動させる自信度の上限
         """
         ...
@@ -43,14 +43,14 @@ class Predictor:
         cls,
         window: int = 7,
         *,
-        kanji_dict: str | None = None,
+        single_char_dict: str | None = None,
         numeric_threshold: float = 0.5,
     ) -> "Predictor":
         """同梱モデルから予測器を作成する。
 
         Args:
             window: コンテキストウィンドウサイズ（4, 5, 7）。デフォルトは 7。
-            kanji_dict: 漢字辞書 TSV のパス（省略可）
+            single_char_dict: 単一文字辞書 TSV のパス（省略可）
             numeric_threshold: 数字ルールベース変換を発動させる自信度の上限
         """
         ...

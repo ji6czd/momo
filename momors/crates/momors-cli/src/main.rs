@@ -54,7 +54,7 @@ struct Cli {
     #[arg(long, default_value = "large")]
     model: ModelSize,
 
-    /// 漢字辞書ファイル (.tsv) のパス（省略時はモデル .mbm に同梱された辞書を使用）
+    /// 単一文字辞書ファイル (.tsv) のパス（省略時はモデル .mbm に同梱された辞書を使用）
     #[arg(long)]
     single_dict: Option<String>,
 
@@ -171,15 +171,15 @@ fn main() -> ExitCode {
     };
 
     let mut config = PredictorConfig::new(&model_path);
-    // 単一漢字辞書は .mbm に同梱されたもの（学習時と同一）を既定とし、
+    // 単一文字辞書は .mbm に同梱されたもの（学習時と同一）を既定とし、
     // --single-dict の明示指定があるときだけ外部ファイルで上書きする。
     if let Some(ref path) = cli.single_dict {
         let p = PathBuf::from(path);
         if !p.exists() {
-            eprintln!("漢字辞書ファイルが見つかりません: {}", p.display());
+            eprintln!("単一文字辞書ファイルが見つかりません: {}", p.display());
             return ExitCode::FAILURE;
         }
-        config = config.with_kanji_dict_path(&p);
+        config = config.with_single_char_dict_path(&p);
     }
 
     let predictor = match AnyPredictor::load(config) {

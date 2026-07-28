@@ -3,10 +3,10 @@
 //! Python 側 `momo_py/exporter.py` の `export_float()` が書き出すバイナリを
 //! ストリーミング読み込みして [`FloatMomoModel`] を構築する。`.mbm`
 //! (`loader.rs`) とセクション構成はほぼ同一で、語彙テーブル・読みラベル
-//! テーブル・人名辞書テーブル・単一漢字辞書テーブルは完全に同一のバイト列
+//! テーブル・人名辞書テーブル・単一文字辞書テーブルは完全に同一のバイト列
 //! フォーマットのため、そのセクション読み込みは `loader.rs` の
 //! `pub(crate)` ヘルパー (`read_vocab` / `read_labels` / `read_name_dict` /
-//! `read_kanji_dict` / `read_f32_vec` / `read_csc_structure` / `io_err`) を
+//! `read_single_char_dict` / `read_f32_vec` / `read_csc_structure` / `io_err`) を
 //! そのまま再利用する。ヘッダ検証の定数 (`VERSION` / `MAX_CLASSES` /
 //! `MAX_REASONABLE_COUNT`) も `loader.rs` の定義を共有し、ここでは複製しない
 //! ―― 複製すると次のフォーマット変更で片方だけ更新してしまう。
@@ -36,7 +36,7 @@
 //!   algo_tag == 0x01 (木)  : .mbm と完全に同一バイト列（元々量子化していない）
 //!
 //! [人名辞書テーブル]        .mbm と同一
-//! [単一漢字辞書テーブル]    .mbm と同一
+//! [単一文字辞書テーブル]    .mbm と同一
 //! ```
 
 use std::fs::File;
@@ -48,7 +48,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use crate::float_model::FloatMomoModel;
 use crate::loader::{
     MAX_CLASSES, MAX_REASONABLE_COUNT, VERSION, io_err, read_csc_structure, read_f32_vec,
-    read_kanji_dict, read_labels, read_name_dict, read_vocab,
+    read_labels, read_name_dict, read_single_char_dict, read_vocab,
 };
 use crate::{Error, Result};
 
@@ -136,10 +136,10 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
     // ---- 境界モデル (algo_tag で線形/木を分岐、boundary.rs) ----
     model.boundary = crate::boundary::parse_float(reader, n_features as usize, path)?;
 
-    // ---- 人名辞書テーブル / 単一漢字辞書テーブル (.mbm と共通実装) ----
+    // ---- 人名辞書テーブル / 単一文字辞書テーブル (.mbm と共通実装) ----
     let names = read_name_dict(reader, path)?;
     model.name_dict = crate::name_dict::build_name_index(&names);
-    model.kanji_dict = read_kanji_dict(reader, path)?;
+    model.single_char_dict = read_single_char_dict(reader, path)?;
 
     // ---- 後処理: vocab を Rust の Ord で再ソート (.mbm の loader と同じ理由) ----
     model.vocab.sort_by(|a, b| a.0.cmp(&b.0));

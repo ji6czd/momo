@@ -45,7 +45,7 @@ pub struct FloatMomoModel {
     pub(crate) boundary: FloatBoundary,
 
     pub(crate) name_dict: NameIndex,
-    pub(crate) kanji_dict: Vec<(char, Vec<String>)>,
+    pub(crate) single_char_dict: Vec<(char, Vec<String>)>,
 
     pub(crate) n_classes: u32,
     pub(crate) n_features: u32,
@@ -79,7 +79,7 @@ impl Default for FloatMomoModel {
             intercept_read: Vec::new(),
             boundary: FloatBoundary::default(),
             name_dict: NameIndex::new(),
-            kanji_dict: Vec::new(),
+            single_char_dict: Vec::new(),
             n_classes: 0,
             n_features: 0,
         }
@@ -129,8 +129,8 @@ impl WeightModel for FloatMomoModel {
         &self.name_dict
     }
 
-    fn take_kanji_dict(&mut self) -> Vec<(char, Vec<String>)> {
-        std::mem::take(&mut self.kanji_dict)
+    fn take_single_char_dict(&mut self) -> Vec<(char, Vec<String>)> {
+        std::mem::take(&mut self.single_char_dict)
     }
 
     fn compute_read_scores(&self, feat_ids: &[u32], _scratch: &mut (), scores: &mut [f32]) {

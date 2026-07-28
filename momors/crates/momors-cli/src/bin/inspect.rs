@@ -56,7 +56,7 @@ struct Cli {
     #[arg(long, default_value = "large", global = true)]
     model: ModelSize,
 
-    /// 漢字辞書ファイル (.tsv) のパス（省略時はモデルに同梱された辞書を使用）
+    /// 単一文字辞書ファイル (.tsv) のパス（省略時はモデルに同梱された辞書を使用）
     #[arg(long, global = true)]
     single_dict: Option<String>,
 
@@ -124,10 +124,10 @@ fn main() -> ExitCode {
     if let Some(ref path) = cli.single_dict {
         let p = PathBuf::from(path);
         if !p.exists() {
-            eprintln!("漢字辞書ファイルが見つかりません: {}", p.display());
+            eprintln!("単一文字辞書ファイルが見つかりません: {}", p.display());
             return ExitCode::FAILURE;
         }
-        config = config.with_kanji_dict_path(&p);
+        config = config.with_single_char_dict_path(&p);
     }
 
     let predictor = match AnyPredictor::load(config) {

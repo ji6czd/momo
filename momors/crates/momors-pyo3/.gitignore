@@ -2,3 +2,11 @@
 # Force-included into the wheel via [tool.maturin] include.
 python/momors_py/*.mbm
 python/momors_py/single_character_dic.tsv
+
+# maturin develop / uv run local artifacts (must also stay out of the
+# sdist: Cargo.toml's include allowlist bypasses .gitignore, so these
+# are additionally excluded there).
+.venv/
+__pycache__/
+python/momors_py/*.pyd
+python/momors_py/*.pdb

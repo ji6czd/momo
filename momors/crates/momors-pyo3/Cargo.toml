@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 authors.workspace = true
 license.workspace = true
+include = ["src/**", "/Cargo.toml"]
 
 [lib]
 name = "momors_py"

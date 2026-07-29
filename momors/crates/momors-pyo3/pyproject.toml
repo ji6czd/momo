@@ -2,10 +2,11 @@
 name = "momors-py"
 version = "0.8.13"
 description = "Python bindings for the MOMO Japanese text-to-Braille engine (Rust backend)"
-authors = [
-    { name = "KIRIAKE Masanori", email = "seiken@rd01.net" }
-]
+authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]
 requires-python = ">=3.13"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
@@ -15,7 +16,4 @@ build-backend = "maturin"
 module-name = "momors_py.momors_py"
 python-source = "python"
 features = ["pyo3/extension-module"]
-include = [
-    { path = "python/momors_py/*.mbm", format = "wheel" },
-    { path = "python/momors_py/single_character_dic.tsv", format = "wheel" },
-]
+include = ["python/momors_py/*.mbm"]

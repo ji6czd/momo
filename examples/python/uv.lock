@@ -1,0 +1,22 @@
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[[package]]
+name = "momors-py"
+version = "0.8.13"
+source = { path = "../../dist/momors_py-0.8.13-cp313-abi3-win_amd64.whl" }
+wheels = [
+    { filename = "momors_py-0.8.13-cp313-abi3-win_amd64.whl", hash = "sha256:ace409087ea915f375c8813e1ad4c7423ec39e52d0aab1a93672591b85a0396e" },
+]
+
+[[package]]
+name = "peach"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "momors-py" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "momors-py", path = "../../dist/momors_py-0.8.13-cp313-abi3-win_amd64.whl" }]

@@ -1,0 +1,12 @@
+[project]
+name = "peach"
+version = "0.1.0"
+description = "MOMOを使ったPythonのプロジェクトテンプレート"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "momors-py",
+]
+
+[tool.uv.sources]
+momors-py = { path = "../../dist/momors_py-0.8.13-cp313-abi3-win_amd64.whl" }

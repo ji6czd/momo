@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-include = ["src/**", "build.rs", "data/**"]
+include = ["src/**", "tables/**"]
 
 [dependencies]
 thiserror.workspace = true

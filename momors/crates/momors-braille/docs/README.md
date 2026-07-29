@@ -1,10 +1,10 @@
 # momors-braille のドキュメント
 
 英語点字（UEB grade 2）の仕様書。**MOMO がどの規則をどう実装したか**を、規範の条文番号つきで
-記録してある。日本語点字については `src/japanese_translator.rs` と `dataset/japanese_*.toml` を参照。
+記録してある。日本語点字については `src/japanese_translator.rs` と `tables/japanese_*.toml` を参照。
 
 実装は [`src/english_translator.rs`](../src/english_translator.rs)、データは
-`dataset/english_ueb_grade2.toml`（grade 1 は `english_ueb_grade1.toml`）。
+`tables/english_ueb_grade2.toml`（grade 1 は `english_ueb_grade1.toml`）。
 
 ## 規範（出典）
 

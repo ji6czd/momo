@@ -6,7 +6,7 @@ UEB grade 2 の英語点訳を**単体で完成**させる。
 
 - 出典: The Rules of Unified English Braille, 3rd Edition 2024 (ICEB) §2.6（standing alone）,
   §4（capitals）, §6（numeric mode / grade 1）, §10.11（contraction の選択）。
-- 対象は英語点字エンジン（`english_translator.rs` + `dataset/english_ueb_grade2.toml`）に閉じる。
+- 対象は英語点字エンジン（`english_translator.rs` + `tables/english_ueb_grade2.toml`）に閉じる。
 
 ---
 

@@ -366,22 +366,22 @@ pub struct Table {
 
 const TOML_GRADE1: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../dataset/japanese_grade1.toml"
+    "/tables/japanese_grade1.toml"
 ));
 
 const TOML_NOCONVERSION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../dataset/japanese_no_conversion.toml"
+    "/tables/japanese_no_conversion.toml"
 ));
 
 const TOML_UEB_GRADE2: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../dataset/english_ueb_grade2.toml"
+    "/tables/english_ueb_grade2.toml"
 ));
 
 const TOML_UEB_GRADE1: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../dataset/english_ueb_grade1.toml"
+    "/tables/english_ueb_grade1.toml"
 ));
 
 static EMBEDDED: LazyLock<Vec<Table>> = LazyLock::new(|| {
@@ -818,12 +818,16 @@ mod tests {
     fn embedded_tables_list() {
         let tables = embedded_tables();
         assert!(tables.len() >= 2, "テーブルが2つ以上ある");
-        assert!(tables
-            .iter()
-            .any(|t| t.name.as_deref() == Some("japanese_grade1")));
-        assert!(tables
-            .iter()
-            .any(|t| t.name.as_deref() == Some("japanese_no_conversion")));
+        assert!(
+            tables
+                .iter()
+                .any(|t| t.name.as_deref() == Some("japanese_grade1"))
+        );
+        assert!(
+            tables
+                .iter()
+                .any(|t| t.name.as_deref() == Some("japanese_no_conversion"))
+        );
     }
 
     #[test]

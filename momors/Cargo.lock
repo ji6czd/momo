@@ -240,7 +240,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "momors-braille"
-version = "0.8.13"
+version = "0.8.14"
 dependencies = [
  "serde",
  "thiserror",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "momors-cli"
-version = "0.8.13"
+version = "0.8.14"
 dependencies = [
  "clap",
  "momors-braille",
@@ -258,7 +258,7 @@ dependencies = [
 
 [[package]]
 name = "momors-core"
-version = "0.8.13"
+version = "0.8.14"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "momors-ffi"
-version = "0.8.13"
+version = "0.8.14"
 dependencies = [
  "cbindgen",
  "momors-braille",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "momors-pyo3"
-version = "0.8.13"
+version = "0.8.14"
 dependencies = [
  "momors-braille",
  "momors-core",
@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "momors-wasm"
-version = "0.8.13"
+version = "0.8.14"
 dependencies = [
  "momors-braille",
  "momors-core",

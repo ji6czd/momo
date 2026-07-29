@@ -189,12 +189,6 @@ tasks:
     cmds:
       - task train
 
-  pyo3:venv:
-    desc: Ensure momo-py venv exists (uv sync)
-    dir: momo-py
-    cmds:
-      - uv sync
-
   pyo3:sync:
     desc: Copy trained model files from dataset/ to momors-pyo3 crate
     vars:
@@ -218,22 +212,11 @@ tasks:
 
   pyo3:
     desc: Build Python wheel from Rust bindings (maturin)
-    deps: [pyo3:venv, pyo3:sync]
+    deps: [pyo3:sync]
     dir: momors/crates/momors-pyo3
     env:
-      VIRTUAL_ENV: "{{.ROOT_DIR}}/momo-py/.venv"
     cmds:
-      - echo "{{.VIRTUAL_ENV}}"
-      - maturin build --release
-
-  pyo3:dev:
-    desc: Install Rust bindings into momo-py venv (maturin develop)
-    deps: [pyo3:venv, pyo3:sync]
-    dir: momors/crates/momors-pyo3
-    env:
-      VIRTUAL_ENV: "{{.ROOT_DIR}}/momo-py/.venv"
-    cmds:
-      - maturin develop --release
+      - uv build
 
   gui:
     desc: Build .NET GUI (release)

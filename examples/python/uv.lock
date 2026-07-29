@@ -3,6 +3,21 @@ revision = 3
 requires-python = ">=3.13"
 
 [[package]]
+name = "momors-py"
+version = "0.8.13"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fc/97/bcead8d377dadb9d567e7d6680c5bf0e42c9c10af329e039592837fa9d1f/momors_py-0.8.13.tar.gz", hash = "sha256:f3701fd0db020e15697a734ee5c854cf7fede80ffc018e8f83e2ff494bc9ca2d", size = 36227085, upload-time = "2026-07-29T07:25:56.391Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/c1/933de3e220957816f6f439af4a4868a91ff33fff71f3f4e9dbe42ecf3e72/momors_py-0.8.13-cp313-abi3-win_amd64.whl", hash = "sha256:2242b7861b13b7814842f34cc212d46523b9030bd6ade4c206c0e5ccca775d24", size = 36597538, upload-time = "2026-07-29T07:25:48.207Z" },
+]
+
+[[package]]
 name = "peach"
 version = "0.1.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "momors-py" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "momors-py", specifier = ">=0.8.13" }]

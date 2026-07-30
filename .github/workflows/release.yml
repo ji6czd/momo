@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "release/*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # タグと momors/Cargo.toml のバージョンがずれたまま学習(~30分)に
+      # 突入するのを避けるため、最初に安く落とす。
+      - name: Verify tag matches momors/Cargo.toml version
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ github.ref_name }}" -replace '^release/', ''
+          $cargoVersion = (Select-String -Path momors/Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          if ($tagVersion -ne $cargoVersion) {
+            Write-Error "Tag version ($tagVersion) does not match momors/Cargo.toml version ($cargoVersion)"
+            exit 1
+          }
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Task
+        uses: arduino/setup-task@v3
+
+      - name: Set up wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      # 手元環境と同じ winget 導入にすることで、Taskfile.yml の dist:msi が
+      # ハードコードしている "WiX Toolset v3.14" のインストールパスと一致させる。
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          winget install --id WixToolset.WixToolset -e --silent --accept-package-agreements --accept-source-agreements
+          "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # Taskfile.yml の vscode/dist:vscode タスクは node_modules が
+      # 存在する前提のため、CI では別途インストールしておく必要がある。
+      - name: Install vscode-momo dependencies
+        working-directory: vscode-momo
+        run: pnpm install --frozen-lockfile
+
+      - name: Train model
+        run: task train
+
+      - name: Verify version consistency across components
+        run: task version:check
+
+      - name: Build wasm bindings
+        run: task wasm
+
+      - name: Package VSCode extension
+        run: task dist:vscode
+
+      - name: Build Windows installer
+        run: task dist:msi
+
+      - name: Build Python (pyo3) wheel
+        run: task dist:pyo3
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          files: |
+            dist/*.msi
+            dist/*.vsix
+            dist/*.whl

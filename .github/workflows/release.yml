@@ -36,7 +36,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v9
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.13"
 
@@ -54,7 +54,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Set up Task
-        uses: arduino/setup-task@v3
+        uses: arduino/setup-task@v3.0.0
 
       - name: Set up wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0

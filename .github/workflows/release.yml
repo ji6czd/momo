@@ -65,13 +65,12 @@ jobs:
       - name: Set up wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
 
-      # 手元環境と同じ winget 導入にすることで、Taskfile.yml の dist:msi が
-      # ハードコードしている "WiX Toolset v3.14" のインストールパスと一致させる。
-      - name: Install WiX Toolset
+      # windows-latest ランナーには WiX Toolset v3.14 がプリインストール済み
+      # (手元環境も同じバージョン)。Taskfile.yml の dist:msi がこのパスを
+      # ハードコードしているため、PATH に追加するだけでよい。
+      - name: Add WiX Toolset to PATH
         shell: pwsh
         run: |
-          winget source update -n winget
-          winget install --source winget --id WixToolset.WixToolset --silent --accept-package-agreements --accept-source-agreements
           "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # Taskfile.yml の vscode/dist:vscode タスクは node_modules が

@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "release/*"
+  # ビルド一式の動作確認用。タグを作らずブランチに対して手動実行できる。
+  # バージョンチェックと Release 作成(draft)はタグ push の時だけ行う。
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,6 +24,7 @@ jobs:
       # タグと momors/Cargo.toml のバージョンがずれたまま学習(~30分)に
       # 突入するのを避けるため、最初に安く落とす。
       - name: Verify tag matches momors/Cargo.toml version
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $tagVersion = "${{ github.ref_name }}" -replace '^release/', ''
@@ -94,6 +98,7 @@ jobs:
         run: task dist:pyo3
 
       - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}

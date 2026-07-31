@@ -18,6 +18,10 @@ concurrency:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      # Windows ランナーの既定コンソールコードページでは momo-py の絵文字入り
+      # 出力(例: 📊)がエンコードできず落ちるため、Python を UTF-8 モードで動かす。
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v7
 

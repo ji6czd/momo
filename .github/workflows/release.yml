@@ -83,8 +83,15 @@ jobs:
         working-directory: vscode-momo
         run: pnpm install --frozen-lockfile
 
+      # ランナーの論理コア数を検出し、momo-py/Taskfile.yml の JOBS を
+      # CLI 上書きして学習の並列度をランナーのスペックに合わせる。
       - name: Train model
-        run: task train
+        shell: pwsh
+        working-directory: momo-py
+        run: |
+          $jobs = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+          Write-Host "Detected $jobs logical processors; training with JOBS=$jobs"
+          task train JOBS=$jobs
 
       - name: Verify version consistency across components
         run: task version:check

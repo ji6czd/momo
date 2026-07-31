@@ -89,6 +89,9 @@ jobs:
       - name: Verify version consistency across components
         run: task version:check
 
+      - name: Build momo binaries
+        run: task rust
+
       - name: Build wasm bindings
         run: task wasm
 

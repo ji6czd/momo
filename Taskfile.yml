@@ -220,6 +220,7 @@ tasks:
 
   gui:
     desc: Build .NET GUI (release)
+    deps: [rust]
     dir: momo-gui
     cmds:
       - dotnet publish -c Release
@@ -227,6 +228,7 @@ tasks:
   editor:
     desc: Build .NET editor (release)
     dir: momo-editor
+    deps: [rust]
     cmds:
       - dotnet publish -c Release
 

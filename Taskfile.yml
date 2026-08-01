@@ -283,7 +283,7 @@ tasks:
     deps: [pyo3]
     cmds:
       - mkdir -p "{{.OUT}}"
-      - cp momors/target/wheels/*.whl "{{.OUT}}/"
+      - cp momors/crates/momors-pyo3/dist/*.whl "{{.OUT}}/"
 
   dist:python:
     desc: Build Python wheel and copy to dist/

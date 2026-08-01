@@ -88,6 +88,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: trained-model
+          path: dataset
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -174,6 +175,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: trained-model
+          path: dataset
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -209,11 +211,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: windows-dist
+          path: dist
 
       - name: download macos artifacts
         uses: actions/download-artifact@v4
         with:
           name: macos-dist
+          path: dist
 
       - name: Create draft release
         if: startsWith(github.ref, 'refs/tags/')

@@ -9,6 +9,7 @@ tasks:
 
   rust:
     desc: Build Rust workspace (release)
+    run: once
     dir: momors
     cmds:
       - uv run -p 3.13 tools/gen_char_type_rs.py
@@ -264,9 +265,9 @@ tasks:
       OUT: "{{.ROOT_DIR}}/dist"
     deps:
       - rust
-      - gui
-      - editor
     cmds:
+      - task: gui
+      - task: editor
       - task: dist:stage
       - mkdir -p "{{.OUT}}"
       - candle -arch x64 "-dVersion={{.VERSION}}" "-dStageDir={{.STAGE}}" -out "{{.OBJ}}" "{{.WXS}}"

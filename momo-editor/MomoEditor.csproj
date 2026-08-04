@@ -9,7 +9,7 @@
 
     <!-- About ダイアログに表示する情報。ここを書き換えればバージョン・著作権が反映される。 -->
     <Product>Momo Editor</Product>
-    <Version>0.8.14</Version>
+    <Version>0.9.0</Version>
     <Company>Momo Project Team</Company>
     <Copyright>Copyright © 2026 Momo Project Team</Copyright>
   </PropertyGroup>

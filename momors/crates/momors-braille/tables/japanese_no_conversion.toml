@@ -46,6 +46,10 @@ author = "MOMO Project"
 "* -> punct.jp.inline" = 1
 "punct.jp.inline -> *" = 1
 # 句読点の前は続ける
+"punct.latin.inline -> punct.jp.inline" = 0
+"punct.jp.inline -> punct.jp.inline" = 0
+"punct.jp.inline -> punct.latin.stop" = 0
+"punct.jp.inline -> punct.latin.pause" = 0
 "punct.jp.inline -> punct.jp.stop" = 0
 "punct.jp.inline -> punct.jp.pause" = 0
 "punct.jp.inline -> punct.jp.close" = 0
@@ -338,21 +342,19 @@ classes = ["stop", "pause", "open", "close", "inline"]
 "㋿" = "⠛⠃⠄"
 "㈱" = "⠶⠡⠐⠭⠶"
 "㈲" = "⠶⠬⠒⠶"
-"●" = "⠐⠵"
-"◎" = "⠐⠵"
-"○" = "⠐⠵"
-"◯" = "⠐⠵"
-"★" = "⠐⠿"
-"☆" = "⠐⠿"
-"■" = "⠐⠽"
-"□" = "⠸⠭⠇"
-"◆" = "⠐⠽"
-"◇" = "⠐⠽"
-"▲" = "⠐⠷"
-"△" = "⠐⠷"
-"▼" = "⠐⠾"
-"▽" = "⠐⠾"
-"※" = "⠔⠔"
+"●" = { braille = "⠐⠵", class = "inline" }
+"◎" = { braille = "⠐⠵", class = "inline" }
+"○" = { braille = "⠐⠵", class = "inline" }
+"★" = { braille = "⠐⠿", class = "inline" }
+"☆" = { braille = "⠐⠿", class = "inline" }
+"□" = { braille = "⠸⠭⠇", class = "inline" }
+"◆" = { braille = "⠐⠽", class = "inline" }
+"◇" = { braille = "⠐⠽", class = "inline" }
+"▲" = { braille = "⠐⠷", class = "inline" }
+"△" = { braille = "⠐⠷", class = "inline" }
+"▼" = { braille = "⠐⠾", class = "inline" }
+"▽" = { braille = "⠐⠾", class = "inline" }
+"※" = { braille = "⠔⠔", class = "inline" }
 "㍘" = "⠼⠚⠐⠳"
 "㍙" = "⠼⠁⠐⠳"
 "㍚" = "⠼⠃⠐⠳"

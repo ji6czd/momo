@@ -71,6 +71,12 @@ double_entry_prefix = "⠠⠠" # 次の文字も大文字のとき（全大文�
 "* -> punct.jp.inline" = 1
 "punct.jp.inline -> *" = 1
 # →など、句読点の前は続ける
+"punct.latin.stop -> punct.jp.inline" = 0
+"punct.latin.pause -> punct.jp.inline" = 0
+"punct.latin.inline -> punct.jp.inline" = 0
+"punct.jp.inline -> punct.jp.inline" = 0
+"punct.jp.inline -> punct.latin.stop" = 0
+"punct.jp.inline -> punct.latin.pause" = 0
 "punct.jp.inline -> punct.jp.stop" = 0
 "punct.jp.inline -> punct.jp.pause" = 0
 "punct.jp.inline -> punct.jp.close" = 0
@@ -366,21 +372,19 @@ classes = ["stop", "pause", "open", "close", "inline"]
 "㋿" = "⠛⠃⠄"
 "㈱" = "⠶⠡⠐⠭⠶"
 "㈲" = "⠶⠬⠒⠶"
-"●" = "⠐⠵"
-"◎" = "⠐⠵"
-"○" = "⠐⠵"
-"◯" = "⠐⠵"
-"★" = "⠐⠿"
-"☆" = "⠐⠿"
-"■" = "⠐⠽"
-"□" = "⠸⠭⠇"
-"◆" = "⠐⠽"
-"◇" = "⠐⠽"
-"▲" = "⠐⠷"
-"△" = "⠐⠷"
-"▼" = "⠐⠾"
-"▽" = "⠐⠾"
-"※" = "⠔⠔"
+"●" = { braille = "⠐⠵", class = "inline" }
+"◎" = { braille = "⠐⠵", class = "inline" }
+"○" = { braille = "⠐⠵", class = "inline" }
+"★" = { braille = "⠐⠿", class = "inline" }
+"☆" = { braille = "⠐⠿", class = "inline" }
+"□" = { braille = "⠸⠭⠇", class = "inline" }
+"◆" = { braille = "⠐⠽", class = "inline" }
+"◇" = { braille = "⠐⠽", class = "inline" }
+"▲" = { braille = "⠐⠷", class = "inline" }
+"△" = { braille = "⠐⠷", class = "inline" }
+"▼" = { braille = "⠐⠾", class = "inline" }
+"▽" = { braille = "⠐⠾", class = "inline" }
+"※" = { braille = "⠔⠔", class = "inline" }
 "㍘" = "⠼⠚⠐⠳"
 "㍙" = "⠼⠁⠐⠳"
 "㍚" = "⠼⠃⠐⠳"

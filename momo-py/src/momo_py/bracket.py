@@ -127,8 +127,16 @@ def _with_char_and_label(row: Row, new_char: str, new_label: str) -> Row:
 # trainer.py側でこのラベルの行を実際の学習例（Y_read/Y_boundary）から除外する
 # ためのセンチネル。source_seq（ひいてはbigram/trigram/kanji_run等の特徴量
 # 計算）には残す＝隣接する実文字が「括弧がここにあった」ことを認識できる
-# ようにするが、この行自体には読み/境界を予測させない
-# （実際の出力・マスあけはRust推論側のstrip/Atom/splice経路が別途決める）。
+# ようにするが、この行自体には読み/境界を予測させない。
+#
+# ASIDE括弧（開き括弧の行）にのみ使う。中身がspanごと本文から抜かれて独立文
+# になるため、開き括弧の行自体は「そこにASIDEがあった」ことを示す特徴量専用の
+# プレースホルダでしかなく、実際の出力・マスあけの決定対象になり得ない
+# （Rust推論側のextract_aside_spans/splice_atomsが別途決める）。
+#
+# INLINE括弧には使わない（tokenize_for_training参照）。中身と一緒に本文の
+# 流れに残るため、開き・閉じの行自体もRust推論側で実際の境界判定対象になる
+# ─ その行自身のラベル（+Sの有無）をそのまま学習に使う。
 LABEL_CONTEXT_ONLY = "@"
 
 
@@ -227,27 +235,27 @@ def tokenize_for_training(rows: Sentence) -> Tuple[Sentence, List[Sentence]]:
     専用の圧縮トークン（INLINE_OPEN_TOKEN/INLINE_CLOSE_TOKEN/ASIDE_TOKEN）に
     置き換える（strip_for_trainingの後継、圧縮アイデンティティ・トークン方式）。
 
-    strip_for_trainingとの違い: 括弧の行そのものは削除しない。ラベルは
-    LABEL_CONTEXT_ONLYに差し替え、trainer.py側でこの行を実際の学習例
-    （Y_read/Y_boundary）からは除外しつつ、bigram/trigram/kanji_run/
-    kanji_pos_first等の特徴量計算にはそのまま使わせる。個々の括弧字形は
-    bigram/trigramにとって希少すぎて汎化しないが、Role×Treatmentを3値に
-    圧縮したトークンなら汎化する（実測: momo-inspect traceで「、」が読み
-    分けに効く主因はbi_p1_s/type_tri_p2_p1_sのような隣接ベースの特徴量
-    だった。kanji_run/kanji_pos_firstはsource_seq上の隣接をそのまま辿る
-    実装のため、strip_for_trainingのように行ごと削除すると括弧の存在を
-    一切認識できない）。utilities/bracket_identity_token_experiment.pyでの
-    実データ検証で、READING誤り2件（海→ウミ、楽→ガッ）が直ることを確認済み。
+    strip_for_trainingとの違い: 括弧の行そのものは削除しない。char列だけを
+    トークンへ差し替える。個々の括弧字形はbigram/trigramにとって希少すぎて
+    汎化しないが、Role×Treatmentを3値に圧縮したトークンなら汎化する
+    （実測: momo-inspect traceで「、」が読み分けに効く主因はbi_p1_s/
+    type_tri_p2_p1_sのような隣接ベースの特徴量だった。kanji_run/
+    kanji_pos_firstはsource_seq上の隣接をそのまま辿る実装のため、
+    strip_for_trainingのように行ごと削除すると括弧の存在を一切認識できない）。
+    utilities/bracket_identity_token_experiment.pyでの実データ検証で、
+    READING誤り2件（海→ウミ、楽→ガッ）が直ることを確認済み。
 
-    出力・マスあけの決定は従来通りRust推論側のstrip/Atom/splice経路に
-    委ねる（この関数もbracket.rs側も一切変更しない）。
-
-    - INLINE括弧: その場でトークンに置換。閉じ括弧行が持っていた+Sは
-      strip_for_trainingと同じ規則で直前の実文字行へ移す。
-    - ASIDE括弧: 開き括弧の行だけをASIDE_TOKENに置換し、閉じ括弧の行と
-      中身は本文から除く。中身は独立した副文として返す
-      （Rust側predict_with_bracketsの再帰独立推論に対応）。閉じ括弧の+Sは
-      strip_for_trainingと同じく開き括弧の直前に来る実文字行へ移す。
+    - INLINE括弧: その場でトークンに置換するだけで、ラベル（`+S`の有無を
+      含む）には一切触れない。中身と一緒に本文の流れに残り、Rust推論側
+      （momors-core::prediction）でも実文字のまま境界判定の対象になる
+      （strip/spliceでは外さない）ため、開き・閉じの行自身が持つ`+S`を
+      そのまま学習に使えばよく、直前行への移設は不要（旧strip_for_training
+      時代の名残）。
+    - ASIDE括弧: 開き括弧の行だけを`ASIDE_TOKEN`＋`LABEL_CONTEXT_ONLY`に
+      置換し、閉じ括弧の行と中身は本文から除く。中身は独立した副文として
+      返す（Rust側predict_with_bracketsの再帰独立推論に対応）。中身は
+      span ごと本文から抜かれるため、閉じ括弧の`+S`はRust側と同じく
+      開き括弧の直前に来る実文字行へ移す（Aside側は従来通り）。
 
     戻り値: (トークン化したメイン文, 副文のリスト。入れ子Asideは再帰的に平坦化)
     """
@@ -267,16 +275,8 @@ def tokenize_for_training(rows: Sentence) -> Tuple[Sentence, List[Sentence]]:
         role, treatment = info
 
         if treatment == Treatment.INLINE:
-            if role == Role.OPEN:
-                if _has_space(row[1]):
-                    print(f"⚠️  開き括弧行に+S(未対応パターン、無視): {row}")
-                out_rows.append(_with_char_and_label(row, INLINE_OPEN_TOKEN, LABEL_CONTEXT_ONLY))
-            else:  # CLOSE
-                if out_rows and _has_space(row[1]):
-                    out_rows[-1] = _with_label(out_rows[-1], _set_space(out_rows[-1][1], True))
-                elif _has_space(row[1]):
-                    print(f"⚠️  文頭付近の閉じ括弧+Sを移設できません(無視): {row}")
-                out_rows.append(_with_char_and_label(row, INLINE_CLOSE_TOKEN, LABEL_CONTEXT_ONLY))
+            token = INLINE_OPEN_TOKEN if role == Role.OPEN else INLINE_CLOSE_TOKEN
+            out_rows.append(_with_char_and_label(row, token, row[1]))
             i += 1
             continue
 

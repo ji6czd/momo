@@ -101,12 +101,17 @@ impl CharType {
         self.category() == 0x10
     }
 
-    /// 素通し (bypass) 扱いにすべき文字種か。
+    /// 素通し (bypass) 扱いにすべき文字種か。**読みの**素通し可否のみを表す。
     ///
-    /// `Space`・記号系・`Other` は読みも境界も推論せず、原文をそのまま出力する。
+    /// `Space`・記号系・`Other` は読みを推論せず、原文をそのまま出力する。
     /// 英字 `Alpha` は読みこそ素通しだが、直後のマスあけは境界モデルに委ねるため
     /// bypass には含めない（カタカナと同じ「読み素通し＋境界モデル」扱い。
     /// 推論本体 `predict_normalized` の ALPHA 分岐を参照）。
+    ///
+    /// 境界（マスあけ）判定を実際にスキップするかどうかは別軸で、
+    /// [`skips_boundary_check`](Self::skips_boundary_check) が担う。
+    /// `Symbol`/`SymbolOpen`/`SymbolClose`（括弧類を含む）は読みは素通ししつつ
+    /// 境界はモデルに問い合わせる（ALPHA・カタカナと同型）。
     #[inline]
     pub fn is_bypass(self) -> bool {
         matches!(
@@ -118,6 +123,29 @@ impl CharType {
                 | CharType::SymbolStop
                 | CharType::SymbolPause
                 | CharType::Other
+        )
+    }
+
+    /// 境界（マスあけ）判定もスキップすべき文字種か。
+    ///
+    /// `is_bypass()` が読みの素通し可否を表すのに対し、こちらは境界判定の
+    /// 可否を表す独立した軸。`SymbolStop`（文末記号 `。！?.`）・
+    /// `SymbolPause`（読点・中点 `、・,`）はそれ自体が既に文の区切りとして
+    /// 機能しており、直後にさらに境界モデルでマスあけを重ねて判定する意味が
+    /// 薄いためスキップする。`Space`（原文の空白そのもの）・`Other`
+    /// （未定義文字）も同様に対象外とする。
+    ///
+    /// 一方 `Symbol`・`SymbolOpen`・`SymbolClose`（括弧類を含む）は境界としての
+    /// 意味合いが薄く、直後に語が続くかどうかは文脈次第（例:「」の直後が
+    /// 助詞なら分割しない・体言が続くなら分割する）なので、ここには含めず
+    /// 境界モデルに判定させる。学習データ（trainer.py）はこれらの文字種の
+    /// 行も boundary ラベル（+S）付きで学習に使っており、モデル自体は既に
+    /// 対応済み。単に推論側がこれまで問い合わせていなかっただけ。
+    #[inline]
+    pub fn skips_boundary_check(self) -> bool {
+        matches!(
+            self,
+            CharType::Space | CharType::SymbolStop | CharType::SymbolPause | CharType::Other
         )
     }
 
@@ -383,6 +411,40 @@ mod tests {
     #[test]
     fn other_is_bypass() {
         assert!(CharType::Other.is_bypass());
+    }
+
+    #[test]
+    fn stop_and_pause_skip_boundary_check() {
+        // それ自体が既に文の区切りとして機能するため、直後のマスあけ判定は
+        // 重ねてモデルに問い合わせない。
+        assert!(CharType::SymbolStop.skips_boundary_check());
+        assert!(CharType::SymbolPause.skips_boundary_check());
+    }
+
+    #[test]
+    fn space_and_other_skip_boundary_check() {
+        assert!(CharType::Space.skips_boundary_check());
+        assert!(CharType::Other.skips_boundary_check());
+    }
+
+    #[test]
+    fn symbol_and_brackets_do_not_skip_boundary_check() {
+        // 括弧類（SymbolOpen/SymbolClose）を含む一般記号は境界としての意味合いが
+        // 薄く、直後に語が続くかは文脈次第（例:「」の直後が助詞なら分割しない・
+        // 体言が続くなら分割する）なので、読みはbypassしつつ境界はモデルに
+        // 判定させる（ALPHA・カタカナと同型）。
+        assert!(!CharType::Symbol.skips_boundary_check());
+        assert!(!CharType::SymbolOpen.skips_boundary_check());
+        assert!(!CharType::SymbolClose.skips_boundary_check());
+    }
+
+    #[test]
+    fn non_bypass_types_do_not_skip_boundary_check() {
+        // is_bypass()がfalseの型は別経路(ALPHA/カタカナ専用分岐や通常LR分岐)で
+        // 境界判定されるため、この述語の対象外(falseで一貫)。
+        assert!(!CharType::Hiragana.skips_boundary_check());
+        assert!(!CharType::Kanji.skips_boundary_check());
+        assert!(!CharType::Alpha.skips_boundary_check());
     }
 
     #[test]

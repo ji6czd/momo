@@ -541,18 +541,24 @@ impl<M: WeightModel> Predictor<M> {
         Ok(result)
     }
 
-    /// 括弧を本文から外して推論し、結果へ組み立て直す。
+    /// 括弧を扱いつつ推論する。
     ///
-    /// 括弧種によって外し方が2通りある（[`crate::bracket::Treatment`]）:
+    /// 括弧種によって扱いが2通りある（[`crate::bracket::Treatment`]）:
     ///
     /// - **Aside（注釈系）**: span ごと本文から抜き、中身は独立に推論して前の語へ
     ///   食いつけて合成する。フラット化すると `オケオーケストラ` のような実在しない
     ///   隣接ができ、特徴量ウィンドウが偽の文脈をまたぐため。
-    /// - **Inline（引用系）**: 括弧文字だけ外し、中身は本文と一緒に推論する。
-    ///   `朝おはようと` は自然文で、モデルへの問いも正しい問いになるため。
+    /// - **Inline（引用系）**: 本文からは外さない。中身と一緒にそのまま推論へ
+    ///   乗せる ─ 読みは他の記号と同じく bypass、直後のマスあけは境界モデルに
+    ///   委ねる（ALPHA・カタカナと同型。`CharType::skips_boundary_check` 参照）。
+    ///   これにより閉じ括弧自身が自分の直後のマスあけを判定できる
+    ///   （直前の実文字の判定を借用する必要が無い）。
     ///
-    /// どちらも境界モデルのマスあけ判断には手を加えない。中身を抜いた本文は
-    /// 括弧が無かったときの自然文そのものなので、その語境界がそのまま正解になる。
+    /// どちらも特徴量計算（bigram/trigram/kanji_run等）は実文字ではなく
+    /// `INLINE_OPEN_TOKEN`/`INLINE_CLOSE_TOKEN`/`ASIDE_TOKEN`
+    /// （[`crate::bracket`] 参照）に置き換えたビューから取る。個々の括弧字形は
+    /// 特徴量にとって希少すぎて汎化しないため。出力・ctype分岐・境界判定は
+    /// 常に実文字ベースの `text`/`outer.text` 基準のまま。
     ///
     /// 入出力の座標系は引数 `text` 基準。括弧が無ければ最終的に
     /// [`predict_normalized_with_feature_text`] へオーバーヘッドゼロで届く。
@@ -563,17 +569,16 @@ impl<M: WeightModel> Predictor<M> {
         // --- Aside span を本文から抜く ---
         let (outer, spans) = extract_aside_spans(text);
 
-        // --- 本文（Inline 括弧はここで外す）を推論 ---
-        // spans が非空なら、特徴量計算専用ビュー（Aside span を ASIDE_TOKEN に
-        // 置換したテキスト）を作り、隣接文字の bigram/trigram/kanji_run 等が
-        // 「注釈がそこにあった」ことを認識できるようにする（出力・マスあけは
-        // 従来通り outer.text 基準のまま、一切変えない）。
-        let mut result = if spans.is_empty() {
-            self.predict_inline(&outer.text)?
+        // --- 特徴量計算専用ビューを組み立てる ---
+        // Aside span は ASIDE_TOKEN に、Inline括弧は INLINE_OPEN/CLOSE_TOKEN に
+        // 置換する（出力・ctype分岐・境界判定は常に outer.text 基準の実文字の
+        // まま、一切変えない）。
+        let feature_text = if spans.is_empty() {
+            replace_inline_brackets_with_token(text)
         } else {
-            let feature_text = replace_aside_spans_with_token(text, &spans);
-            self.predict_inline_with_feature_text(&outer.text, &feature_text)?
+            replace_inline_brackets_with_token(&replace_aside_spans_with_token(text, &spans))
         };
+        let mut result = self.predict_normalized_with_feature_text(&outer.text, &feature_text)?;
         if !spans.is_empty() {
             // outer 座標 → text 座標
             remap_result_to_source(&mut result, text, &outer.byte_map);
@@ -612,8 +617,6 @@ impl<M: WeightModel> Predictor<M> {
 
             atoms.push(Atom {
                 pos: sp.pos,
-                // span 全体が前の語へ食いつく（注釈は前の語を修飾する）
-                side: Side::Left,
                 kana,
                 srcs,
                 confs,
@@ -624,50 +627,20 @@ impl<M: WeightModel> Predictor<M> {
         Ok(result)
     }
 
-    /// Inline 括弧（引用系）と、対応の取れない単独括弧を外して推論する。
-    ///
-    /// 中身は本文と一緒にフラット化して推論し、括弧文字だけを開き=後続に密着 /
-    /// 閉じ=前接に密着させて書き戻す。マスあけには触らない。
-    fn predict_inline(&self, text: &str) -> Result<PredictionResult> {
-        self.predict_inline_with_feature_text(text, text)
-    }
-
-    /// [`predict_inline`] の特徴量専用ビュー対応版。`feature_text` は
-    /// [`predict_with_brackets`] が Aside span を ASIDE_TOKEN に置換した
-    /// テキストを渡すことがある（無ければ `text` と同じ）。
-    ///
-    /// [`predict_inline`]: Predictor::predict_inline
-    /// [`predict_with_brackets`]: Predictor::predict_with_brackets
-    fn predict_inline_with_feature_text(
-        &self,
-        text: &str,
-        feature_text: &str,
-    ) -> Result<PredictionResult> {
-        let (stripped, atoms) = strip_bracket_chars(text);
-        // Inline 括弧（および対応の取れない単独括弧）を INLINE_OPEN_TOKEN/
-        // INLINE_CLOSE_TOKEN に置換する。feature_text 側にだけ適用し、
-        // strip_bracket_chars の除去（出力・マスあけ用）には触れない。
-        let feature_text = replace_inline_brackets_with_token(feature_text);
-        if atoms.is_empty() {
-            return self.predict_normalized_with_feature_text(text, &feature_text);
-        }
-        let mut result =
-            self.predict_normalized_with_feature_text(&stripped.text, &feature_text)?;
-        remap_result_to_source(&mut result, text, &stripped.byte_map);
-        splice_atoms(&mut result, text, atoms);
-        Ok(result)
-    }
-
     /// 正規化済みテキストに対する推論本体。
     ///
     /// 結果の source_text とインデックスは正規化後テキスト基準。
     ///
-    /// `feature_text` は `text` と同じ実文字を同じ相対順序で含むが、
-    /// 括弧の位置が完全に除去されるのではなく圧縮アイデンティティ・トークン
+    /// `feature_text` は `text` と同じ実文字を同じ相対順序で含むが、括弧の
+    /// 位置が INLINE_OPEN_TOKEN/INLINE_CLOSE_TOKEN/ASIDE_TOKEN
     /// （bracket.rs参照）に置き換えられている場合がある。これにより
     /// bigram/trigram/kanji_run/kanji_pos_first 等の特徴量が「括弧がそこに
-    /// あった」ことを認識できる。出力・マスあけの決定は常に `text` 基準
-    /// （このプレースホルダ自身の行は特徴量計算後にフィルタして除く）。
+    /// あった」ことを認識できる。出力・ctype分岐・境界判定は常に `text` 基準。
+    /// `feature_text` 側で `ASIDE_TOKEN` になっている位置は `text` 側に対応する
+    /// 実文字が無い（span丸ごと1トークンに圧縮されている）ため特徴量計算後に
+    /// フィルタして除くが、`INLINE_OPEN_TOKEN`/`INLINE_CLOSE_TOKEN` は
+    /// `text` 側にも同じ位置に実文字（括弧そのもの）が1:1で存在するので
+    /// フィルタしない。
     /// `feature_text == text` のとき（大多数のケース、括弧の無い通常入力）は
     /// 従来と全く同じ経路を通る（オーバーヘッドゼロ）。
     fn predict_normalized_with_feature_text(
@@ -705,10 +678,11 @@ impl<M: WeightModel> Predictor<M> {
         let all_feat_keys: Vec<Vec<FeatureKey>> = if feature_text == text {
             compute_source_features(&source_seq, &name_flags)
         } else {
-            // 特徴量専用ビュー: プレースホルダを含むsource_seqで特徴量を計算し、
-            // プレースホルダ位置の行だけをフィルタして除く。プレースホルダは
-            // 実文書に出現しない合成コードポイントなので、cp一致でのフィルタが
-            // そのまま実文字と1対1・同順序で対応する。
+            // 特徴量専用ビュー: ASIDE_TOKEN（span丸ごと1文字に圧縮したプレース
+            // ホルダ）の行だけをフィルタして除く。INLINE_OPEN_TOKEN/
+            // INLINE_CLOSE_TOKEN は `text` 側にも同じ位置に実文字（括弧そのもの）
+            // が1:1で存在するのでフィルタしない ─ そのままその行自身の
+            // feat_keysとして使う。
             let feat_seq = to_source_seq(feature_text);
             let (feat_name_flags, _) =
                 crate::name_dict::compute_name_matches(&feat_seq, self.model.name_dict());
@@ -716,7 +690,7 @@ impl<M: WeightModel> Predictor<M> {
             let filtered: Vec<Vec<FeatureKey>> = feat_seq
                 .iter()
                 .zip(feat_keys)
-                .filter(|(entry, _)| !crate::bracket::is_identity_token(entry.cp))
+                .filter(|(entry, _)| entry.cp != crate::bracket::ASIDE_TOKEN as u32)
                 .map(|(_, keys)| keys)
                 .collect();
             debug_assert_eq!(
@@ -771,7 +745,10 @@ impl<M: WeightModel> Predictor<M> {
             }
 
             // ============================================================
-            // bypass (素通し)
+            // bypass (素通し): 読みは常に素通しだが、境界（マスあけ）は
+            // skips_boundary_check() が false の文字種（Symbol/SymbolOpen/
+            // SymbolClose、括弧類を含む）だけ境界モデルに問い合わせる
+            // （ALPHA・カタカナと同型の「読み素通し＋境界モデル」扱い）。
             // ============================================================
             if entry.ctype.is_bypass() {
                 self.emit_char_passthrough(entry, 1.0, DecisionSource::Bypass, &mut result);
@@ -781,6 +758,15 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
+                if !entry.ctype.skips_boundary_check() {
+                    let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                    if has_split {
+                        result.kana_text.push(' ');
+                        result.kana_to_src_index.push(entry.orig_idx as usize);
+                        result.confidences.push(1.0);
+                        result.decision_sources.push(DecisionSource::Bypass);
+                    }
+                }
                 continue;
             }
 
@@ -1625,13 +1611,12 @@ fn remap_result_to_source(result: &mut PredictionResult, source_text: &str, byte
 // 括弧の処理（Aside span 抽出 / Inline 括弧の除去 / 合成）
 // ============================================================
 
-/// かな列へ挿入する「原子」。単独の括弧文字、または Aside span 一式。
+/// かな列へ挿入する「原子」（Aside span 一式）。常に直前の語へ食いつく
+/// （注釈は前の語を修飾するため）。
 struct Atom {
     /// 挿入位置。この原子が本来あったテキストの **UTF-8 バイト位置**。
     pos: usize,
-    /// 前の語に食いつくか、次の語に食いつくか。
-    side: Side,
-    /// 挿入するかな（Aside span なら `（` + 中身のかな + `）`）。
+    /// 挿入するかな（`（` + 中身のかな + `）`）。
     kana: String,
     /// `kana` のバイトごとの原文位置。
     srcs: Vec<usize>,
@@ -1639,15 +1624,6 @@ struct Atom {
     confs: Vec<f32>,
     /// `kana` のバイトごとの決定根拠（trace 用）。
     decs: Vec<DecisionSource>,
-}
-
-/// 原子がどちらの語に密着するか。
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Side {
-    /// 直前の語に密着する（閉じ括弧・Aside span）。
-    Left,
-    /// 直後の語に密着する（開き括弧）。
-    Right,
 }
 
 /// 本文から抜き出した Aside span（注釈系括弧とその中身）。
@@ -1742,43 +1718,6 @@ fn extract_aside_spans(text: &str) -> (Removed, Vec<AsideSpan>) {
     )
 }
 
-/// 本文から括弧文字だけを取り除く（中身は残す）。
-///
-/// [`extract_aside_spans`] 済みの本文に残っているのは Inline 括弧と、対応の
-/// 取れなかった単独の Aside 括弧。どちらも1文字の原子として扱う。
-fn strip_bracket_chars(text: &str) -> (Removed, Vec<Atom>) {
-    let mut out = String::with_capacity(text.len());
-    let mut byte_map = Vec::with_capacity(text.len());
-    let mut atoms = Vec::new();
-    for (b, c) in text.char_indices() {
-        if let Some((role, _)) = bracket::lookup(c) {
-            atoms.push(Atom {
-                pos: b,
-                side: match role {
-                    Role::Open => Side::Right,
-                    Role::Close => Side::Left,
-                },
-                kana: c.to_string(),
-                srcs: vec![b; c.len_utf8()],
-                confs: vec![1.0; c.len_utf8()],
-                decs: vec![DecisionSource::Bypass; c.len_utf8()],
-            });
-        } else {
-            out.push(c);
-            for _ in 0..c.len_utf8() {
-                byte_map.push(b);
-            }
-        }
-    }
-    (
-        Removed {
-            text: out,
-            byte_map,
-        },
-        atoms,
-    )
-}
-
 /// [`extract_aside_spans`] の特徴量専用ビュー版。span を完全に除去せず、
 /// 1個の ASIDE_TOKEN（bracket.rs参照）に置き換えたテキストを返す。
 ///
@@ -1804,11 +1743,12 @@ fn replace_aside_spans_with_token(text: &str, spans: &[AsideSpan]) -> String {
     out
 }
 
-/// [`strip_bracket_chars`] の特徴量専用ビュー版。括弧文字を完全に除去せず、
+/// 特徴量計算専用ビューを作る: 括弧文字を除去せず、その場で
 /// INLINE_OPEN_TOKEN/INLINE_CLOSE_TOKEN（bracket.rs参照）に置き換えたテキスト
-/// を返す。出力・マスあけの決定には使わない（それは [`strip_bracket_chars`]
-/// が引き続き担う）。個々の括弧字形はbigram/trigram特徴量にとって希少すぎて
-/// 汎化しないため、圧縮トークンに置き換える。
+/// を返す（1文字対1文字の置換なので文字数は変わらない）。出力・ctype分岐・
+/// 境界判定には使わない（それは実文字ベースの `text` 側が担う）。個々の
+/// 括弧字形はbigram/trigram特徴量にとって希少すぎて汎化しないため、圧縮
+/// トークンに置き換える。
 fn replace_inline_brackets_with_token(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -1824,15 +1764,6 @@ fn replace_inline_brackets_with_token(text: &str) -> String {
     out
 }
 
-/// かな列へ原子を挿入する。
-///
-/// `result` は `text` 座標の推論結果。原子は本来の位置へ、[`Side`] に従って
-/// 前後どちらかの語へ密着させて挿入する。
-///
-/// **境界モデルが入れたマスあけには一切触らない。** 括弧は本文の語境界を
-/// 書き換えないからで、Aside span は本文から抜いてあるため本文側の境界判断は
-/// 括弧が無かったときのまま正しい（`週末カラオケ` の語境界がそのまま
-/// `週末（3連休）␣カラオケ` の空きになる）。
 /// かな列の空白のうち、`src` が指すものが原文由来（バイパスで素通しされた
 /// 「内容」）かどうか。
 ///
@@ -1886,6 +1817,12 @@ fn trim_trailing_boundary_spaces(result: &mut PredictionResult, text: &str) {
     }
 }
 
+/// かな列へ Aside span の原子を挿入する。常に直前の語へ食いつける
+/// （文頭で直前の語が無ければ先頭に置く）。
+///
+/// **境界モデルが入れたマスあけには一切触らない。** Aside span は本文から
+/// 抜いてあるため、本文側の境界判断は括弧が無かったときのまま正しい
+/// （`週末カラオケ` の語境界がそのまま `週末（3連休）␣カラオケ` の空きになる）。
 fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>) {
     if atoms.is_empty() {
         return;
@@ -1920,23 +1857,15 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
         .map(|(i, _)| i)
         .collect();
 
-    // --- 原子を内容セルの前(Right)／後(Left)へ割り付ける ---
+    // --- 原子を直前の内容セルへ割り付ける（常に前の語へ食いつく） ---
     use std::collections::HashMap;
-    let mut prefix: HashMap<usize, Vec<&Atom>> = HashMap::new();
     let mut suffix: HashMap<usize, Vec<&Atom>> = HashMap::new();
-    // 内容セルが片側に無い退化ケース（文頭の Left・文末の Right）。
+    // 内容セルが手前に無い退化ケース（文頭の Aside span）。
     let mut leading: Vec<&Atom> = Vec::new();
-    let mut trailing: Vec<&Atom> = Vec::new();
     for atom in &atoms {
-        match atom.side {
-            Side::Right => match content.iter().find(|&&ci| cells[ci].src > atom.pos) {
-                Some(&ci) => prefix.entry(ci).or_default().push(atom),
-                None => trailing.push(atom),
-            },
-            Side::Left => match content.iter().rev().find(|&&ci| cells[ci].src < atom.pos) {
-                Some(&ci) => suffix.entry(ci).or_default().push(atom),
-                None => leading.push(atom),
-            },
+        match content.iter().rev().find(|&&ci| cells[ci].src < atom.pos) {
+            Some(&ci) => suffix.entry(ci).or_default().push(atom),
+            None => leading.push(atom),
         }
     }
 
@@ -1986,11 +1915,6 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
         for j in 0..content.len() {
             let ci = content[j];
 
-            if let Some(opens) = prefix.get(&ci) {
-                for a in opens {
-                    push_atom(&mut sink, a);
-                }
-            }
             let mut buf = [0u8; 4];
             push_text(
                 &mut sink,
@@ -2020,10 +1944,6 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
                     push_text(&mut sink, " ", space_src, 1.0, DecisionSource::Bypass);
                 }
             }
-        }
-
-        for a in &trailing {
-            push_atom(&mut sink, a);
         }
     }
 
@@ -2441,29 +2361,6 @@ mod tests {
         assert_eq!(outer.byte_map, vec![0, 8]);
     }
 
-    // --- Inline 括弧の除去 ---
-
-    #[test]
-    fn strip_bracket_chars_keeps_content() {
-        // a「b」c : a=0 「=1(3B) b=4 」=5(3B) c=8
-        let (stripped, atoms) = strip_bracket_chars("a「b」c");
-        assert_eq!(stripped.text, "abc");
-        assert_eq!(stripped.byte_map, vec![0, 4, 8]);
-        assert_eq!(atoms.len(), 2);
-        assert_eq!(atoms[0].kana, "「");
-        assert_eq!(atoms[0].pos, 1);
-        assert!(atoms[0].side == Side::Right, "開きは後続に食いつく");
-        assert_eq!(atoms[1].kana, "」");
-        assert!(atoms[1].side == Side::Left, "閉じは前接に食いつく");
-    }
-
-    #[test]
-    fn strip_bracket_chars_none_when_absent() {
-        let (stripped, atoms) = strip_bracket_chars("あいう");
-        assert_eq!(stripped.text, "あいう");
-        assert!(atoms.is_empty());
-    }
-
     // --- 特徴量専用ビュー（圧縮アイデンティティ・トークン） ---
 
     #[test]
@@ -2512,55 +2409,62 @@ mod tests {
         );
     }
 
-    // --- 合成（splice_atoms） ---
-
-    #[test]
-    fn splice_inline_attaches_without_touching_spaces() {
-        // 括弧はモデルのマスあけ判断に手を加えない
-        let (stripped, atoms) = strip_bracket_chars("a「b」c");
-        let mut r = make_result(&stripped.text, "abc", &[0, 1, 2]);
-        remap_result_to_source(&mut r, "a「b」c", &stripped.byte_map);
-        splice_atoms(&mut r, "a「b」c", atoms);
-        assert_eq!(r.kana_text, "a「b」c");
-        assert_eq!(r.source_text, "a「b」c");
-        assert_eq!(r.kana_to_src_index.len(), r.kana_text.len());
-        assert_eq!(r.confidences.len(), r.kana_text.len());
-        assert_eq!(r.src_to_kana_index.len(), "a「b」c".len());
-    }
-
-    #[test]
-    fn splice_inline_keeps_model_spaces() {
-        // 引用系はフラット化した本文の語境界がそのまま出る
-        let (stripped, atoms) = strip_bracket_chars("a「b」c");
-        let mut r = make_result(&stripped.text, "a b c", &[0, 0, 1, 1, 2]);
-        remap_result_to_source(&mut r, "a「b」c", &stripped.byte_map);
-        splice_atoms(&mut r, "a「b」c", atoms);
-        assert_eq!(r.kana_text, "a 「b」 c");
-    }
+    // --- 合成（splice_atoms、Aside専用） ---
 
     #[test]
     fn splice_keeps_source_space() {
         // 原文の空白は「内容」なので消さない
-        let (stripped, atoms) = strip_bracket_chars("a 「b」");
-        assert_eq!(stripped.text, "a b");
-        let mut r = make_result(&stripped.text, "a b", &[0, 1, 2]);
-        remap_result_to_source(&mut r, "a 「b」", &stripped.byte_map);
-        splice_atoms(&mut r, "a 「b」", atoms);
-        assert_eq!(r.kana_text, "a 「b」");
+        let text = "a （b）";
+        let (outer, spans) = extract_aside_spans(text);
+        assert_eq!(outer.text, "a ");
+        let mut r = make_result(&outer.text, "a ", &[0, 1]);
+        remap_result_to_source(&mut r, text, &outer.byte_map);
+        let sp = &spans[0];
+        let atom = Atom {
+            pos: sp.pos,
+            kana: "（b）".to_string(),
+            srcs: vec![
+                sp.pos,
+                sp.pos,
+                sp.pos,
+                sp.content.start,
+                sp.close_pos,
+                sp.close_pos,
+                sp.close_pos,
+            ],
+            confs: vec![1.0; 7],
+            decs: vec![DecisionSource::Bypass; 7],
+        };
+        splice_atoms(&mut r, text, vec![atom]);
+        assert_eq!(r.kana_text, "a （b）");
     }
 
     #[test]
     fn splice_keeps_non_ascii_source_whitespace() {
         // 空白判定は char_type 基準なので 0x20 以外の原文空白も保存される
         for ws in ['\u{3000}', '\u{00A0}', '\t'] {
-            let text: String = format!("a{ws}「b」");
-            let (stripped, atoms) = strip_bracket_chars(&text);
-            assert_eq!(stripped.text, format!("a{ws}b"));
-            let kana: String = format!("a{ws}b");
-            let srcs = [0, 1, 1 + ws.len_utf8()];
-            let mut r = make_result(&stripped.text, &kana, &srcs);
-            remap_result_to_source(&mut r, &text, &stripped.byte_map);
-            splice_atoms(&mut r, &text, atoms);
+            let text: String = format!("a{ws}（b）");
+            let (outer, spans) = extract_aside_spans(&text);
+            assert_eq!(outer.text, format!("a{ws}"));
+            let mut r = make_result(&outer.text, &format!("a{ws}"), &[0, 1]);
+            remap_result_to_source(&mut r, &text, &outer.byte_map);
+            let sp = &spans[0];
+            let atom = Atom {
+                pos: sp.pos,
+                kana: "（b）".to_string(),
+                srcs: vec![
+                    sp.pos,
+                    sp.pos,
+                    sp.pos,
+                    sp.content.start,
+                    sp.close_pos,
+                    sp.close_pos,
+                    sp.close_pos,
+                ],
+                confs: vec![1.0; 7],
+                decs: vec![DecisionSource::Bypass; 7],
+            };
+            splice_atoms(&mut r, &text, vec![atom]);
             assert_eq!(r.kana_text, text, "原文空白 {ws:?} が保存されること");
         }
     }
@@ -2580,7 +2484,6 @@ mod tests {
         let sp = &spans[0];
         let atom = Atom {
             pos: sp.pos,
-            side: Side::Left,
             kana: "（b）".to_string(),
             srcs: vec![1, 1, 1, 4, 5, 5, 5],
             confs: vec![1.0; 7],
@@ -2607,7 +2510,6 @@ mod tests {
         let sp = &spans[0];
         let atom = Atom {
             pos: sp.pos,
-            side: Side::Left,
             kana: "（b）".to_string(),
             srcs: vec![1, 1, 1, 4, 5, 5, 5],
             confs: vec![1.0; 7],
@@ -2981,8 +2883,11 @@ mod tests {
         // fixture.mbm は圧縮アイデンティティ・トークン（bracket.rs参照）の
         // 語彙を持たない旧モデルだが、特徴量専用ビューの構築・フィルタ・
         // lookup_feature_ids への受け渡しが、未知語彙（OOV）を無視するだけで
-        // クラッシュしないことを確認する（後方互換）。出力・マスあけは
-        // strip/Atom/splice経路のまま変わらないはず。
+        // クラッシュしないことを確認する（後方互換）。読みは常にbypassなので
+        // Inline括弧の字形はそのまま出力される。境界（マスあけ）は括弧自身の
+        // 位置でも境界モデルに問い合わせるようになったが、旧モデルはこの特徴量
+        // キーを知らずOOV＝スコア寄与ゼロになるため、bias頼みの既定判定になる
+        // （このfixtureではたまたま非分割のまま、という程度の弱い保証）。
         let config = PredictorConfig::new(fixture_model_path());
         let predictor: Predictor = Predictor::load(config).unwrap();
 

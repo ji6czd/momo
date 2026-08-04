@@ -182,9 +182,12 @@ class TestTokenizeForTraining:
         assert main == rows
         assert subs == []
 
-    def test_inline_brackets_become_context_only_tokens(self):
+    def test_inline_brackets_become_tokens_but_keep_own_label(self):
         # strip_for_trainingと違い、行は削除せず残す（隣接文字のbigram/
         # trigram/kanji_runがsource_seq経由で括弧の存在を認識できるように）。
+        # ASIDEと違い、char列だけをトークンに差し替え、ラベルには触れない
+        # （中身と一緒に本文の流れに残るため、開き・閉じの行自身がRust推論側
+        # でも実際の境界判定対象になる＝LABEL_CONTEXT_ONLYにはしない）。
         rows = [
             _row("A", "エー"),
             _row("「", "_", ctype="SYMBOL_OPEN"),
@@ -195,9 +198,9 @@ class TestTokenizeForTraining:
         main, subs = tokenize_for_training(rows)
         assert [r[0] for r in main] == ["A", INLINE_OPEN_TOKEN, "B", INLINE_CLOSE_TOKEN, "C"]
         assert subs == []
-        # プレースホルダ行のラベルはLABEL_CONTEXT_ONLY（学習対象から除外する目印）
-        assert main[1][1] == LABEL_CONTEXT_ONLY
-        assert main[3][1] == LABEL_CONTEXT_ONLY
+        # プレースホルダ行のラベルは元の"_"のまま（LABEL_CONTEXT_ONLYにはしない）
+        assert main[1][1] == "_"
+        assert main[3][1] == "_"
         # ctypeは元のSYMBOL_OPEN/SYMBOL_CLOSEのまま
         assert main[1][2] == "SYMBOL_OPEN"
         assert main[3][2] == "SYMBOL_CLOSE"
@@ -206,7 +209,10 @@ class TestTokenizeForTraining:
         assert main[2][1] == "ビー"
         assert main[4][1] == "シー"
 
-    def test_inline_close_space_moves_to_preceding_char(self):
+    def test_inline_close_space_stays_on_its_own_row(self):
+        # ASIDEと違い、閉じ括弧行の+Sは直前の実文字行へ移設しない。閉じ括弧
+        # 自身がRust推論側で実際の境界判定対象になるため、自分の+Sは自分の
+        # 行に残す必要がある。
         rows = [
             _row("A", "エー"),
             _row("「", "_", ctype="SYMBOL_OPEN"),
@@ -216,10 +222,9 @@ class TestTokenizeForTraining:
         ]
         main, _ = tokenize_for_training(rows)
         assert [r[0] for r in main] == ["A", INLINE_OPEN_TOKEN, "B", INLINE_CLOSE_TOKEN, "C"]
-        # +Sは引用内最後の実文字（B）へ移設される
-        assert main[2][1] == "ビー+S"
-        # プレースホルダ自身は引き続きLABEL_CONTEXT_ONLYのまま（学習対象から除外）
-        assert main[3][1] == LABEL_CONTEXT_ONLY
+        # +Sは移設されず、閉じ括弧トークン自身の行に残る
+        assert main[2][1] == "ビー"
+        assert main[3][1] == "_+S"
 
     def test_aside_open_becomes_token_close_and_content_are_removed(self):
         rows = [

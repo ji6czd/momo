@@ -227,8 +227,7 @@ jobs:
       - name: Build manylinux wheel
         uses: PyO3/maturin-action@v1
         with:
-          manifest-path: momors/crates/momors-pyo3/Cargo.toml
-          args: --release --out dist
+          args: --release --out dist --manifest-path momors/crates/momors-pyo3/Cargo.toml
           manylinux: auto
 
       - name: Upload artifacts

@@ -16,6 +16,13 @@ tasks:
       - uv run -p 3.13 tools/gen_normalize_table.py
       - cargo build --release
 
+  rust:gen_tables:
+    desc: Generate char_type.rs and normalize_table.rs
+    dir: momors
+    cmds:
+      - uv run -p 3.13 tools/gen_char_type_rs.py
+      - uv run -p 3.13 tools/gen_normalize_table.py
+
   python:
     desc: Build Python package
     dir: momo-py
@@ -213,7 +220,7 @@ tasks:
 
   pyo3:
     desc: Build Python wheel from Rust bindings (maturin)
-    deps: [pyo3:sync]
+    deps: [pyo3:sync, rust:gen_tables]
     dir: momors/crates/momors-pyo3
     env:
     cmds:

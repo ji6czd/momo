@@ -218,11 +218,19 @@ jobs:
           name: trained-model
           path: dataset
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.13"
+
       - name: Set up Task
         uses: arduino/setup-task@v3.0.0
 
       - name: Sync trained model into momors-pyo3
         run: task pyo3:sync
+
+      - name: Generate Rust tables
+        run: task rust:gen_tables
 
       - name: Build manylinux wheel
         uses: PyO3/maturin-action@v1

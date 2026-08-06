@@ -96,8 +96,8 @@ tasks:
       - bash eval/run_regression.sh
 
   sdk:
-    desc: Build C++ and C# SDKs and create distribution archives
-    deps: [sdk:zip:cpp, sdk:zip:csharp]
+    desc: Build C++, C#, and WebAssembly SDKs and create distribution archives
+    deps: [sdk:zip:cpp, sdk:zip:csharp, sdk:zip:wasm]
 
   sdk:ffi:
     desc: Build FFI DLL only (momors-ffi crate, release)
@@ -170,12 +170,44 @@ tasks:
       - rm -f "{{.OUT}}"
       - powershell -NoProfile -Command "Compress-Archive -Path '{{.STAGE}}/*' -DestinationPath '{{.OUT}}'"
 
+  sdk:wasm:
+    desc: Build WebAssembly SDK (browser target) and stage to dist/sdk/wasm/
+    vars:
+      OUT: "{{.ROOT_DIR}}/dist/sdk/wasm"
+      DATA: "{{.ROOT_DIR}}/dataset"
+    sources:
+      - momors/crates/momors-wasm/src/**/*.rs
+      - momors/crates/momors-core/src/**/*.rs
+      - momors/crates/momors-braille/src/**/*.rs
+    generates:
+      - "{{.OUT}}/pkg/momors_wasm_bg.wasm"
+    cmds:
+      - rm -rf "{{.OUT}}"
+      - mkdir -p "{{.OUT}}/data"
+      - wasm-pack build momors/crates/momors-wasm --target web --out-dir "{{.OUT}}/pkg"
+      - cp "{{.DATA}}/basic_data_4.mbm" "{{.OUT}}/data/"
+      - cp "{{.DATA}}/basic_data_5.mbm" "{{.OUT}}/data/"
+      - cp "{{.DATA}}/basic_data_7.mbm" "{{.OUT}}/data/"
+
+  sdk:zip:wasm:
+    desc: Create WebAssembly SDK ZIP archive to dist/
+    vars:
+      VERSION:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+      STAGE: "{{.ROOT_DIR}}/dist/sdk/wasm"
+      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-wasm-{{.VERSION}}.zip"
+    deps: [sdk:wasm]
+    cmds:
+      - rm -f "{{.OUT}}"
+      - powershell -NoProfile -Command "Compress-Archive -Path '{{.STAGE}}/*' -DestinationPath '{{.OUT}}'"
+
   sdk:clean:
     desc: Clean SDK artifacts
     cmds:
       - rm -rf "{{.ROOT_DIR}}/dist/sdk"
       - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-cpp-"*.zip
       - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-csharp-"*.zip
+      - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-wasm-"*.zip
 
   clean:
     desc: Clean all build artifacts

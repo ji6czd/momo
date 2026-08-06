@@ -1,21 +1,33 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
-import { MomoWasm } from "../wasm/momors_wasm.js";
+import {
+  BrailleTranslator,
+  Predictor,
+  type PredictionResult,
+} from "../wasm/momors_wasm.js";
 
-let momo: MomoWasm | undefined;
+let predictor: Predictor | undefined;
+let translator: BrailleTranslator | undefined;
 
-function getMomo(context: vscode.ExtensionContext): MomoWasm {
-  if (!momo) {
+function getPredictor(context: vscode.ExtensionContext): Predictor {
+  if (!predictor) {
     const modelPath = path.join(
       context.extensionPath,
       "resources",
       "model.mbm",
     );
     const modelBytes = fs.readFileSync(modelPath);
-    momo = new MomoWasm(new Uint8Array(modelBytes));
+    predictor = new Predictor(new Uint8Array(modelBytes));
   }
-  return momo;
+  return predictor;
+}
+
+function getBrailleTranslator(): BrailleTranslator {
+  if (!translator) {
+    translator = new BrailleTranslator();
+  }
+  return translator;
 }
 
 // 現在行の直後に1行挿入するヘルパー
@@ -30,23 +42,23 @@ function insertLineAfterCurrent(
   });
 }
 
-// predict_segmented の JSON から分かち書きかな文字列を組み立てる
-function buildSegmentedString(text: string, jsonStr: string): string {
-  const data = JSON.parse(jsonStr) as {
-    braille: string;
-    kana: string;
-    kana_to_src_index: number[];
-    src_to_kana_index: number[][];
-  };
+// PredictionResult.sourceToKana から分かち書きかな文字列を組み立てる
+function buildSegmentedString(
+  text: string,
+  braille: string,
+  pred: PredictionResult,
+): string {
+  const kana = pred.kana;
+  const sourceToKana = pred.sourceToKana;
   const segments: string[] = [];
   for (let i = 0; i < text.length; i++) {
-    const kanaPositions = data.src_to_kana_index[i];
-    if (!kanaPositions || kanaPositions.length === 0) {
+    const kanaPositions: Iterable<number> | undefined = sourceToKana[i];
+    if (!kanaPositions) {
       continue;
     }
     let current = "";
     for (const p of kanaPositions) {
-      const ch = data.kana[p];
+      const ch = kana[p];
       if (ch === " ") {
         if (current) {
           segments.push(current);
@@ -61,7 +73,7 @@ function buildSegmentedString(text: string, jsonStr: string): string {
       segments.push(current);
     }
   }
-  return data.braille + "\n" + segments.join("/");
+  return braille + "\n" + segments.join("/");
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -76,7 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
       try {
         const currentLine = editor.selection.active.line;
         const lineText = editor.document.lineAt(currentLine).text;
-        const kana = getMomo(context).predictKana(lineText);
+        const kana = getPredictor(context).predict(lineText).kana;
         insertLineAfterCurrent(editor, currentLine, kana).then(
           undefined,
           (err: Error) => vscode.window.showErrorMessage(String(err)),
@@ -98,7 +110,8 @@ export function activate(context: vscode.ExtensionContext) {
       try {
         const currentLine = editor.selection.active.line;
         const lineText = editor.document.lineAt(currentLine).text;
-        const braille = getMomo(context).predictBraille(lineText);
+        const kana = getPredictor(context).predict(lineText).kana;
+        const braille = getBrailleTranslator().translate(kana).braille;
         insertLineAfterCurrent(editor, currentLine, braille).then(
           undefined,
           (err: Error) => vscode.window.showErrorMessage(String(err)),
@@ -120,8 +133,9 @@ export function activate(context: vscode.ExtensionContext) {
       try {
         const currentLine = editor.selection.active.line;
         const lineText = editor.document.lineAt(currentLine).text;
-        const jsonStr = getMomo(context).predictSegmented(lineText);
-        const result = buildSegmentedString(lineText, jsonStr);
+        const pred = getPredictor(context).predict(lineText);
+        const braille = getBrailleTranslator().translate(pred.kana).braille;
+        const result = buildSegmentedString(lineText, braille, pred);
         insertLineAfterCurrent(editor, currentLine, result).then(
           undefined,
           (err: Error) => vscode.window.showErrorMessage(String(err)),
@@ -138,6 +152,8 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  momo?.free();
-  momo = undefined;
+  predictor?.free();
+  predictor = undefined;
+  translator?.free();
+  translator = undefined;
 }

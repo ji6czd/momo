@@ -6,19 +6,11 @@ from types import FrameType
 from importlib.metadata import version
 from flask import Flask, request, abort
 from markupsafe import escape
-from momo_py import PredictionResult, Predictor, PredictorConfig
-from momo_py import pybraille
+from momors_py import Predictor, PredictionResult, BrailleTranslator, BrailleResult
 
 app = Flask(__name__)
 
-version_info = f"Momo version {version('momo_py')}"
-
-# モデルファイルのパス定義
-_MODELS = {
-    "small": 4,
-    "medium": 5,
-    "large": 7,
-}
+version_info = f"Momo version {version('momors_py')}"
 
 # セマフォで同時実行を1に制限する。
 # Cloud Run の concurrency 設定に関係なく、コード側で強制する。
@@ -26,7 +18,12 @@ _MODELS = {
 _semaphore = threading.Semaphore(1)
 
 
-
+# モデル名とウィンドーサイズの対応表
+_models = {
+    "small": 4,
+    "medium": 5,
+    "large": 7,
+}
 # 現在キャッシュしているモデル（同時に1つだけ保持）
 _current_model: str = ""
 _current_predictor: Predictor | None = None
@@ -38,10 +35,7 @@ def _get_predictor(model: str = "large") -> Predictor:
         # 別モデルへの切り替え: 古いインスタンスを解放してからロード
         _current_predictor = None
         gc.collect()
-        cfg = PredictorConfig(
-            window=_MODELS.get(model, _MODELS["large"]),
-        )
-        _current_predictor = Predictor(cfg)
+        _current_predictor = Predictor.from_bundled(window=_models[model])
         _current_model = model
     return _current_predictor
 
@@ -104,7 +98,6 @@ predict_page = """<!DOCTYPE html>
         <input type="submit" value="LR機械学習点訳">
     </form>
     </p>
-    <p>Model version: {model_version}</p>
     <p>{version_info}</p>
 </body></html>
 """
@@ -116,24 +109,20 @@ def make_characters_table(res: PredictionResult) -> str:
     """
     characters_table = "<table border='1'><tr><th>元の文字</th>"
 
-    for i, idx in enumerate(res.kana_to_src_index):
-        if res.kana_text[i] == " ":
+    for i, idx in enumerate(res.kana_to_source):
+        if res.kana[i] == " ":
             orig_char = " "
         else:
-            orig_char = res.source_text[idx] if idx < len(res.source_text) else ""
+            orig_char = res.source[idx] if idx < len(res.source) else ""
         characters_table += f"<td>{orig_char}</td>"
     characters_table += "</tr><tr><th>文字</th>"
     # かな約結果を並べる
-    for c in res.kana_text:
+    for c in res.kana:
         characters_table += f"<td>{c}</td>"
     characters_table += "</tr><tr><th>確信度</th>"
     # 次に確信度を横に並べる
     for conf in res.confidences:
         characters_table += f"<td>{conf:.2f}</td>"
-    characters_table += "</tr><tr><th>ソース</th>"
-    # 変換ソース
-    for dec in res.decision_sources:
-        characters_table += f"<td>{dec}</td>"
     characters_table += "</tr></table>"
     return characters_table
 
@@ -152,29 +141,18 @@ def predict() -> str:
     model = request.args.get("model", "large")
     with _semaphore:
         prd = _get_predictor(model)
-        model_version = (prd.get_version_info() or {}).get("trained_at", "不明")
         res = prd.predict(source)
 
-    braille = pybraille.to_jp_braille(res.kana_text)
+    translator = BrailleTranslator()
+    braille = translator.translate(res.kana).braille
 
     return predict_page.format(
         source=escape(source),
-        result=res.kana_text,
+        result=res.kana,
         confidences_table=make_characters_table(res),
         braille_result=braille,
-        model_version=model_version,
         version_info=version_info,
     )
-
-
-@app.route("/api/predict", methods=["GET"])
-def api_predict() -> str:
-    source = request.args.get("source")
-    if not source:
-        abort(400, "source パラメータが必要です")
-    model = request.args.get("model", "large")
-    with _semaphore:
-        return _get_predictor(model).predict(source).to_json()
 
 
 def shutdown_handler(signal_int: int, frame: FrameType) -> None:

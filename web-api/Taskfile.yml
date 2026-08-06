@@ -7,4 +7,4 @@ tasks:
   default:
     desc: Deploy the web API to Google Cloud Run
     cmds:
-      - gcloud run deploy neomomo --region=asia-northeast1 --memory=768Mi --concurrency=1 --source=.
+      - gcloud run deploy neomomo --region=asia-northeast1 --memory=768Mi --concurrency=1 --source=. --set-build-env-vars=GOOGLE_PYTHON_PACKAGE_MANAGER=uv

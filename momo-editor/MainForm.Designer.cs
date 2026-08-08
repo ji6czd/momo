@@ -193,9 +193,12 @@ partial class MainForm
 
         // richTextBox
         richTextBox.Dock = DockStyle.Fill;
-        // 点字グリフ（U+2800〜）をネイティブに持つ等幅フォント（Windows 11 標準搭載）。
-        // 無い環境（Windows 10 等）へのフォールバックは MainForm コンストラクタで行う。
-        richTextBox.Font = new Font("Cascadia Mono", 28F, FontStyle.Regular, GraphicsUnit.Point);
+        // 点字グリフ（U+2800〜）を256/256完全カバーし、点字グリフ同士は1500unit等幅
+        // （全体はプロポーショナルフォント）。OS/2 の Unicode Range も Braille Patterns を
+        // 宣言済みなのでフォントリンクによる差し替えが起きない。インストーラで
+        // システムインストールされる（momo-installer/fonts/）。無い環境（インストーラを
+        // 経由しない実行等）へのフォールバックは MainForm コンストラクタで行う。
+        richTextBox.Font = new Font("DejaVu Sans", 28F, FontStyle.Regular, GraphicsUnit.Point);
         richTextBox.ScrollBars = RichTextBoxScrollBars.Both;
         richTextBox.WordWrap = false;
         richTextBox.AcceptsTab = true;

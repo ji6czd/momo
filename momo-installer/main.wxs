@@ -66,6 +66,20 @@
                 </Directory>
             </Directory>
 
+            <!-- Windows Fonts フォルダ。点字セル(U+2800-28FF)をエディタで表示するための
+                 DejaVu Sans を同梱・システムインストールする。ライセンス文言は
+                 licenses\DejaVuSans-LICENSE.txt として APPLICATIONFOLDER に同梱。 -->
+            <Directory Id='FontsFolder'>
+                <Component Id='DejaVuSansFont' Guid='CAB123B9-5630-4E52-BAE5-FF96A8D572E8'>
+                    <File Id='DejaVuSansTtf'
+                          Name='DejaVuSans.ttf'
+                          DiskId='1'
+                          Source='$(var.StageDir)\fonts\DejaVuSans.ttf'
+                          KeyPath='yes'
+                          TrueType='yes'/>
+                </Component>
+            </Directory>
+
             <!-- Program Files\Momo\ -->
             <Directory Id='$(var.PlatformProgramFilesFolder)'>
                 <Directory Id='APPLICATIONFOLDER' Name='Momo'>
@@ -170,6 +184,17 @@
                         </Component>
                     </Directory>
 
+                    <Directory Id='Licenses' Name='licenses'>
+                        <!-- DejaVu Sans のライセンス文言（フォント本体は FontsFolder に別途配置） -->
+                        <Component Id='DejaVuSansLicense' Guid='95C8B935-D058-4275-B81E-D5B42BF1F839'>
+                            <File Id='DejaVuSansLicenseTxt'
+                                  Name='DejaVuSans-LICENSE.txt'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\licenses\DejaVuSans-LICENSE.txt'
+                                  KeyPath='yes'/>
+                        </Component>
+                    </Directory>
+
                     <Directory Id='Data' Name='data'>
                         <!-- 学習済みモデルと変換テーブル -->
                         <Component Id='DataFiles' Guid='F6FAD1D0-6CFD-49B9-AAFE-84705CF0BFC4'>
@@ -217,6 +242,8 @@
             <ComponentRef Id='DataFiles'/>
             <ComponentRef Id='DatasetEnv'/>
             <ComponentRef Id='ApplicationShortcut'/>
+            <ComponentRef Id='DejaVuSansFont'/>
+            <ComponentRef Id='DejaVuSansLicense'/>
 
             <Feature
                 Id='EnvironmentPath'

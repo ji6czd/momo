@@ -282,7 +282,7 @@ tasks:
       DATA: "{{.ROOT_DIR}}/dataset"
     cmds:
       - rm -rf "{{.STAGE}}"
-      - mkdir -p "{{.STAGE}}/bin" "{{.STAGE}}/data"
+      - mkdir -p "{{.STAGE}}/bin" "{{.STAGE}}/data" "{{.STAGE}}/fonts" "{{.STAGE}}/licenses"
       - cp "{{.RUST_BIN}}/momo.exe"                        "{{.STAGE}}/bin/"
       - cp "{{.RUST_BIN}}/momors_ffi.dll"                 "{{.STAGE}}/bin/"
       - cp "{{.GUI_BIN}}"/*.* "{{.STAGE}}/bin/"
@@ -292,6 +292,9 @@ tasks:
       - cp "{{.DATA}}/basic_data_4.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"
+      # エディタの点字セル表示用フォント（システムインストール）
+      - cp "{{.ROOT_DIR}}/momo-installer/fonts/DejaVuSans.ttf" "{{.STAGE}}/fonts/"
+      - cp "{{.ROOT_DIR}}/momo-installer/fonts/LICENSE-DejaVu.txt" "{{.STAGE}}/licenses/DejaVuSans-LICENSE.txt"
 
   dist:msi:
     desc: Build Windows installer (.msi) — requires WiX Toolset v3

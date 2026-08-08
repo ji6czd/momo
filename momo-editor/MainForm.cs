@@ -41,11 +41,12 @@ public partial class MainForm : Form
     public MainForm(string? initialPath = null)
     {
         InitializeComponent();
-        // Cascadia Mono が無い環境（Windows 10 等）では、同じく点字グリフを
-        // ネイティブに持つ Segoe UI Symbol（全 Windows 標準）へフォールバックする。
+        // DejaVu Sans はインストーラでシステムインストールされる想定だが、インストーラを
+        // 経由しない実行（開発時の dotnet run 等）では無いことがある。その場合は
+        // Cascadia Mono（Windows 11 標準搭載の等幅コーディングフォント）へフォールバックする。
         // フォントリンク任せにすると環境ごとに描画フォントが変わってしまう。
-        if (richTextBox.Font.Name != "Cascadia Mono")
-            richTextBox.Font = new Font("Segoe UI Symbol", 28F, FontStyle.Regular, GraphicsUnit.Point);
+        if (richTextBox.Font.Name != "DejaVu Sans")
+            richTextBox.Font = new Font("Cascadia Mono", 28F, FontStyle.Regular, GraphicsUnit.Point);
         _keyMap = new()
         {
             [Keys.Control | Keys.H] = SimulateBackspace,

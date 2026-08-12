@@ -41,21 +41,29 @@ impl Default for PageNumberStyle {
 /// 強制改ページに付随する上書き情報。
 ///
 /// 直前の物理行の**後ろ**でページを送る。各フィールドは、その改ページで
-/// 始まる新しいページに対する上書きを表す（`None` は上書きなし）。
+/// 始まるページ以降に適用される**継続的な状態変更**を表す（`None` は「現在の
+/// 状態を維持（上書きしない）」の意味）。一度上書きされた値は、以降のページに
+/// そのまま引き継がれ、次の [`PageBreak`] で再び上書きされるまで有効であり続ける
+/// （暗黙のページ分割をまたいでも保持される）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PageBreak {
-    /// このページのヘッダタイトルを上書きする（点字文字列）。
+    /// このページ以降のヘッダタイトルを上書きする（点字文字列）。次に上書きされるまで継続。
     pub header_override: Option<String>,
-    /// このページのページ番号をこの値から再開する。
+    /// このページ以降、ページヘッダ行の表示有無を切り替える。`None` は現在の状態を維持。
+    pub header_enabled: Option<bool>,
+    /// このページのページ番号をこの値から再開する（以降は自動的に1ずつ増加する）。
     pub number_start: Option<u32>,
-    /// このページ以降のページ番号スタイルを切り替える。
+    /// このページ以降のページ番号スタイルを切り替える。次に上書きされるまで継続。
     pub number_style: Option<PageNumberStyle>,
 }
 
 impl PageBreak {
     /// 上書き情報を一切持たない（既定の）強制改ページか。
     pub fn is_plain(&self) -> bool {
-        self.header_override.is_none() && self.number_start.is_none() && self.number_style.is_none()
+        self.header_override.is_none()
+            && self.header_enabled.is_none()
+            && self.number_start.is_none()
+            && self.number_style.is_none()
     }
 
     /// MBR の `====` マーカー行（プレフィックス込み）へ直列化する。
@@ -97,15 +105,22 @@ impl PhysicalLine {
 }
 
 /// ドキュメント設定（フロントマター相当）。
+///
+/// `page_header` / `title` / `number_start` は先頭ページの初期状態であり、
+/// [`PageBreak`] の対応フィールド（[`PageBreak::header_enabled`] /
+/// [`PageBreak::header_override`] / [`PageBreak::number_start`] /
+/// [`PageBreak::number_style`]）によって、以降のページで継続的に上書きできる
+/// （複数セクションに分かれた文書の、セクションごとのヘッダ・ページ番号再開に使う）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentConfig {
     /// 1行あたりのマス数（点字セル数）。
     pub line_width: usize,
     /// 1ページあたりの行数（ヘッダ行を含む）。
     pub lines_per_page: usize,
-    /// ページヘッダ行を生成するか。
+    /// ページヘッダ行を生成するか（先頭ページの初期状態。[`PageBreak::header_enabled`] で以降を上書き可能）。
     pub page_header: bool,
-    /// ページヘッダのタイトル（点字文字列）。`None` でページ番号のみ。
+    /// ページヘッダのタイトル（点字文字列。先頭ページの初期状態。`None` でページ番号のみ。
+    /// [`PageBreak::header_override`] で以降を上書き可能）。
     pub title: Option<String>,
     /// 開始ページ番号（先頭ページに付く番号。[`PageBreak::number_start`] で以降を上書き可能）。
     pub number_start: u32,
@@ -185,7 +200,7 @@ impl BrailleDocument {
     /// title = ⠞⠊⠞⠇⠑          # 省略可
     /// ---
     /// ⠁⠃⠉                     # 論理行1・物理行1
-    /// ==== start=5 style=alt   # 直前の物理行の後で強制改ページ（上書き可）
+    /// ==== start=5 style=alt show_header=false   # 直前の物理行の後で強制改ページ（上書き可。以降のページへ継続）
     /// ⠁⠃⠉                     # 論理行1・物理行2（改ページ後）
     ///                          # 空行 = 論理行の区切り
     /// ⠑⠋⠛                     # 論理行2
@@ -356,6 +371,7 @@ fn parse_page_break(rest: &str) -> PageBreak {
                     PageNumberStyle::Standard
                 });
             }
+            "show_header" => pb.header_enabled = Some(val == "true"),
             "header" => pb.header_override = Some(val.to_string()),
             _ => {}
         }
@@ -372,6 +388,13 @@ fn format_page_break(pb: &PageBreak) -> String {
         s.push_str(match style {
             PageNumberStyle::Alternative => " style=alt",
             PageNumberStyle::Standard => " style=standard",
+        });
+    }
+    if let Some(show) = pb.header_enabled {
+        s.push_str(if show {
+            " show_header=true"
+        } else {
+            " show_header=false"
         });
     }
     if let Some(h) = &pb.header_override {
@@ -458,6 +481,53 @@ mod tests {
         assert_eq!(pb.header_override.as_deref(), Some("⠭"));
         assert!(doc.paragraphs[0][1].logical_end);
         assert_eq!(doc.to_mbr(), mbr);
+    }
+
+    #[test]
+    fn mbr_page_break_show_header_roundtrip() {
+        let mbr_off = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n==== show_header=false\n⠉⠙\n";
+        let doc = BrailleDocument::parse_mbr(mbr_off);
+        let pb = doc.paragraphs[0][0].page_break.as_ref().unwrap();
+        assert_eq!(pb.header_enabled, Some(false));
+        assert_eq!(doc.to_mbr(), mbr_off);
+
+        let mbr_on = "line_width = 32\nlines_per_page = 22\npage_header = false\n---\n⠁⠃\n==== show_header=true\n⠉⠙\n";
+        let doc = BrailleDocument::parse_mbr(mbr_on);
+        let pb = doc.paragraphs[0][0].page_break.as_ref().unwrap();
+        assert_eq!(pb.header_enabled, Some(true));
+        assert_eq!(doc.to_mbr(), mbr_on);
+    }
+
+    #[test]
+    fn mbr_page_break_all_overrides_combined_roundtrip() {
+        // 表紙(ヘッダ無し)からセクション開始(ヘッダ有り・番号再開・タイトル変更)への遷移を模す。
+        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = false\n---\n⠁⠃\n==== start=5 style=alt show_header=true header=⠭\n⠉⠙\n";
+        let doc = BrailleDocument::parse_mbr(mbr);
+        let pb = doc.paragraphs[0][0].page_break.as_ref().unwrap();
+        assert_eq!(pb.number_start, Some(5));
+        assert_eq!(pb.number_style, Some(PageNumberStyle::Alternative));
+        assert_eq!(pb.header_enabled, Some(true));
+        assert_eq!(pb.header_override.as_deref(), Some("⠭"));
+        assert_eq!(doc.to_mbr(), mbr);
+    }
+
+    #[test]
+    fn page_break_is_plain_accounts_for_header_enabled() {
+        assert!(PageBreak::default().is_plain());
+        assert!(
+            !PageBreak {
+                header_enabled: Some(true),
+                ..PageBreak::default()
+            }
+            .is_plain()
+        );
+        assert!(
+            !PageBreak {
+                header_enabled: Some(false),
+                ..PageBreak::default()
+            }
+            .is_plain()
+        );
     }
 
     #[test]

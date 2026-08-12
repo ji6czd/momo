@@ -2,6 +2,9 @@
 //!
 //! - [`render`]: 各セグメントを行幅で**折り返し**た上で、ページ分割・ページヘッダ生成・
 //!   ページ番号付与・改ページ上書きを行う。強制改行（セグメント境界）と改ページは尊重する。
+//!   ヘッダ表示有無・タイトル・ページ番号・番号スタイルは [`PageBreak`] による**継続的な状態**
+//!   として扱われ、ヘッダ表示有無が変わるとページあたりのコンテンツ収容行数もそのページから
+//!   動的に変わる。
 //! - [`wrap_line`] / [`wrap_suffix`]: 1セグメントの点字文字列をワードラップして
 //!   表示行に分割する低レベル関数。`render` 内部や FFI の逐次折返しに使う。
 
@@ -80,22 +83,41 @@ impl FormattedDocument {
 // render
 // ============================================================
 
+/// ヘッダ表示有無から、1ページあたりのコンテンツ用行数を求める。
+/// ヘッダ行が1行を占めるため、ヘッダ表示時は `lines_per_page - 1`（最低1）。
+fn content_capacity(header_enabled: bool, lines_per_page: usize) -> usize {
+    if header_enabled {
+        lines_per_page.saturating_sub(1).max(1)
+    } else {
+        lines_per_page.max(1)
+    }
+}
+
+/// パス1で解決された1ページ分。ヘッダ表示有無・タイトル・ページ番号・番号スタイルは、
+/// このページの**先頭時点**で有効だった継続状態として確定済み。
+struct ResolvedPage {
+    lines: Vec<(String, bool, i32)>,
+    header_enabled: bool,
+    title: Option<String>,
+    page_number: u32,
+    style: PageNumberStyle,
+}
+
 /// 正本ドキュメントを印刷イメージへ導出する。
 ///
 /// 各セグメントを行幅で**折り返し**た上で、ページ分割（暗黙/強制）とページヘッダ・
 /// ページ番号を付与する。空ドキュメント（段落 0）は 0 ページ。
 /// 折返しで分かれた行は同じ `segment_index` を持ち、最後の行だけが論理行終端/改ページを担う。
+///
+/// ヘッダ表示有無 (`header_enabled`) ・タイトル・ページ番号・番号スタイルは、強制改ページの
+/// 上書きが無い限り前のページから引き継がれる（継続的な状態）。ヘッダ表示有無は
+/// 1ページあたりのコンテンツ収容行数にも影響するため、各ページの収容行数は、その**ページの
+/// 先頭で有効なヘッダ表示状態**に基づいて動的に決まる（改ページ上書きは、それを含む行が
+/// 属する現在のページの収容行数には影響せず、次のページから適用される）。
 pub fn render(doc: &BrailleDocument) -> FormattedDocument {
     let cfg = &doc.config;
     let line_width = cfg.line_width;
     let lines_per_page = cfg.lines_per_page;
-
-    // ヘッダが1行を占めるため、コンテンツ用の行数を1減らす。
-    let content_per_page = if cfg.page_header {
-        lines_per_page.saturating_sub(1).max(1)
-    } else {
-        lines_per_page.max(1)
-    };
 
     // セグメントを折返して表示行へ平坦化する。
     // 各行: (content, logical_end, page_break, segment_index)
@@ -139,59 +161,78 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
         };
     }
 
-    // パス1: ページへ分割する。各 raw ページに「そのページを開始させた改ページ上書き」を持たせる。
-    let mut raw_pages: Vec<(Vec<(String, bool, i32)>, Option<PageBreak>)> = Vec::new();
+    // パス1: ページへ分割しつつ、ヘッダ表示有無・タイトル・ページ番号・番号スタイルという
+    // 継続的な状態を解決する。ヘッダ表示有無はページ収容行数にも影響するため、収容行数は
+    // 「そのページの先頭で有効なヘッダ表示状態」から都度求め直す。
+    let mut resolved_pages: Vec<ResolvedPage> = Vec::new();
+    let mut header_enabled = cfg.page_header;
+    let mut title: Option<String> = cfg.title.clone();
+    let mut page_number = cfg.number_start;
+    let mut style = PageNumberStyle::default();
+    let mut capacity = content_capacity(header_enabled, lines_per_page);
+
     let mut cur: Vec<(String, bool, i32)> = Vec::new();
-    let mut start_override: Option<PageBreak> = None;
     let mut count = 0usize;
 
     for (content, logical_end, page_break, sidx) in flat {
         cur.push((content, logical_end, sidx));
         count += 1;
-        if let Some(pb) = page_break {
-            // 強制改ページ: この行の後でページを送る。
-            raw_pages.push((std::mem::take(&mut cur), start_override.take()));
-            start_override = Some(pb);
+
+        let forced = page_break.is_some();
+        if forced || count >= capacity {
+            // ページ確定: 今のページはこの時点の状態で焼き込む。
+            resolved_pages.push(ResolvedPage {
+                lines: std::mem::take(&mut cur),
+                header_enabled,
+                title: title.clone(),
+                page_number,
+                style,
+            });
+            page_number += 1;
             count = 0;
-        } else if count >= content_per_page {
-            // 暗黙改ページ。
-            raw_pages.push((std::mem::take(&mut cur), start_override.take()));
-            count = 0;
+
+            if let Some(pb) = page_break {
+                // 強制改ページの上書きは、次のページから適用される。
+                if let Some(v) = pb.header_enabled {
+                    header_enabled = v;
+                }
+                if let Some(h) = pb.header_override {
+                    title = Some(h);
+                }
+                if let Some(n) = pb.number_start {
+                    page_number = n;
+                }
+                if let Some(s) = pb.number_style {
+                    style = s;
+                }
+                capacity = content_capacity(header_enabled, lines_per_page);
+            }
         }
     }
     if !cur.is_empty() {
-        raw_pages.push((cur, start_override.take()));
+        resolved_pages.push(ResolvedPage {
+            lines: cur,
+            header_enabled,
+            title,
+            page_number,
+            style,
+        });
     }
 
-    // パス2: ページ番号・ヘッダを付与する。
-    let mut pages: Vec<Vec<RenderedLine>> = Vec::with_capacity(raw_pages.len());
-    let mut page_number = cfg.number_start;
-    let mut style = PageNumberStyle::default();
-
-    for (lines, ovr) in raw_pages {
-        if let Some(o) = &ovr {
-            if let Some(s) = o.number_style {
-                style = s;
-            }
-            if let Some(n) = o.number_start {
-                page_number = n;
-            }
-        }
-
-        let mut page: Vec<RenderedLine> = Vec::with_capacity(lines.len() + 1);
-        if cfg.page_header {
-            let title: &str = match &ovr {
-                Some(o) if o.header_override.is_some() => o.header_override.as_deref().unwrap(),
-                _ => cfg.title.as_deref().unwrap_or(""),
-            };
+    // パス2: 解決済みの状態から RenderedLine を組み立てるだけの純粋な整形。
+    let mut pages: Vec<Vec<RenderedLine>> = Vec::with_capacity(resolved_pages.len());
+    for rp in resolved_pages {
+        let mut page: Vec<RenderedLine> = Vec::with_capacity(rp.lines.len() + 1);
+        if rp.header_enabled {
+            let title_str = rp.title.as_deref().unwrap_or("");
             page.push(RenderedLine {
-                content: make_header(title, page_number, style, line_width),
+                content: make_header(title_str, rp.page_number, rp.style, line_width),
                 logical_end: true,
                 is_header: true,
                 segment_index: -1,
             });
         }
-        for (content, logical_end, sidx) in lines {
+        for (content, logical_end, sidx) in rp.lines {
             page.push(RenderedLine {
                 content,
                 logical_end,
@@ -200,7 +241,6 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
             });
         }
         pages.push(page);
-        page_number += 1;
     }
 
     FormattedDocument {
@@ -619,5 +659,80 @@ mod tests {
         assert!(f.pages()[1][0].content.starts_with("⠭⠭"));
         // 1ページ目はドキュメントタイトル
         assert!(f.pages()[0][0].content.starts_with(&braille_str(3)));
+    }
+
+    #[test]
+    fn render_title_override_persists_across_implicit_page_break() {
+        // lines_per_page=3 → ヘッダあり時の収容行数は2。改ページ直後のページ(2枚目)だけでなく、
+        // その後の暗黙のページ分割で生じるページ(3枚目)でもタイトル上書きが継続することを確認する。
+        let mut doc = doc_from(&[braille_str(1)], config(32, 3, true));
+        doc.paragraphs[0] = vec![
+            PhysicalLine::new(braille_str(1), false),
+            {
+                let mut l = PhysicalLine::new(braille_str(1), false);
+                l.page_break = Some(PageBreak {
+                    header_override: Some("⠭".to_string()),
+                    ..PageBreak::default()
+                });
+                l
+            },
+            PhysicalLine::new(braille_str(1), false),
+            PhysicalLine::new(braille_str(1), false),
+            PhysicalLine::new(braille_str(1), false),
+            PhysicalLine::new(braille_str(1), true),
+        ];
+        let f = render(&doc);
+        assert_eq!(f.page_count(), 3);
+        assert!(f.pages()[1][0].content.starts_with("⠭"));
+        assert!(f.pages()[2][0].content.starts_with("⠭")); // 暗黙分割後も継続
+    }
+
+    #[test]
+    fn render_header_enabled_toggle_changes_page_capacity() {
+        // header_enabled=false のセクション（収容行数5）→ 強制改ページで header_enabled=Some(true)
+        // に切り替え（収容行数4）。ヘッダ有無の切替が暗黙のページ分割をまたいで継続し、かつ
+        // ページ収容行数に反映されることを確認する。
+        let mut doc = doc_from(&[braille_str(1)], config(32, 5, false));
+        let mut lines: Vec<PhysicalLine> = (0..10)
+            .map(|_| PhysicalLine::new(braille_str(1), false))
+            .collect();
+        lines[9].page_break = Some(PageBreak {
+            header_enabled: Some(true),
+            ..PageBreak::default()
+        });
+        lines.extend((0..8).map(|_| PhysicalLine::new(braille_str(1), false)));
+        lines.last_mut().unwrap().logical_end = true;
+        doc.paragraphs[0] = lines;
+
+        let f = render(&doc);
+        assert_eq!(f.page_count(), 4);
+        // 前半2ページ: ヘッダ無し、収容行数5がそのまま反映される。
+        assert_eq!(f.pages()[0].len(), 5);
+        assert!(!f.pages()[0][0].is_header);
+        assert_eq!(f.pages()[1].len(), 5);
+        assert!(!f.pages()[1][0].is_header);
+        // 後半2ページ: ヘッダ有り、収容行数は4に減る（4行+ヘッダ1行=5）。
+        assert_eq!(f.pages()[2].len(), 5);
+        assert!(f.pages()[2][0].is_header);
+        assert_eq!(f.pages()[3].len(), 5);
+        assert!(f.pages()[3][0].is_header);
+    }
+
+    #[test]
+    fn render_show_header_marker_toggles_header_line() {
+        // MBR の ==== show_header=false マーカー経由でも同じ状態遷移が機能することを確認する。
+        let mut doc = doc_from(&[braille_str(1)], config(32, 25, true));
+        doc.paragraphs[0] = vec![
+            {
+                let mut l = PhysicalLine::new(braille_str(1), false);
+                l.page_break = Some(PageBreak::from_marker("==== show_header=false"));
+                l
+            },
+            PhysicalLine::new(braille_str(1), true),
+        ];
+        let f = render(&doc);
+        assert_eq!(f.page_count(), 2);
+        assert!(f.pages()[0][0].is_header);
+        assert!(!f.pages()[1][0].is_header);
     }
 }

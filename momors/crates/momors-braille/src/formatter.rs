@@ -168,7 +168,7 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
     let mut header_enabled = cfg.page_header;
     let mut title: Option<String> = cfg.title.clone();
     let mut page_number = cfg.number_start;
-    let mut style = PageNumberStyle::default();
+    let mut style = cfg.number_style;
     let mut capacity = content_capacity(header_enabled, lines_per_page);
 
     let mut cur: Vec<(String, bool, i32)> = Vec::new();
@@ -390,6 +390,7 @@ mod tests {
             page_header,
             title: None,
             number_start: 1,
+            number_style: PageNumberStyle::Standard,
         }
     }
 
@@ -606,6 +607,29 @@ mod tests {
             .rev()
             .collect();
         assert_eq!(tail, "⠼⠑");
+    }
+
+    #[test]
+    fn render_number_style_from_config_applies_to_first_page() {
+        // DocumentConfig.number_style を代替スタイルにすると、改ページ上書き無しでも
+        // 先頭ページから代替スタイルの番号が使われる。
+        let cfg = DocumentConfig {
+            number_style: PageNumberStyle::Alternative,
+            ..config(32, 25, true)
+        };
+        let doc = doc_from(&[braille_str(1)], cfg);
+        let f = render(&doc);
+        let header = &f.pages()[0][0].content;
+        // 代替スタイルの 1 = ⠂、prefix ⠼
+        let tail: String = header
+            .chars()
+            .rev()
+            .take(2)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        assert_eq!(tail, "⠼⠂");
     }
 
     #[test]

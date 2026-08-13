@@ -19,7 +19,7 @@
 //! - ヘッダ行: 各ページ先頭行を位置で落とす。ただし数符 `⠼` を含む行に限定して誤爆を防ぐ。
 //!   （タイトル・ページ番号の中身の復元は点字→数字の逆変換が入ってから。）
 
-use crate::document::{BrailleDocument, DocumentConfig, PageBreak, PhysicalLine};
+use crate::document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
 
 const HEADER_SIZE: usize = 512;
 const EXT_HEADER_SIZE: usize = 512;
@@ -203,6 +203,7 @@ fn assemble_document(
         // タイトルは読み込み時に落としている（点字→数字の逆変換が入るまで復元しない）。
         title: None,
         number_start: 1,
+        number_style: PageNumberStyle::Standard,
     };
 
     Some(BrailleDocument { paragraphs, config })
@@ -406,11 +407,12 @@ mod tests {
             ],
         );
         let doc = read_bes(&bytes).unwrap();
-        assert!(doc
-            .paragraphs
-            .iter()
-            .flatten()
-            .all(|l| l.page_break.is_none()));
+        assert!(
+            doc.paragraphs
+                .iter()
+                .flatten()
+                .all(|l| l.page_break.is_none())
+        );
     }
 
     #[test]
@@ -467,6 +469,7 @@ mod tests {
             page_header: false,
             title: None,
             number_start: 1,
+            number_style: PageNumberStyle::Standard,
         };
         let paras = vec![braille_str(10), braille_str(40), braille_str(5)];
         let doc = BrailleDocument::from_paragraphs(&paras, config);

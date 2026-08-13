@@ -106,7 +106,7 @@ impl PhysicalLine {
 
 /// ドキュメント設定（フロントマター相当）。
 ///
-/// `page_header` / `title` / `number_start` は先頭ページの初期状態であり、
+/// `page_header` / `title` / `number_start` / `number_style` は先頭ページの初期状態であり、
 /// [`PageBreak`] の対応フィールド（[`PageBreak::header_enabled`] /
 /// [`PageBreak::header_override`] / [`PageBreak::number_start`] /
 /// [`PageBreak::number_style`]）によって、以降のページで継続的に上書きできる
@@ -124,6 +124,8 @@ pub struct DocumentConfig {
     pub title: Option<String>,
     /// 開始ページ番号（先頭ページに付く番号。[`PageBreak::number_start`] で以降を上書き可能）。
     pub number_start: u32,
+    /// 先頭ページのページ番号スタイル。[`PageBreak::number_style`] で以降を上書き可能。
+    pub number_style: PageNumberStyle,
 }
 
 impl Default for DocumentConfig {
@@ -134,6 +136,7 @@ impl Default for DocumentConfig {
             page_header: true,
             title: None,
             number_start: 1,
+            number_style: PageNumberStyle::Standard,
         }
     }
 }
@@ -197,6 +200,7 @@ impl BrailleDocument {
     /// line_width = 32
     /// lines_per_page = 22
     /// page_header = true
+    /// number_style = alt        # 省略可（既定は標準スタイル）
     /// title = ⠞⠊⠞⠇⠑          # 省略可
     /// ---
     /// ⠁⠃⠉                     # 論理行1・物理行1
@@ -278,6 +282,9 @@ impl BrailleDocument {
         if c.number_start != 1 {
             out.push_str(&format!("number_start = {}\n", c.number_start));
         }
+        if c.number_style == PageNumberStyle::Alternative {
+            out.push_str("number_style = alt\n");
+        }
         if let Some(title) = &c.title {
             if !title.is_empty() {
                 out.push_str(&format!("title = {}\n", title));
@@ -337,6 +344,13 @@ fn parse_config(lines: &[&str]) -> DocumentConfig {
                 if let Ok(v) = value.parse() {
                     config.number_start = v;
                 }
+            }
+            "number_style" => {
+                config.number_style = if value == "alt" {
+                    PageNumberStyle::Alternative
+                } else {
+                    PageNumberStyle::Standard
+                };
             }
             "title" => {
                 config.title = if value.is_empty() {
@@ -449,6 +463,25 @@ mod tests {
         );
         assert_eq!(doc.config.number_start, 1);
         assert!(!doc.to_mbr().contains("number_start"));
+    }
+
+    #[test]
+    fn mbr_number_style_roundtrip() {
+        // number_style は既定(標準)以外のときだけ前付けに出力され、往復で保たれる。
+        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\nnumber_style = alt\n---\n⠁\n";
+        let doc = BrailleDocument::parse_mbr(mbr);
+        assert_eq!(doc.config.number_style, PageNumberStyle::Alternative);
+        assert_eq!(doc.to_mbr(), mbr);
+    }
+
+    #[test]
+    fn mbr_default_number_style_omitted() {
+        // 既定(標準)のときは前付けに number_style を出さない。
+        let doc = BrailleDocument::parse_mbr(
+            "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁\n",
+        );
+        assert_eq!(doc.config.number_style, PageNumberStyle::Standard);
+        assert!(!doc.to_mbr().contains("number_style"));
     }
 
     #[test]

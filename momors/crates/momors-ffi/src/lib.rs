@@ -114,14 +114,16 @@
 
 use std::os::raw::c_int;
 
-use momors_braille::document::{BrailleDocument, DocumentConfig, PageBreak, PhysicalLine};
-use momors_braille::formatter::{render, wrap_line, wrap_suffix, FormattedDocument, RenderedLine};
-use momors_braille::writer::OutputFormat;
 use momors_braille::NabccCase;
+use momors_braille::document::{
+    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine,
+};
+use momors_braille::formatter::{FormattedDocument, RenderedLine, render, wrap_line, wrap_suffix};
+use momors_braille::writer::OutputFormat;
 use momors_braille::{
-    detect_language, embedded_table, embedded_tables, BackTransResult, BrailleBackTranslator,
-    BrailleResult, BrailleTranslator, EnglishTranslator, JapaneseTranslator, Language, Table,
-    UnknownCharPolicy,
+    BackTransResult, BrailleBackTranslator, BrailleResult, BrailleTranslator, EnglishTranslator,
+    JapaneseTranslator, Language, Table, UnknownCharPolicy, detect_language, embedded_table,
+    embedded_tables,
 };
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
@@ -1118,6 +1120,7 @@ pub extern "C" fn momo_doc_builder_new(
         page_header,
         title,
         number_start: number_start.max(0) as u32,
+        number_style: PageNumberStyle::Standard,
     };
     Box::into_raw(Box::new(BrailleDocBuilder {
         config,
@@ -1491,6 +1494,7 @@ fn config_from_params(
         page_header,
         title,
         number_start: number_start.max(0) as u32,
+        number_style: PageNumberStyle::Standard,
     }
 }
 

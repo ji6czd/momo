@@ -4,8 +4,8 @@
 //! - `Bes` / `Base` / `BrailleText`: [`render`] で印刷イメージへ導出してから符号化する。
 
 use crate::document::BrailleDocument;
-use crate::formatter::{render, FormattedDocument};
-use crate::nabcc::{braille_to_nabcc, NabccCase};
+use crate::formatter::{FormattedDocument, render};
+use crate::nabcc::{NabccCase, braille_to_nabcc};
 
 /// ドキュメントの出力形式。
 pub enum OutputFormat {
@@ -176,7 +176,7 @@ fn write_bes_file(doc: &FormattedDocument) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::DocumentConfig;
+    use crate::document::{DocumentConfig, PageNumberStyle};
 
     fn config(page_header: bool) -> DocumentConfig {
         DocumentConfig {
@@ -185,6 +185,7 @@ mod tests {
             page_header,
             title: None,
             number_start: 1,
+            number_style: PageNumberStyle::Standard,
         }
     }
 
@@ -265,6 +266,7 @@ mod tests {
             page_header: false,
             title: None,
             number_start: 1,
+            number_style: PageNumberStyle::Standard,
         };
         let d = BrailleDocument::from_paragraphs(&["⠁⠁⠁⠁⠀⠃⠃".to_string()], cfg);
         let out = String::from_utf8(brf(&d, NabccCase::Upper)).unwrap();

@@ -23,6 +23,7 @@ partial class MainForm
         exitMenuItem = new ToolStripMenuItem();
         editMenu = new ToolStripMenuItem();
         undoMenuItem = new ToolStripMenuItem();
+        redoMenuItem = new ToolStripMenuItem();
         cutMenuItem = new ToolStripMenuItem();
         copyMenuItem = new ToolStripMenuItem();
         pasteMenuItem = new ToolStripMenuItem();
@@ -96,6 +97,7 @@ partial class MainForm
         editMenu.Text = "編集(&E)";
         editMenu.DropDownItems.AddRange(new ToolStripItem[] {
             undoMenuItem,
+            redoMenuItem,
             new ToolStripSeparator(),
             cutMenuItem,
             copyMenuItem,
@@ -114,6 +116,19 @@ partial class MainForm
         undoMenuItem.Text = "元に戻す(&U)";
         undoMenuItem.ShortcutKeys = Keys.Control | Keys.Z;
         undoMenuItem.Click += (_, _) => SmartUndo();
+
+        redoMenuItem.Text = "やり直し(&Y)";
+        redoMenuItem.ShortcutKeys = Keys.Control | Keys.Y;
+        redoMenuItem.Click += (_, _) => SmartRedo();
+
+        // Undo/Redo スタックが空のときはメニューをグレーアウトする。フォールバックモード
+        // （_view == null）ではモデル側スタックが常に空なので、RichTextBox 標準の
+        // CanUndo/CanRedo で判定を分岐する。
+        editMenu.DropDownOpening += (_, _) =>
+        {
+            undoMenuItem.Enabled = _view == null ? richTextBox.CanUndo : _undoStack.Count > 0;
+            redoMenuItem.Enabled = _view == null ? richTextBox.CanRedo : _redoStack.Count > 0;
+        };
 
         cutMenuItem.Text = "切り取り(&T)";
         cutMenuItem.ShortcutKeys = Keys.Control | Keys.X;
@@ -257,6 +272,7 @@ partial class MainForm
     private ToolStripMenuItem exitMenuItem;
     private ToolStripMenuItem editMenu;
     private ToolStripMenuItem undoMenuItem;
+    private ToolStripMenuItem redoMenuItem;
     private ToolStripMenuItem cutMenuItem;
     private ToolStripMenuItem copyMenuItem;
     private ToolStripMenuItem pasteMenuItem;

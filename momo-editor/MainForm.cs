@@ -282,10 +282,43 @@ public partial class MainForm : Form
     // ---- フォーマット・レンダリング ----
 
     /// <summary>
-    /// _document を Rust で整形して RichTextBox に描画する。
-    /// targetSeg/targetOffset: カーソルを論理位置（セグメント+オフセット）に復元する（-1 なら先頭の編集可能行）。
+    /// _document を Rust で整形して描画する（Undo/Redo スタック管理込み）。
+    /// targetSeg &lt; 0（ロード/新規）なら前の文書の Undo/Redo 履歴を破棄。
+    /// それ以外（実際の編集）は、直前の状態（_lastSnapshot）を Undo スタックへ積んでから
+    /// 描画し、描画後の状態で _lastSnapshot を更新し直す。
     /// </summary>
     private void ReformatAndRender(int targetSeg, int targetOffset)
+    {
+        if (targetSeg < 0)
+        {
+            _undoStack.Clear();
+            _redoStack.Clear();
+        }
+        else if (_lastSnapshot != null)
+        {
+            PushCapped(_undoStack, _lastSnapshot);
+            _redoStack.Clear();
+        }
+
+        RenderDocumentToEditor(targetSeg, targetOffset);
+
+        if (_view != null)
+        {
+            var (si, off) = GetCursor();
+            _lastSnapshot = new EditSnapshot(CloneDocument(_document), si, off);
+        }
+        else
+        {
+            _lastSnapshot = null; // フォールバック表示中はモデル駆動 Undo の対象外
+        }
+    }
+
+    /// <summary>
+    /// _document を Rust で整形して RichTextBox に描画する（描画のみ、Undo/Redo スタックには
+    /// 触れない）。ReformatAndRender と RestoreSnapshot（MainForm.Undo.cs）の双方から呼ばれる。
+    /// targetSeg/targetOffset: カーソルを論理位置（セグメント+オフセット）に復元する（-1 なら先頭の編集可能行）。
+    /// </summary>
+    private void RenderDocumentToEditor(int targetSeg, int targetOffset)
     {
         _suppressModified = true;
         try
@@ -334,6 +367,14 @@ public partial class MainForm : Form
             sb.Append(_view.ContentAt(i));
         }
         richTextBox.Text = sb.ToString();
+
+        // RichTextBox 自前のネイティブ Undo バッファを毎回クリアする。ContextMenuStrip
+        // 未設定のため右クリックでネイティブの「元に戻す」を含むコンテキストメニューが
+        // 出せる状態になっており、それを操作すると _document を介さず表示だけが戻って
+        // しまい、モデルと表示がズレる。モデル駆動描画のたびにクリアしておけば、その
+        // 項目は常に無効化され実害が起きない（フォールバックモードはここを通らないため
+        // 既存の richTextBox.Undo() は影響を受けない）。
+        richTextBox.ClearUndo();
 
         ApplyLineSpacing();
         ApplyHeaderProtection();
@@ -1061,13 +1102,6 @@ public partial class MainForm : Form
             richTextBox.Select(richTextBox.SelectionStart, 1);
             richTextBox.SelectedText = "";
         }
-    }
-
-    private void SmartUndo()
-    {
-        // モデル駆動編集中は Undo スタックがないため何もしない
-        if (_view != null) return;
-        richTextBox.Undo();
     }
 
     private void SmartCut()

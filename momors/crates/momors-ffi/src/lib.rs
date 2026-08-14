@@ -72,21 +72,28 @@
 //!
 //! ## 点字ドキュメント（正本）の読み書き・描画
 //! すべての形式（MBR / BES / BASE / BrailleText）の読み書きは Rust 側に集約される。
-//! 改ページ情報は MBR の `====` マーカー文字列として不透明に授受する。
-//! 詳細はソース下部の各関数ドキュメントを参照。
+//! ドキュメントは**エントリ**（テキスト段落 or 改ページ）のフラットな列。改ページは
+//! どの物理行にも属さない独立したエントリで、MBR の `====` マーカー文字列として
+//! 不透明に授受する。詳細はソース下部の各関数ドキュメントを参照。
 //! ```c
 //! // 読込: バイト列 -> ドキュメント（format: 0=MBR,1=BES,2=BET）
 //! MomoDoc momo_doc_read(const uint8_t* bytes, int32_t len, int32_t format);
 //! void    momo_doc_free(MomoDoc);
-//! // 設定・段落・物理行の getter（momo_doc_line_width / _paragraph_count / _line_w など）
+//! // 設定・エントリの getter（momo_doc_line_width / _entry_count / _entry_kind / _line_w など）
 //! // 保存: ビルダーで組み立て -> momo_doc_write でバイト列取得（format: 0=MBR,1=BES,3=BASE,4=BRF）
-//! MomoDocBuilder momo_doc_builder_new(int32_t lw, int32_t lpp, bool header, int32_t number_start, const uint16_t* title);
-//! void           momo_doc_builder_add_line(MomoDocBuilder, const uint16_t* content, bool logical_end, const uint16_t* page_break);
+//! MomoDocBuilder momo_doc_builder_new(int32_t lw, int32_t lpp, bool header, int32_t number_start, int32_t number_style, const uint16_t* title);
+//! void           momo_doc_builder_add_line(MomoDocBuilder, const uint16_t* content, bool logical_end); // テキスト行を追加
+//! void           momo_doc_builder_add_page_break(MomoDocBuilder, const uint16_t* marker); // 改ページエントリを追加（marker は NULL/空でプレーン）
 //! MomoDoc        momo_doc_builder_build(MomoDocBuilder); // ビルダーは解放される
 //! MomoBytes      momo_doc_write(MomoDoc, int32_t format);
 //! int32_t        momo_bytes_len(MomoBytes);  void momo_bytes_copy(MomoBytes, uint8_t* out);  void momo_bytes_free(MomoBytes);
 //! // 表示: 印刷イメージ（ページ/物理行/ヘッダ）
 //! MomoFormatted  momo_doc_render(MomoDoc);
+//! // ページ単位の実効設定（ヘッダ有無・タイトル・番号・番号スタイル。継続的状態の解決結果）
+//! bool     momo_formatted_page_header_enabled(MomoFormatted, int32_t page);
+//! int32_t  momo_formatted_page_title_w(MomoFormatted, int32_t page, uint16_t* buf, int32_t len);
+//! int32_t  momo_formatted_page_number(MomoFormatted, int32_t page);
+//! int32_t  momo_formatted_page_number_style(MomoFormatted, int32_t page); // 0=Standard,1=Alternative
 //! // 逐次: 1論理行の折返し
 //! MomoWrapLines  momo_wrap_line_w(const uint16_t* text, int32_t line_width);
 //! MomoWrapLines  momo_wrap_suffix_w(const uint16_t* text, int32_t line_width, int32_t first_line_remaining);
@@ -116,9 +123,11 @@ use std::os::raw::c_int;
 
 use momors_braille::NabccCase;
 use momors_braille::document::{
-    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine,
+    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, ParagraphEntry, PhysicalLine,
 };
-use momors_braille::formatter::{FormattedDocument, RenderedLine, render, wrap_line, wrap_suffix};
+use momors_braille::formatter::{
+    FormattedDocument, PageInfo, RenderedLine, render, wrap_line, wrap_suffix,
+};
 use momors_braille::writer::OutputFormat;
 use momors_braille::{
     BackTransResult, BrailleBackTranslator, BrailleResult, BrailleTranslator, EnglishTranslator,
@@ -991,6 +1000,18 @@ pub extern "C" fn momo_doc_number_start(h: *const BrailleDocHandle) -> c_int {
     }
 }
 
+/// 先頭ページのページ番号スタイル。0=Standard, 1=Alternative。handle NULL なら -1。
+#[no_mangle]
+pub extern "C" fn momo_doc_number_style(h: *const BrailleDocHandle) -> c_int {
+    match unsafe { h.as_ref() } {
+        Some(h) => match h.doc.config.number_style {
+            PageNumberStyle::Standard => 0,
+            PageNumberStyle::Alternative => 1,
+        },
+        None => -1,
+    }
+}
+
 /// タイトル（UTF-16, null 終端）を buf に書く。タイトル無しなら 0、handle NULL なら -1。
 #[no_mangle]
 pub extern "C" fn momo_doc_title_w(
@@ -1008,40 +1029,71 @@ pub extern "C" fn momo_doc_title_w(
     }
 }
 
-// ---- 段落・物理行 getter ----
+// ---- エントリ・物理行 getter ----
+//
+// ドキュメントはエントリ（テキスト段落 or 改ページ）のフラットな列。改ページは
+// どの物理行にも属さない独立したエントリなので、2次元の [para][line] ではなく
+// 「フラットなエントリ番号＋種別問い合わせ」でアクセスする。
 
 #[no_mangle]
-pub extern "C" fn momo_doc_paragraph_count(h: *const BrailleDocHandle) -> c_int {
+pub extern "C" fn momo_doc_entry_count(h: *const BrailleDocHandle) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => h.doc.paragraphs.len() as c_int,
         None => -1,
     }
 }
 
+/// エントリの種別。0=テキスト段落, 1=改ページ, 無効な引数なら -1。
 #[no_mangle]
-pub extern "C" fn momo_doc_line_count(h: *const BrailleDocHandle, para: c_int) -> c_int {
+pub extern "C" fn momo_doc_entry_kind(h: *const BrailleDocHandle, entry: c_int) -> c_int {
     let h = match unsafe { h.as_ref() } {
         Some(h) => h,
         None => return -1,
     };
-    match h.doc.paragraphs.get(para as usize) {
-        Some(p) => p.len() as c_int,
+    if entry < 0 {
+        return -1;
+    }
+    match h.doc.paragraphs.get(entry as usize) {
+        Some(ParagraphEntry::Text(_)) => 0,
+        Some(ParagraphEntry::Break(_)) => 1,
         None => -1,
     }
 }
 
-fn doc_line(h: &BrailleDocHandle, para: c_int, line: c_int) -> Option<&PhysicalLine> {
-    h.doc
-        .paragraphs
-        .get(para as usize)
-        .and_then(|p| p.get(line as usize))
+/// テキスト段落の物理行数。改ページエントリなら 0（種別を見ずにループしても安全）。
+/// 無効な引数なら -1。
+#[no_mangle]
+pub extern "C" fn momo_doc_line_count(h: *const BrailleDocHandle, entry: c_int) -> c_int {
+    let h = match unsafe { h.as_ref() } {
+        Some(h) => h,
+        None => return -1,
+    };
+    if entry < 0 {
+        return -1;
+    }
+    match h.doc.paragraphs.get(entry as usize) {
+        Some(ParagraphEntry::Text(lines)) => lines.len() as c_int,
+        Some(ParagraphEntry::Break(_)) => 0,
+        None => -1,
+    }
 }
 
-/// 物理行のテキスト（UTF-16, null 終端）。無効な引数なら -1。
+fn doc_line(h: &BrailleDocHandle, entry: c_int, line: c_int) -> Option<&PhysicalLine> {
+    if entry < 0 {
+        return None;
+    }
+    h.doc
+        .paragraphs
+        .get(entry as usize)?
+        .as_text()?
+        .get(line as usize)
+}
+
+/// 物理行のテキスト（UTF-16, null 終端）。無効な引数（改ページエントリを含む）なら -1。
 #[no_mangle]
 pub extern "C" fn momo_doc_line_w(
     h: *const BrailleDocHandle,
-    para: c_int,
+    entry: c_int,
     line: c_int,
     buf: *mut u16,
     buf_len: c_int,
@@ -1050,34 +1102,33 @@ pub extern "C" fn momo_doc_line_w(
         Some(h) => h,
         None => return -1,
     };
-    match doc_line(h, para, line) {
+    match doc_line(h, entry, line) {
         Some(l) => write_utf16(&l.content, buf, buf_len),
         None => -1,
     }
 }
 
-/// 物理行が論理行末尾か。無効な引数なら false。
+/// 物理行が論理行末尾か。無効な引数（改ページエントリを含む）なら false。
 #[no_mangle]
 pub extern "C" fn momo_doc_line_logical_end(
     h: *const BrailleDocHandle,
-    para: c_int,
+    entry: c_int,
     line: c_int,
 ) -> bool {
     match unsafe { h.as_ref() } {
-        Some(h) => doc_line(h, para, line)
+        Some(h) => doc_line(h, entry, line)
             .map(|l| l.logical_end)
             .unwrap_or(false),
         None => false,
     }
 }
 
-/// 物理行の改ページマーカー（==== で始まる行）を UTF-16 で buf に書く。
-/// 改ページ無しなら 0、無効な引数なら -1。
+/// 改ページエントリのマーカー文字列（`====` プレフィックス込み、UTF-16, null 終端）を
+/// buf に書く。テキスト段落エントリ/無効な引数なら -1。
 #[no_mangle]
-pub extern "C" fn momo_doc_line_page_break_w(
+pub extern "C" fn momo_doc_entry_page_break_w(
     h: *const BrailleDocHandle,
-    para: c_int,
-    line: c_int,
+    entry: c_int,
     buf: *mut u16,
     buf_len: c_int,
 ) -> c_int {
@@ -1085,12 +1136,12 @@ pub extern "C" fn momo_doc_line_page_break_w(
         Some(h) => h,
         None => return -1,
     };
-    match doc_line(h, para, line) {
-        Some(l) => match &l.page_break {
-            Some(pb) => write_utf16(&pb.to_marker(), buf, buf_len),
-            None => 0,
-        },
-        None => -1,
+    if entry < 0 {
+        return -1;
+    }
+    match h.doc.paragraphs.get(entry as usize) {
+        Some(ParagraphEntry::Break(pb)) => write_utf16(&pb.to_marker(), buf, buf_len),
+        Some(ParagraphEntry::Text(_)) | None => -1,
     }
 }
 
@@ -1100,17 +1151,19 @@ pub extern "C" fn momo_doc_line_page_break_w(
 
 pub struct BrailleDocBuilder {
     config: DocumentConfig,
-    paragraphs: Vec<Vec<PhysicalLine>>,
+    entries: Vec<ParagraphEntry>,
     current: Vec<PhysicalLine>,
 }
 
-/// ビルダーを作る。number_start: 開始ページ番号。title は NULL/空で無し。
+/// ビルダーを作る。number_start: 開始ページ番号。number_style: 0=Standard, 1=Alternative。
+/// title は NULL/空で無し。
 #[no_mangle]
 pub extern "C" fn momo_doc_builder_new(
     line_width: c_int,
     lines_per_page: c_int,
     page_header: bool,
     number_start: c_int,
+    number_style: c_int,
     title: *const u16,
 ) -> *mut BrailleDocBuilder {
     let title = unsafe { lpwstr_to_string(title) }.filter(|s| !s.is_empty());
@@ -1120,40 +1173,60 @@ pub extern "C" fn momo_doc_builder_new(
         page_header,
         title,
         number_start: number_start.max(0) as u32,
-        number_style: PageNumberStyle::Standard,
+        number_style: if number_style == 1 {
+            PageNumberStyle::Alternative
+        } else {
+            PageNumberStyle::Standard
+        },
     };
     Box::into_raw(Box::new(BrailleDocBuilder {
         config,
-        paragraphs: Vec::new(),
+        entries: Vec::new(),
         current: Vec::new(),
     }))
 }
 
-/// 物理行を1行追加する。logical_end が true ならその行で段落を確定する。
-/// page_break は ==== マーカー文字列（NULL/空で改ページ無し）。
+/// テキストの物理行を1行追加する。logical_end が true ならその行で段落を確定する。
 #[no_mangle]
 pub extern "C" fn momo_doc_builder_add_line(
     b: *mut BrailleDocBuilder,
     content: *const u16,
     logical_end: bool,
-    page_break: *const u16,
 ) {
     let b = match unsafe { b.as_mut() } {
         Some(b) => b,
         None => return,
     };
     let content = unsafe { lpwstr_to_string(content) }.unwrap_or_default();
-    let pb = unsafe { lpwstr_to_string(page_break) }
-        .filter(|s| !s.is_empty())
-        .map(|m| PageBreak::from_marker(&m));
     b.current.push(PhysicalLine {
         content,
         logical_end,
-        page_break: pb,
     });
     if logical_end {
-        b.paragraphs.push(std::mem::take(&mut b.current));
+        b.entries
+            .push(ParagraphEntry::Text(std::mem::take(&mut b.current)));
     }
+}
+
+/// 改ページエントリを追加する（テキストを一切持たない独立したエントリ）。
+/// marker は `====` マーカー文字列（NULL/空でプレーンな改ページ）。
+/// それまでに `add_line` で積まれていた未確定の物理行があれば、先にテキスト段落として
+/// 確定してから改ページエントリを追加する。
+#[no_mangle]
+pub extern "C" fn momo_doc_builder_add_page_break(b: *mut BrailleDocBuilder, marker: *const u16) {
+    let b = match unsafe { b.as_mut() } {
+        Some(b) => b,
+        None => return,
+    };
+    if !b.current.is_empty() {
+        b.entries
+            .push(ParagraphEntry::Text(std::mem::take(&mut b.current)));
+    }
+    let pb = unsafe { lpwstr_to_string(marker) }
+        .filter(|s| !s.is_empty())
+        .map(|m| PageBreak::from_marker(&m))
+        .unwrap_or_default();
+    b.entries.push(ParagraphEntry::Break(pb));
 }
 
 /// ビルダーからドキュメントを確定して返す。
@@ -1177,14 +1250,17 @@ pub extern "C" fn momo_doc_builder_build(b: *mut BrailleDocBuilder) -> *mut Brai
     let builder = unsafe { *Box::from_raw(b) };
     let BrailleDocBuilder {
         config,
-        mut paragraphs,
+        mut entries,
         current,
     } = builder;
     if !current.is_empty() {
-        paragraphs.push(current);
+        entries.push(ParagraphEntry::Text(current));
     }
     Box::into_raw(Box::new(BrailleDocHandle {
-        doc: BrailleDocument { paragraphs, config },
+        doc: BrailleDocument {
+            paragraphs: entries,
+            config,
+        },
     }))
 }
 
@@ -1382,6 +1458,78 @@ pub extern "C" fn momo_formatted_line_segment_index(
     match unsafe { h.as_ref() } {
         Some(h) => fmt_line(h, page, line)
             .map(|l| l.segment_index)
+            .unwrap_or(-1),
+        None => -1,
+    }
+}
+
+fn fmt_page_info(h: &FormattedDocHandle, page: c_int) -> Option<&PageInfo> {
+    if page < 0 {
+        return None;
+    }
+    h.doc.page_info(page as usize)
+}
+
+/// 指定ページでヘッダ行が表示されているか（セクション単位の継続的状態の実効値）。
+/// 無効な引数なら false。
+#[no_mangle]
+pub extern "C" fn momo_formatted_page_header_enabled(
+    h: *const FormattedDocHandle,
+    page: c_int,
+) -> bool {
+    match unsafe { h.as_ref() } {
+        Some(h) => fmt_page_info(h, page)
+            .map(|i| i.header_enabled)
+            .unwrap_or(false),
+        None => false,
+    }
+}
+
+/// 指定ページのヘッダタイトル（UTF-16, null 終端。実効値）。
+/// タイトル無しなら 0、無効な引数なら -1。
+#[no_mangle]
+pub extern "C" fn momo_formatted_page_title_w(
+    h: *const FormattedDocHandle,
+    page: c_int,
+    buf: *mut u16,
+    buf_len: c_int,
+) -> c_int {
+    let h = match unsafe { h.as_ref() } {
+        Some(h) => h,
+        None => return -1,
+    };
+    match fmt_page_info(h, page) {
+        Some(i) => match &i.title {
+            Some(t) => write_utf16(t, buf, buf_len),
+            None => 0,
+        },
+        None => -1,
+    }
+}
+
+/// 指定ページのページ番号（実効値）。無効な引数なら -1。
+#[no_mangle]
+pub extern "C" fn momo_formatted_page_number(h: *const FormattedDocHandle, page: c_int) -> c_int {
+    match unsafe { h.as_ref() } {
+        Some(h) => fmt_page_info(h, page)
+            .map(|i| i.page_number as c_int)
+            .unwrap_or(-1),
+        None => -1,
+    }
+}
+
+/// 指定ページのページ番号スタイル（実効値）。0=Standard, 1=Alternative。無効な引数なら -1。
+#[no_mangle]
+pub extern "C" fn momo_formatted_page_number_style(
+    h: *const FormattedDocHandle,
+    page: c_int,
+) -> c_int {
+    match unsafe { h.as_ref() } {
+        Some(h) => fmt_page_info(h, page)
+            .map(|i| match i.style {
+                PageNumberStyle::Standard => 0,
+                PageNumberStyle::Alternative => 1,
+            })
             .unwrap_or(-1),
         None => -1,
     }

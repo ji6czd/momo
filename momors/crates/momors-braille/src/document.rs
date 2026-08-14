@@ -8,13 +8,28 @@
 //!
 //! ## レベルの区別
 //!
-//! - **論理ドキュメント**（本モジュール）: 段落 = 物理行の列。手動改行・強制改ページ・
-//!   ページ番号上書きなど、編集で保持すべき情報をすべて持つ。可逆。
+//! - **論理ドキュメント**（本モジュール）: [`ParagraphEntry`] の列。テキスト段落
+//!   （物理行の列）と、改ページそのものを表す独立したエントリが並ぶ。手動改行・
+//!   強制改ページ・ページ番号上書きなど、編集で保持すべき情報をすべて持つ。可逆。
 //! - **印刷イメージ**（[`crate::formatter`]）: ページ×折返し済み行×ヘッダ。非可逆。
 //!
 //! 段落を「物理行の列」として保持するのは、ユーザーが置いた強制物理改行を
 //! 再ワードラップで失わないため。新規にテキストから組む場合は
 //! [`BrailleDocument::from_paragraphs`] で組み、折返しは [`crate::formatter::render`] が行う。
+//!
+//! ## 改ページは独立したエントリである
+//!
+//! 強制改ページ（と、それに伴うヘッダ有無・タイトル・番号・番号スタイルの上書き）は、
+//! かつて「直前の物理行にぶら下がるプロパティ」として表現されていたが、これは
+//! テキスト編集（結合・分割）のたびに改ページの生死が編集方向に依存してしまう、
+//! 空段落との判定が曖昧になる、といった問題を生んだ。現在は [`ParagraphEntry::Break`]
+//! という、テキストを一切持たない独立したエントリとして表現する。テキスト段落の結合・
+//! 分割ロジックは [`ParagraphEntry::Text`] だけを扱えばよく、改ページに触れることは
+//! 構造的にあり得ない。
+//!
+//! 一方、`render()` がページ収容行数（`lines_per_page`）に達しただけで送る**暗黙の
+//! 改ページ**は、[`ParagraphEntry::Break`] を一切生成しない（印刷イメージ側にヘッダ行が
+//! 生成されるだけ）。「改ページエントリ」は常にユーザーが明示的に作ったものだけを指す。
 
 const SEPARATOR: &str = "---";
 const PAGE_BREAK_MARKER: &str = "====";
@@ -38,13 +53,12 @@ impl Default for PageNumberStyle {
     }
 }
 
-/// 強制改ページに付随する上書き情報。
+/// 強制改ページに付随する上書き情報（[`ParagraphEntry::Break`] の中身）。
 ///
-/// 直前の物理行の**後ろ**でページを送る。各フィールドは、その改ページで
-/// 始まるページ以降に適用される**継続的な状態変更**を表す（`None` は「現在の
-/// 状態を維持（上書きしない）」の意味）。一度上書きされた値は、以降のページに
-/// そのまま引き継がれ、次の [`PageBreak`] で再び上書きされるまで有効であり続ける
-/// （暗黙のページ分割をまたいでも保持される）。
+/// 各フィールドは、その改ページで始まるページ以降に適用される**継続的な状態変更**を
+/// 表す（`None` は「現在の状態を維持（上書きしない）」の意味）。一度上書きされた値は、
+/// 以降のページにそのまま引き継がれ、次の [`PageBreak`] で再び上書きされるまで有効で
+/// あり続ける（暗黙のページ分割をまたいでも保持される）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PageBreak {
     /// このページ以降のヘッダタイトルを上書きする（点字文字列）。次に上書きされるまで継続。
@@ -89,18 +103,44 @@ pub struct PhysicalLine {
     pub content: String,
     /// このセグメントで論理行（段落）が終わるか。`false` は次セグメントへの強制改行。
     pub logical_end: bool,
-    /// このセグメントの直後で強制改ページするか（上書き情報込み）。
-    pub page_break: Option<PageBreak>,
 }
 
 impl PhysicalLine {
-    /// 改ページ無し・指定 `logical_end` の物理行を作る。
+    /// 指定 `logical_end` の物理行を作る。
     pub fn new(content: impl Into<String>, logical_end: bool) -> Self {
         Self {
             content: content.into(),
             logical_end,
-            page_break: None,
         }
+    }
+}
+
+/// [`BrailleDocument::paragraphs`] の1要素。テキスト段落か、改ページそのものかのどちらか。
+///
+/// 改ページ（[`Break`](Self::Break)）はテキストを一切持たない独立したエントリであり、
+/// どの物理行にも属さない。これにより、テキストの結合・分割ロジックは常に
+/// [`Text`](Self::Text) だけを扱えばよく、改ページ情報を誤って巻き込む・失うことが
+/// 構造的にあり得なくなる。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParagraphEntry {
+    /// 通常のテキスト段落（物理行の列）。
+    Text(Vec<PhysicalLine>),
+    /// 改ページそのもの（上書き情報込み）。テキストを持たない。
+    Break(PageBreak),
+}
+
+impl ParagraphEntry {
+    /// テキスト段落なら物理行の列を返す。改ページなら `None`。
+    pub fn as_text(&self) -> Option<&[PhysicalLine]> {
+        match self {
+            ParagraphEntry::Text(lines) => Some(lines),
+            ParagraphEntry::Break(_) => None,
+        }
+    }
+
+    /// 改ページエントリか。
+    pub fn is_break(&self) -> bool {
+        matches!(self, ParagraphEntry::Break(_))
     }
 }
 
@@ -145,11 +185,11 @@ impl Default for DocumentConfig {
 // BrailleDocument
 // ============================================================
 
-/// 点字ドキュメントの正本。段落 = 物理行の列。
+/// 点字ドキュメントの正本。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrailleDocument {
-    /// 段落のリスト。各要素が1論理行（段落）の物理行リスト。
-    pub paragraphs: Vec<Vec<PhysicalLine>>,
+    /// エントリのリスト。テキスト段落と改ページが並ぶ。
+    pub paragraphs: Vec<ParagraphEntry>,
     /// ドキュメント設定。
     pub config: DocumentConfig,
 }
@@ -170,11 +210,12 @@ impl BrailleDocument {
     }
 
     /// 段落 `index` の論理テキスト（セグメントを連結したもの）を返す。
+    /// 改ページエントリなら空文字列。
     pub fn logical_text(&self, index: usize) -> String {
-        self.paragraphs[index]
-            .iter()
-            .map(|l| l.content.as_str())
-            .collect()
+        match &self.paragraphs[index] {
+            ParagraphEntry::Text(lines) => lines.iter().map(|l| l.content.as_str()).collect(),
+            ParagraphEntry::Break(_) => String::new(),
+        }
     }
 
     /// 1段落＝1論理テキストの単純なドキュメントを組む（強制改行・改ページなし）。
@@ -184,7 +225,7 @@ impl BrailleDocument {
     pub fn from_paragraphs(paragraphs: &[String], config: DocumentConfig) -> Self {
         let paragraphs = paragraphs
             .iter()
-            .map(|para| vec![PhysicalLine::new(para.clone(), true)])
+            .map(|para| ParagraphEntry::Text(vec![PhysicalLine::new(para.clone(), true)]))
             .collect();
         Self { paragraphs, config }
     }
@@ -204,10 +245,10 @@ impl BrailleDocument {
     /// title = ⠞⠊⠞⠇⠑          # 省略可
     /// ---
     /// ⠁⠃⠉                     # 論理行1・物理行1
-    /// ==== start=5 style=alt show_header=false   # 直前の物理行の後で強制改ページ（上書き可。以降のページへ継続）
-    /// ⠁⠃⠉                     # 論理行1・物理行2（改ページ後）
-    ///                          # 空行 = 論理行の区切り
-    /// ⠑⠋⠛                     # 論理行2
+    ///                          # 空行 = 段落の区切り
+    /// ==== start=5 style=alt show_header=false   # 改ページ（それだけで1グループ＝独立したエントリ）
+    ///
+    /// ⠁⠃⠉                     # 論理行2（改ページ後）
     /// ```
     pub fn parse_mbr(text: &str) -> Self {
         let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
@@ -220,7 +261,7 @@ impl BrailleDocument {
 
         let config = parse_config(header_lines);
 
-        // 空行で区切りながら論理行グループを構築。
+        // 空行で区切りながら論理行グループを構築する。
         let mut groups: Vec<Vec<&str>> = Vec::new();
         let mut current: Vec<&str> = Vec::new();
         for &line in body_lines {
@@ -238,32 +279,30 @@ impl BrailleDocument {
             groups.pop();
         }
 
-        let mut paragraphs: Vec<Vec<PhysicalLine>> = Vec::new();
+        let mut paragraphs: Vec<ParagraphEntry> = Vec::new();
         for group in groups {
             if group.is_empty() {
-                paragraphs.push(vec![PhysicalLine::new(String::new(), true)]);
+                paragraphs.push(ParagraphEntry::Text(vec![PhysicalLine::new(
+                    String::new(),
+                    true,
+                )]));
                 continue;
             }
-
-            let mut phys: Vec<PhysicalLine> = Vec::new();
-            for line in group {
-                if let Some(rest) = line.strip_prefix(PAGE_BREAK_MARKER) {
-                    // ==== マーカー: 直前の物理行に改ページを付ける。
-                    // グループ先頭（直前の物理行がない）なら無視。
-                    if let Some(last) = phys.last_mut() {
-                        last.page_break = Some(parse_page_break(rest));
-                    }
-                } else {
-                    phys.push(PhysicalLine::new(line, false));
+            // グループがちょうど1行で、その行が ==== で始まるなら改ページエントリ。
+            // それ以外（複数行に混在している場合を含む）は普通のテキストとして扱う。
+            if group.len() == 1 {
+                if let Some(rest) = group[0].strip_prefix(PAGE_BREAK_MARKER) {
+                    paragraphs.push(ParagraphEntry::Break(parse_page_break(rest)));
+                    continue;
                 }
             }
 
-            if phys.is_empty() {
-                phys.push(PhysicalLine::new(String::new(), true));
-            } else {
-                phys.last_mut().unwrap().logical_end = true;
-            }
-            paragraphs.push(phys);
+            let mut phys: Vec<PhysicalLine> = group
+                .iter()
+                .map(|&line| PhysicalLine::new(line, false))
+                .collect();
+            phys.last_mut().unwrap().logical_end = true;
+            paragraphs.push(ParagraphEntry::Text(phys));
         }
 
         Self { paragraphs, config }
@@ -293,19 +332,24 @@ impl BrailleDocument {
         out.push_str(SEPARATOR);
         out.push('\n');
 
-        for (i, para) in self.paragraphs.iter().enumerate() {
+        for (i, entry) in self.paragraphs.iter().enumerate() {
             if i > 0 {
                 out.push('\n');
             }
-            let is_empty = para.is_empty() || (para.len() == 1 && para[0].content.is_empty());
-            if !is_empty {
-                for line in para {
-                    out.push_str(&line.content);
-                    out.push('\n');
-                    if let Some(pb) = &line.page_break {
-                        out.push_str(&format_page_break(pb));
-                        out.push('\n');
+            match entry {
+                ParagraphEntry::Text(para) => {
+                    let is_empty =
+                        para.is_empty() || (para.len() == 1 && para[0].content.is_empty());
+                    if !is_empty {
+                        for line in para {
+                            out.push_str(&line.content);
+                            out.push('\n');
+                        }
                     }
+                }
+                ParagraphEntry::Break(pb) => {
+                    out.push_str(&format_page_break(pb));
+                    out.push('\n');
                 }
             }
         }
@@ -497,36 +541,46 @@ mod tests {
         let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n⠉⠙\n\n⠑\n";
         let doc = BrailleDocument::parse_mbr(mbr);
         assert_eq!(doc.paragraphs.len(), 2);
-        assert_eq!(doc.paragraphs[0].len(), 2);
-        assert!(!doc.paragraphs[0][0].logical_end);
-        assert!(doc.paragraphs[0][1].logical_end);
+        let text = doc.paragraphs[0].as_text().unwrap();
+        assert_eq!(text.len(), 2);
+        assert!(!text[0].logical_end);
+        assert!(text[1].logical_end);
         assert_eq!(doc.to_mbr(), mbr);
     }
 
     #[test]
     fn mbr_page_break_with_overrides_roundtrip() {
-        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n==== start=5 style=alt header=⠭\n⠉⠙\n";
+        // 改ページは単独のグループ（前後を空行で囲む）として独立したエントリになる。
+        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n\n==== start=5 style=alt header=⠭\n\n⠉⠙\n";
         let doc = BrailleDocument::parse_mbr(mbr);
-        assert_eq!(doc.paragraphs.len(), 1);
-        let pb = doc.paragraphs[0][0].page_break.as_ref().unwrap();
+        assert_eq!(doc.paragraphs.len(), 3);
+        let pb = match &doc.paragraphs[1] {
+            ParagraphEntry::Break(pb) => pb,
+            _ => panic!("expected a Break entry"),
+        };
         assert_eq!(pb.number_start, Some(5));
         assert_eq!(pb.number_style, Some(PageNumberStyle::Alternative));
         assert_eq!(pb.header_override.as_deref(), Some("⠭"));
-        assert!(doc.paragraphs[0][1].logical_end);
+        assert_eq!(doc.logical_text(0), "⠁⠃");
+        assert_eq!(doc.logical_text(2), "⠉⠙");
         assert_eq!(doc.to_mbr(), mbr);
     }
 
     #[test]
     fn mbr_page_break_show_header_roundtrip() {
-        let mbr_off = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n==== show_header=false\n⠉⠙\n";
+        let mbr_off = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n\n==== show_header=false\n\n⠉⠙\n";
         let doc = BrailleDocument::parse_mbr(mbr_off);
-        let pb = doc.paragraphs[0][0].page_break.as_ref().unwrap();
+        let ParagraphEntry::Break(pb) = &doc.paragraphs[1] else {
+            panic!("expected a Break entry")
+        };
         assert_eq!(pb.header_enabled, Some(false));
         assert_eq!(doc.to_mbr(), mbr_off);
 
-        let mbr_on = "line_width = 32\nlines_per_page = 22\npage_header = false\n---\n⠁⠃\n==== show_header=true\n⠉⠙\n";
+        let mbr_on = "line_width = 32\nlines_per_page = 22\npage_header = false\n---\n⠁⠃\n\n==== show_header=true\n\n⠉⠙\n";
         let doc = BrailleDocument::parse_mbr(mbr_on);
-        let pb = doc.paragraphs[0][0].page_break.as_ref().unwrap();
+        let ParagraphEntry::Break(pb) = &doc.paragraphs[1] else {
+            panic!("expected a Break entry")
+        };
         assert_eq!(pb.header_enabled, Some(true));
         assert_eq!(doc.to_mbr(), mbr_on);
     }
@@ -534,9 +588,11 @@ mod tests {
     #[test]
     fn mbr_page_break_all_overrides_combined_roundtrip() {
         // 表紙(ヘッダ無し)からセクション開始(ヘッダ有り・番号再開・タイトル変更)への遷移を模す。
-        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = false\n---\n⠁⠃\n==== start=5 style=alt show_header=true header=⠭\n⠉⠙\n";
+        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = false\n---\n⠁⠃\n\n==== start=5 style=alt show_header=true header=⠭\n\n⠉⠙\n";
         let doc = BrailleDocument::parse_mbr(mbr);
-        let pb = doc.paragraphs[0][0].page_break.as_ref().unwrap();
+        let ParagraphEntry::Break(pb) = &doc.paragraphs[1] else {
+            panic!("expected a Break entry")
+        };
         assert_eq!(pb.number_start, Some(5));
         assert_eq!(pb.number_style, Some(PageNumberStyle::Alternative));
         assert_eq!(pb.header_enabled, Some(true));
@@ -564,14 +620,47 @@ mod tests {
     }
 
     #[test]
-    fn mbr_page_break_at_group_start_ignored() {
-        // グループ先頭の ==== は無視される（直前の物理行がない）。
+    fn mbr_standalone_page_break_becomes_break_entry() {
+        // 文書の先頭・末尾でも、単独グループのマーカーは正しく Break エントリになる
+        // （旧モデルでは「直前の物理行が無い」として無視されていたが、新モデルでは
+        // 改ページはどの物理行にも属さないため、そもそも「直前の物理行」を必要としない）。
         let mbr =
-            "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n==== start=2\n⠁\n";
+            "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n==== start=2\n\n⠁\n";
+        let doc = BrailleDocument::parse_mbr(mbr);
+        assert_eq!(doc.paragraphs.len(), 2);
+        let ParagraphEntry::Break(pb) = &doc.paragraphs[0] else {
+            panic!("expected a Break entry")
+        };
+        assert_eq!(pb.number_start, Some(2));
+        assert_eq!(doc.logical_text(1), "⠁");
+        assert_eq!(doc.to_mbr(), mbr);
+    }
+
+    #[test]
+    fn mbr_break_only_document_roundtrips() {
+        // テキストを一切持たず、改ページだけの文書も表現できる。
+        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n==== start=3\n";
         let doc = BrailleDocument::parse_mbr(mbr);
         assert_eq!(doc.paragraphs.len(), 1);
-        assert_eq!(doc.paragraphs[0].len(), 1);
-        assert!(doc.paragraphs[0][0].page_break.is_none());
+        let ParagraphEntry::Break(pb) = &doc.paragraphs[0] else {
+            panic!("expected a Break entry")
+        };
+        assert_eq!(pb.number_start, Some(3));
+        assert_eq!(doc.to_mbr(), mbr);
+    }
+
+    #[test]
+    fn mbr_marker_mixed_with_content_is_literal_text() {
+        // 複数行のグループに ==== が混在する場合はマーカーとして解析せず、文字通り扱う。
+        let mbr =
+            "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n==== start=5\n⠉⠙\n";
+        let doc = BrailleDocument::parse_mbr(mbr);
+        assert_eq!(doc.paragraphs.len(), 1);
+        let text = doc.paragraphs[0].as_text().unwrap();
+        assert_eq!(text.len(), 3);
+        assert_eq!(text[1].content, "==== start=5");
+        assert!(!text[1].logical_end);
+        assert_eq!(doc.to_mbr(), mbr);
     }
 
     #[test]
@@ -587,10 +676,27 @@ mod tests {
     }
 
     #[test]
+    fn mbr_empty_paragraph_and_break_are_distinguishable() {
+        // 空の Text 段落と Break エントリが隣接しても混同しない。
+        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁\n\n\n==== start=1\n\n⠃\n";
+        let doc = BrailleDocument::parse_mbr(mbr);
+        assert_eq!(doc.paragraphs.len(), 4);
+        assert_eq!(doc.logical_text(0), "⠁");
+        assert_eq!(doc.logical_text(1), "");
+        assert!(doc.paragraphs[1].as_text().is_some());
+        let ParagraphEntry::Break(pb) = &doc.paragraphs[2] else {
+            panic!("expected a Break entry")
+        };
+        assert_eq!(pb.number_start, Some(1));
+        assert_eq!(doc.logical_text(3), "⠃");
+        assert_eq!(doc.to_mbr(), mbr);
+    }
+
+    #[test]
     fn mbr_no_separator_treats_all_as_body() {
         let doc = BrailleDocument::parse_mbr("⠁\n⠃\n");
         assert_eq!(doc.paragraphs.len(), 1);
-        assert_eq!(doc.paragraphs[0].len(), 2);
+        assert_eq!(doc.paragraphs[0].as_text().unwrap().len(), 2);
     }
 
     #[test]
@@ -603,18 +709,20 @@ mod tests {
         let para = "⠁⠁⠁⠁⠀⠃⠃⠃⠃".to_string();
         let doc = BrailleDocument::from_paragraphs(&[para.clone()], config);
         assert_eq!(doc.paragraphs.len(), 1);
-        assert_eq!(doc.paragraphs[0].len(), 1);
-        assert_eq!(doc.paragraphs[0][0].content, para);
-        assert!(doc.paragraphs[0][0].logical_end);
+        let text = doc.paragraphs[0].as_text().unwrap();
+        assert_eq!(text.len(), 1);
+        assert_eq!(text[0].content, para);
+        assert!(text[0].logical_end);
     }
 
     #[test]
     fn from_paragraphs_empty_becomes_empty_segment() {
         let doc = BrailleDocument::from_paragraphs(&[String::new()], DocumentConfig::default());
         assert_eq!(doc.paragraphs.len(), 1);
-        assert_eq!(doc.paragraphs[0].len(), 1);
-        assert_eq!(doc.paragraphs[0][0].content, "");
-        assert!(doc.paragraphs[0][0].logical_end);
+        let text = doc.paragraphs[0].as_text().unwrap();
+        assert_eq!(text.len(), 1);
+        assert_eq!(text[0].content, "");
+        assert!(text[0].logical_end);
     }
 
     #[test]
@@ -623,9 +731,10 @@ mod tests {
         let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃\n⠉⠙\n";
         let doc = BrailleDocument::parse_mbr(mbr);
         assert_eq!(doc.paragraphs.len(), 1);
-        assert_eq!(doc.paragraphs[0].len(), 2);
-        assert!(!doc.paragraphs[0][0].logical_end); // 強制改行
-        assert!(doc.paragraphs[0][1].logical_end); // 段落終端
+        let text = doc.paragraphs[0].as_text().unwrap();
+        assert_eq!(text.len(), 2);
+        assert!(!text[0].logical_end); // 強制改行
+        assert!(text[1].logical_end); // 段落終端
         assert_eq!(doc.to_mbr(), mbr);
     }
 }

@@ -19,7 +19,9 @@
 //! - ヘッダ行: 各ページ先頭行を位置で落とす。ただし数符 `⠼` を含む行に限定して誤爆を防ぐ。
 //!   （タイトル・ページ番号の中身の復元は点字→数字の逆変換が入ってから。）
 
-use crate::document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
+use crate::document::{
+    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, ParagraphEntry, PhysicalLine,
+};
 
 const HEADER_SIZE: usize = 512;
 const EXT_HEADER_SIZE: usize = 512;
@@ -174,26 +176,27 @@ fn assemble_document(
         raw.extend(page);
     }
 
-    // 物理行を logical_end で区切って段落へまとめる。
-    let mut paragraphs: Vec<Vec<PhysicalLine>> = Vec::new();
+    // 物理行を logical_end で区切って段落へまとめる。強制改ページが起きた場合は
+    // Break エントリを独立して挿入する（段落途中で強制改ページが起きた場合も、
+    // その時点までの物理行の logical_end はそのまま保つ＝段落は Break の後に継続する）。
+    let mut paragraphs: Vec<ParagraphEntry> = Vec::new();
     let mut current: Vec<PhysicalLine> = Vec::new();
     for line in raw {
         let logical_end = line.logical_end;
+        let forced = line.page_break;
         current.push(PhysicalLine {
             content: line.content,
             logical_end,
-            page_break: if line.page_break {
-                Some(PageBreak::default())
-            } else {
-                None
-            },
         });
-        if logical_end {
-            paragraphs.push(std::mem::take(&mut current));
+        if logical_end || forced {
+            paragraphs.push(ParagraphEntry::Text(std::mem::take(&mut current)));
+        }
+        if forced {
+            paragraphs.push(ParagraphEntry::Break(PageBreak::default()));
         }
     }
     if !current.is_empty() {
-        paragraphs.push(current);
+        paragraphs.push(ParagraphEntry::Text(current));
     }
 
     let config = DocumentConfig {
@@ -380,11 +383,12 @@ mod tests {
         let bytes = make_bes(32, 22, &[vec![("⠁⠃", false), ("⠉⠙", true), ("⠑⠋", true)]]);
         let doc = read_bes(&bytes).unwrap();
         assert_eq!(doc.paragraphs.len(), 2);
-        assert_eq!(doc.paragraphs[0].len(), 2); // 継続 + 終端
-        assert_eq!(doc.paragraphs[0][0].content, "⠁⠃");
-        assert!(!doc.paragraphs[0][0].logical_end);
-        assert!(doc.paragraphs[0][1].logical_end);
-        assert_eq!(doc.paragraphs[1].len(), 1);
+        let text0 = doc.paragraphs[0].as_text().unwrap();
+        assert_eq!(text0.len(), 2); // 継続 + 終端
+        assert_eq!(text0[0].content, "⠁⠃");
+        assert!(!text0[0].logical_end);
+        assert!(text0[1].logical_end);
+        assert_eq!(doc.paragraphs[1].as_text().unwrap().len(), 1);
     }
 
     #[test]
@@ -407,21 +411,41 @@ mod tests {
             ],
         );
         let doc = read_bes(&bytes).unwrap();
-        assert!(
-            doc.paragraphs
-                .iter()
-                .flatten()
-                .all(|l| l.page_break.is_none())
-        );
+        // 暗黙の改ページは Break エントリを一切生成しない。
+        assert!(doc.paragraphs.iter().all(|e| !e.is_break()));
     }
 
     #[test]
     fn short_page_break_is_forced() {
         let bytes = make_bes(32, 5, &[vec![("⠁", false), ("⠃", true)], vec![("⠉", true)]]);
         let doc = read_bes(&bytes).unwrap();
-        // ページ0 最終行（段落0の末尾）に強制改ページ
-        assert!(doc.paragraphs[0].last().unwrap().page_break.is_some());
-        assert!(doc.paragraphs[1].last().unwrap().page_break.is_none());
+        // ページ0(段落) → Break → ページ1(段落) という3エントリになる。
+        assert_eq!(doc.paragraphs.len(), 3);
+        assert!(doc.paragraphs[0].as_text().is_some());
+        assert!(doc.paragraphs[1].is_break());
+        assert!(doc.paragraphs[2].as_text().is_some());
+    }
+
+    #[test]
+    fn forced_page_break_mid_paragraph_preserves_continuation() {
+        // 強制改ページが段落途中（logical_end=false の行）で起きても、その行の
+        // logical_end はそのまま保たれる（段落は Break の後の Text へ継続する）。
+        // ページ0は1行だけ（lines_per_page=5未満・最終ページでもない）なので強制改ページになる。
+        let bytes = make_bes(
+            32,
+            5,
+            &[vec![("⠁", false)], vec![("⠃", false), ("⠉", true)]],
+        );
+        let doc = read_bes(&bytes).unwrap();
+        assert_eq!(doc.paragraphs.len(), 3);
+        let text0 = doc.paragraphs[0].as_text().unwrap();
+        assert_eq!(text0.len(), 1);
+        assert!(!text0[0].logical_end); // 強制改ページを挟んでも段落は継続する
+        assert!(doc.paragraphs[1].is_break());
+        let text2 = doc.paragraphs[2].as_text().unwrap();
+        assert_eq!(text2.len(), 2);
+        assert!(!text2[0].logical_end);
+        assert!(text2[1].logical_end);
     }
 
     #[test]
@@ -437,8 +461,9 @@ mod tests {
         let bytes = make_bet(32, 22, &[vec![("⠁⠃", false), ("⠉⠙", true), ("⠑⠋", true)]]);
         let doc = read_bet(&bytes).unwrap();
         assert_eq!(doc.paragraphs.len(), 2);
-        assert_eq!(doc.paragraphs[0].len(), 2);
-        assert!(doc.paragraphs[0][1].logical_end);
+        let text0 = doc.paragraphs[0].as_text().unwrap();
+        assert_eq!(text0.len(), 2);
+        assert!(text0[1].logical_end);
     }
 
     #[test]

@@ -176,23 +176,31 @@ public static class MomoFfi
     static extern int momo_doc_number_start(nint handle);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_doc_number_style(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern int momo_doc_title_w(nint handle, nint buf, int bufLen);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern int momo_doc_paragraph_count(nint handle);
+    static extern int momo_doc_entry_count(nint handle);
+
+    /// <summary>0=テキスト段落, 1=改ページ, 無効なら -1。</summary>
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_doc_entry_kind(nint handle, int entry);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern int momo_doc_line_count(nint handle, int para);
+    static extern int momo_doc_line_count(nint handle, int entry);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern int momo_doc_line_w(nint handle, int para, int line, nint buf, int bufLen);
+    static extern int momo_doc_line_w(nint handle, int entry, int line, nint buf, int bufLen);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
-    static extern bool momo_doc_line_logical_end(nint handle, int para, int line);
+    static extern bool momo_doc_line_logical_end(nint handle, int entry, int line);
 
+    /// <summary>改ページエントリのマーカー文字列。テキスト段落エントリ/無効なら -1。</summary>
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern int momo_doc_line_page_break_w(nint handle, int para, int line, nint buf, int bufLen);
+    static extern int momo_doc_entry_page_break_w(nint handle, int entry, nint buf, int bufLen);
 
     // ---- ビルダー（保存・描画用にドキュメントを組み立てる） ----
 
@@ -201,14 +209,20 @@ public static class MomoFfi
         int lineWidth, int linesPerPage,
         [MarshalAs(UnmanagedType.I1)] bool pageHeader,
         int numberStart,
+        int numberStyle,
         [MarshalAs(UnmanagedType.LPWStr)] string? title);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void momo_doc_builder_add_line(
         nint builder,
         [MarshalAs(UnmanagedType.LPWStr)] string content,
-        [MarshalAs(UnmanagedType.I1)] bool logicalEnd,
-        [MarshalAs(UnmanagedType.LPWStr)] string? pageBreak);
+        [MarshalAs(UnmanagedType.I1)] bool logicalEnd);
+
+    /// <summary>marker: NULL/空でプレーンな改ページ。</summary>
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void momo_doc_builder_add_page_break(
+        nint builder,
+        [MarshalAs(UnmanagedType.LPWStr)] string? marker);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern nint momo_doc_builder_build(nint builder);
@@ -246,6 +260,19 @@ public static class MomoFfi
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern int momo_formatted_line_segment_index(nint handle, int page, int line);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    static extern bool momo_formatted_page_header_enabled(nint handle, int page);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_formatted_page_title_w(nint handle, int page, nint buf, int bufLen);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_formatted_page_number(nint handle, int page);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_formatted_page_number_style(nint handle, int page);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern int momo_bytes_len(nint handle);
@@ -460,6 +487,18 @@ public static class MomoFfi
         public bool IsHeader(int page, int line) => momo_formatted_line_is_header(_ptr, page, line);
         public bool IsLogicalEnd(int page, int line) => momo_formatted_line_logical_end(_ptr, page, line);
         public int SegmentIndex(int page, int line) => momo_formatted_line_segment_index(_ptr, page, line);
+
+        // ページ単位で実効しているヘッダ関連の継続的状態（セクションごとの上書きの解決結果）。
+        // 「今表示されているページ以降に適用する設定」ダイアログの初期値に使う。
+        public bool PageHeaderEnabled(int page) => momo_formatted_page_header_enabled(_ptr, page);
+        public string? PageTitle(int page)
+        {
+            var title = ReadString((b, l) => momo_formatted_page_title_w(_ptr, page, b, l));
+            return title.Length > 0 ? title : null;
+        }
+        public int PageNumber(int page) => momo_formatted_page_number(_ptr, page);
+        public PageNumberStyle PageNumberStyleAt(int page) =>
+            (PageNumberStyle)Math.Max(0, momo_formatted_page_number_style(_ptr, page));
     }
 
     // ---- 公開 API ----
@@ -471,10 +510,15 @@ public static class MomoFfi
         var cfg = doc.Config;
         var builder = momo_doc_builder_new(
             cfg.LineWidth, cfg.LinesPerPage, cfg.PageHeader,
-            cfg.NumberStart, cfg.Title);
+            cfg.NumberStart, (int)cfg.NumberStyle, cfg.Title);
         if (builder == nint.Zero) return nint.Zero;
-        foreach (var seg in doc.Segments)
-            momo_doc_builder_add_line(builder, seg.Text, seg.ParagraphEnd, seg.PageBreakMarker);
+        foreach (var entry in doc.Entries)
+        {
+            if (entry is TextSegment seg)
+                momo_doc_builder_add_line(builder, seg.Text, seg.ParagraphEnd);
+            else if (entry is PageBreakEntry pb)
+                momo_doc_builder_add_page_break(builder, pb.Marker);
+        }
         return momo_doc_builder_build(builder);
     }
 
@@ -501,23 +545,31 @@ public static class MomoFfi
                         LinesPerPage = momo_doc_lines_per_page(ptr),
                         PageHeader = momo_doc_page_header(ptr),
                         NumberStart = momo_doc_number_start(ptr),
+                        NumberStyle = (PageNumberStyle)Math.Max(0, momo_doc_number_style(ptr)),
                         Title = title.Length > 0 ? title : null,
                     },
                 };
-                int pc = momo_doc_paragraph_count(ptr);
-                for (int p = 0; p < pc; p++)
+                int ec = momo_doc_entry_count(ptr);
+                for (int e = 0; e < ec; e++)
                 {
-                    int lc = momo_doc_line_count(ptr, p);
+                    if (momo_doc_entry_kind(ptr, e) == 1)
+                    {
+                        int entry = e;
+                        var marker = ReadString((b, len) => momo_doc_entry_page_break_w(ptr, entry, b, len));
+                        doc.Entries.Add(new PageBreakEntry(marker.Length > 0 ? marker : "===="));
+                        continue;
+                    }
+                    int lc = momo_doc_line_count(ptr, e);
                     for (int l = 0; l < lc; l++)
                     {
-                        string text = ReadString((b, len) => momo_doc_line_w(ptr, p, l, b, len));
-                        bool paragraphEnd = momo_doc_line_logical_end(ptr, p, l);
-                        string marker = ReadString((b, len) => momo_doc_line_page_break_w(ptr, p, l, b, len));
-                        doc.Segments.Add(new Segment(text, paragraphEnd, marker.Length > 0 ? marker : null));
+                        int entry = e, line = l;
+                        string text = ReadString((b, len) => momo_doc_line_w(ptr, entry, line, b, len));
+                        bool paragraphEnd = momo_doc_line_logical_end(ptr, entry, line);
+                        doc.Entries.Add(new TextSegment(text, paragraphEnd));
                     }
                 }
-                if (doc.Segments.Count == 0)
-                    doc.Segments.Add(new Segment("", true));
+                if (doc.Entries.Count == 0)
+                    doc.Entries.Add(new TextSegment("", true));
                 return doc;
             }
             finally { momo_doc_free(ptr); }

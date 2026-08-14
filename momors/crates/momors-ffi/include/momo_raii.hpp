@@ -49,8 +49,14 @@ public:
     DocBuilder(const DocBuilder&) = delete;
     DocBuilder& operator=(const DocBuilder&) = delete;
 
-    void add_line(const uint16_t* content, bool logical_end, const uint16_t* page_break = nullptr) {
-        momo_doc_builder_add_line(b_, content, logical_end, page_break);
+    void add_line(const uint16_t* content, bool logical_end) {
+        momo_doc_builder_add_line(b_, content, logical_end);
+    }
+
+    // marker: "====" マーカー文字列（NULL/空でプレーンな改ページ）。
+    // テキストを一切持たない、独立した改ページエントリを追加する。
+    void add_page_break(const uint16_t* marker = nullptr) {
+        momo_doc_builder_add_page_break(b_, marker);
     }
 
     // build() を呼ぶと内部ポインタを放棄し、返された DocPtr がライフタイムを管理する。
@@ -66,9 +72,12 @@ private:
     BrailleDocBuilder* b_;
 };
 
+// number_style: 0=Standard, 1=Alternative（既定 0）。
 inline DocBuilder make_doc_builder(int line_width, int lines_per_page, bool page_header,
-                                   int number_start, const uint16_t* title = nullptr) {
-    return DocBuilder(momo_doc_builder_new(line_width, lines_per_page, page_header, number_start, title));
+                                   int number_start, const uint16_t* title = nullptr,
+                                   int number_style = 0) {
+    return DocBuilder(momo_doc_builder_new(line_width, lines_per_page, page_header, number_start,
+                                            number_style, title));
 }
 
 }  // namespace momo

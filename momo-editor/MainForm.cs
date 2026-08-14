@@ -218,11 +218,12 @@ public partial class MainForm : Form
         }
 
         bool isHeader = _view.IsHeaderAt(flatLine);
+        bool isDivider = _view.IsDividerAt(flatLine);
         string content = _view.ContentAt(flatLine);
         int col = pos - richTextBox.GetFirstCharIndexFromLine(flatLine);
 
-        // 逆点訳（行内容単位のキャッシュ）。ヘッダ行は点字ではないので対象外。
-        if (!isHeader && content != _guideLineCache)
+        // 逆点訳（行内容単位のキャッシュ）。ヘッダ行・改ページ区切り行は点字ではないので対象外。
+        if (!isHeader && !isDivider && content != _guideLineCache)
         {
             var result = MomoFfi.BackTranslateLine(content);
             _guideSegments = result?.Segments ?? [];
@@ -232,10 +233,10 @@ public partial class MainForm : Form
         // ガイド帯のデータは表示 OFF でも更新する。GuideStrip の AccessibleDescription に
         // 行全体の読みが入るため、スクリーンリーダー（JAWS スクリプト等）が
         // いつでも UIA 経由で現在行の読みを取得できる。
-        if (isHeader) guideStrip.SetData("", [], -1);
+        if (isHeader || isDivider) guideStrip.SetData("", [], -1);
         else guideStrip.SetData(content, _guideSegments, col);
 
-        AnnounceCursorMove(flatLine, isHeader, content);
+        AnnounceCursorMove(flatLine, isHeader, isDivider, content);
     }
 
     /// <summary>
@@ -243,7 +244,7 @@ public partial class MainForm : Form
     /// 発話する。行内の左右移動はスクリーンリーダー自身のセル読み（ドット構成）に任せる。
     /// 再整形中（_suppressModified）や読み上げオフのときは位置の追跡だけ行い発話しない。
     /// </summary>
-    private void AnnounceCursorMove(int flatLine, bool isHeader, string content)
+    private void AnnounceCursorMove(int flatLine, bool isHeader, bool isDivider, string content)
     {
         bool lineChanged = flatLine != _announcedLine;
         _announcedLine = flatLine;
@@ -251,7 +252,8 @@ public partial class MainForm : Form
         if (!lineChanged || _suppressModified || !speechGuideMenuItem.Checked) return;
 
         string reading;
-        if (isHeader) reading = content.Trim();
+        if (isDivider) reading = "改ページ";
+        else if (isHeader) reading = content.Trim();
         else if (content.Length == 0) reading = "空行";
         else reading = string.Concat(_guideSegments.Select(s => s.Text));
         Announce(reading);
@@ -299,7 +301,7 @@ public partial class MainForm : Form
                 return;
             }
 
-            _view = FormattedDocumentView.Build(handle);
+            _view = FormattedDocumentView.Build(handle, _document);
             if (_view.PhysicalLineCount == 0)
                 _view = FormattedDocumentView.CreateEmpty(_document.Config);
 
@@ -319,7 +321,7 @@ public partial class MainForm : Form
 
     // DLL 不在時のフォールバック表示用。各セグメントを1行ずつ並べる。
     private string LogicalFallbackText() =>
-        string.Join("\n", _document.Segments.Select(s => s.Text));
+        string.Join("\n", _document.Entries.OfType<TextSegment>().Select(s => s.Text));
 
     // _view を RichTextBox に書き出し、行間・ヘッダ保護・カーソル復元を行う。
     // _suppressModified が true の状態で呼ぶこと。target < 0 なら先頭の編集可能行にカーソルを置く。
@@ -348,16 +350,18 @@ public partial class MainForm : Form
         }
     }
 
-    /// <summary>現在のカーソル行がヘッダ行かどうかを返す。</summary>
-    private bool IsOnHeaderLine()
+    /// <summary>現在のカーソル行がヘッダ行または改ページ区切り行（保護行）かどうかを返す。
+    /// どちらも論理カーソル位置（セグメント+オフセット）が定まらないため、他の編集コマンドは
+    /// この上では何もしない。</summary>
+    private bool IsOnProtectedLine()
     {
         if (_view == null) return false;
         int flatLine = richTextBox.GetLineFromCharIndex(richTextBox.SelectionStart);
         if (flatLine < 0 || flatLine >= _view.PhysicalLineCount) return false;
-        return _view.IsHeaderAt(flatLine);
+        return _view.IsHeaderAt(flatLine) || _view.IsDividerAt(flatLine);
     }
 
-    /// <summary>ヘッダ行を編集不可に設定する。</summary>
+    /// <summary>ヘッダ行・改ページ区切り行を編集不可に設定する。</summary>
     private void ApplyHeaderProtection()
     {
         if (_view == null) return;
@@ -367,7 +371,7 @@ public partial class MainForm : Form
 
         for (int i = 0; i < _view.PhysicalLineCount; i++)
         {
-            if (!_view.IsHeaderAt(i)) continue;
+            if (!_view.IsHeaderAt(i) && !_view.IsDividerAt(i)) continue;
             int lineStart = richTextBox.GetFirstCharIndexFromLine(i);
             int nextLineStart = i + 1 < _view.PhysicalLineCount
                 ? richTextBox.GetFirstCharIndexFromLine(i + 1)
@@ -477,8 +481,8 @@ public partial class MainForm : Form
                 filePath = Path.ChangeExtension(path, ".mbr"); // 編集中のファイル名は .mbr
                 modified = true;                               // .mbr はまだ保存されていない
             }
-            if (_document.Segments.Count == 0)
-                _document.Segments.Add(new Segment("", true));
+            if (_document.Entries.Count == 0)
+                _document.Entries.Add(new TextSegment("", true));
             LoadDocumentToEditor();
             _filePath = filePath;
             IsModified = modified;
@@ -561,11 +565,11 @@ public partial class MainForm : Form
         // _view != null のとき _document.Segments は編集操作ごとに更新済み。
         if (_view != null) return;
         // フォールバック（DLL 不在）時は RichTextBox の各行を段落セグメントとして取り込む。
-        _document.Segments.Clear();
+        _document.Entries.Clear();
         foreach (var t in richTextBox.Lines)
-            _document.Segments.Add(new Segment(t, true));
-        if (_document.Segments.Count == 0)
-            _document.Segments.Add(new Segment("", true));
+            _document.Entries.Add(new TextSegment(t, true));
+        if (_document.Entries.Count == 0)
+            _document.Entries.Add(new TextSegment("", true));
     }
 
     // ドキュメントを Rust で整形して描画する（折返し・ページ分割・ヘッダは Rust 側）。
@@ -600,15 +604,15 @@ public partial class MainForm : Form
 
         var doc = new BrailleDocument();
         foreach (var raw in text.Split('\n'))
-            doc.Segments.Add(new Segment(translate(raw.TrimEnd('\r')), true));
-        if (doc.Segments.Count == 0)
-            doc.Segments.Add(new Segment("", true));
+            doc.Entries.Add(new TextSegment(translate(raw.TrimEnd('\r')), true));
+        if (doc.Entries.Count == 0)
+            doc.Entries.Add(new TextSegment("", true));
         return doc;
     }
 
     private void ExitMenuItem_Click(object? sender, EventArgs e) => Close();
 
-    // ---- 書式（ページ設定） ----
+    // ---- ページ設定（文書全体の既定値） ----
 
     private void PageSetupMenuItem_Click(object? sender, EventArgs e)
     {
@@ -619,6 +623,91 @@ public partial class MainForm : Form
         var (si, off) = GetCursor();
         _document.Config = updated;
         ReformatAndRender(si, off); // 変更フラグは ReformatAndRender が立てる
+    }
+
+    // ---- ページ行設定（今表示されているページ以降に適用） ----
+
+    private void PageSectionMenuItem_Click(object? sender, EventArgs e)
+    {
+        if (_view == null)
+        {
+            MessageBox.Show("この機能を使うには点訳エンジン（DLL）が必要です。", "ページ行設定",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        // ヘッダ行の上では論理カーソル位置（セグメント+オフセット）が定まらないため、
+        // 他の編集コマンドと同様にヘッダ行上では何もしない。
+        if (IsOnProtectedLine()) return;
+
+        var (cursorSeg, cursorOff) = GetCursor();
+        int page = _view.PageAt(cursorSeg, cursorOff);
+
+        if (page == 0)
+        {
+            // 1ページ目には上書きを付ける先の物理行が無い（直前の物理行が存在しない）ため、
+            // 文書全体の既定値（DocumentConfig）を直接編集する。
+            var cfg = _document.Config;
+            var current = new PageSectionSettings(cfg.PageHeader, cfg.Title, cfg.NumberStart, cfg.NumberStyle);
+            var updated = PageSectionDialog.Edit(this, current, pageDisplayNumber: 1);
+            if (updated == null) return;
+
+            _document.Config = cfg with
+            {
+                PageHeader = updated.PageHeader,
+                Title = updated.Title,
+                NumberStart = updated.NumberStart,
+                NumberStyle = updated.NumberStyle,
+            };
+            ReformatAndRender(cursorSeg, cursorOff);
+            return;
+        }
+
+        // ダイアログの初期値は「このページで今実際に効いている設定」（継続的状態の解決結果）。
+        using var handle = MomoFfi.RenderDocument(_document);
+        if (handle == null) return;
+        var effective = new PageSectionSettings(
+            handle.PageHeaderEnabled(page),
+            handle.PageTitle(page),
+            handle.PageNumber(page),
+            handle.PageNumberStyleAt(page));
+
+        var edited = PageSectionDialog.Edit(this, effective, pageDisplayNumber: page + 1);
+        if (edited == null) return;
+
+        int firstLine = _view.FirstLineOfPage(page);
+        var (segIdx, charOff) = _view.PhysicalToLogical(firstLine, 0);
+        if (segIdx <= 0) return; // 想定外（2ページ目以降のはずが先頭セグメントに解決された）
+        string marker = BuildPageSectionMarker(edited);
+        int entryIdx = EntryIndexOfSegment(segIdx);
+
+        if (charOff == 0)
+        {
+            // ページの先頭が既存のセグメント境界と一致する（強制／暗黙どちらの改ページでもよい）。
+            // 直前に既存の PageBreakEntry（強制改ページ）があればその Marker を直接書き換える。
+            // 無ければ（暗黙の改ページ）新規に PageBreakEntry を挿入する。
+            if (entryIdx > 0 && _document.Entries[entryIdx - 1] is PageBreakEntry existing)
+                existing.Marker = marker;
+            else
+                _document.Entries.Insert(entryIdx, new PageBreakEntry(marker));
+            ReformatAndRender(cursorSeg, cursorOff);
+        }
+        else
+        {
+            // ページの先頭が折返し途中（既存のセグメント境界ではない）。その位置でテキストを
+            // 分割し（段落終端ではなく強制的な改ページ分割として扱う）、分割点に
+            // PageBreakEntry を挿入する。
+            SplitAt(segIdx, charOff, firstParagraphEnd: false);
+            int newEntryIdx = EntryIndexOfSegment(segIdx + 1);
+            _document.Entries.Insert(newEntryIdx, new PageBreakEntry(marker));
+            ReformatAndRender(segIdx + 1, 0);
+        }
+    }
+
+    private static string BuildPageSectionMarker(PageSectionSettings s)
+    {
+        var style = s.NumberStyle == PageNumberStyle.Alternative ? "alt" : "standard";
+        var show = s.PageHeader ? "true" : "false";
+        return $"==== start={s.NumberStart} style={style} show_header={show} header={s.Title ?? ""}";
     }
 
     // ---- ヘルプ ----
@@ -721,9 +810,9 @@ public partial class MainForm : Form
         var ch = (char)(0x2800 + dotPattern);
         if (_view != null)
         {
-            if (IsOnHeaderLine()) return;
+            if (IsOnProtectedLine()) return;
             var (si, off) = GetCursor();
-            var seg = _document.Segments[si];
+            var seg = (TextSegment)_document.Entries[EntryIndexOfSegment(si)];
             seg.Text = seg.Text.Insert(off, ch.ToString());
             ReformatAndRender(si, off + 1);
             Earcon.PlayClick();
@@ -734,19 +823,44 @@ public partial class MainForm : Form
         Earcon.PlayClick();
     }
 
-    // カーソル位置でセグメントを分割する。前半の終端種別と改ページマーカーを指定する。
-    // 後半は元の終端種別・改ページマーカーを引き継ぐ。
-    private void SplitAtCursor(bool firstParagraphEnd, string? firstPageBreak)
+    /// <summary>
+    /// テキストセグメント通し番号(si、Rust の segment_index と一致)から
+    /// <see cref="_document"/>.Entries 内の実インデックスを引く。TextSegment だけを数えるため、
+    /// PageBreakEntry の位置を返すことは構造的にない。
+    /// </summary>
+    private int EntryIndexOfSegment(int si)
+    {
+        int count = 0;
+        for (int i = 0; i < _document.Entries.Count; i++)
+        {
+            if (_document.Entries[i] is TextSegment)
+            {
+                if (count == si) return i;
+                count++;
+            }
+        }
+        return -1;
+    }
+
+    // カーソル位置でセグメントを分割する。前半の終端種別を指定する。後半は元の終端種別を引き継ぐ。
+    private void SplitAtCursor(bool firstParagraphEnd)
     {
         var (si, off) = GetCursor();
-        var seg = _document.Segments[si];
+        SplitAt(si, off, firstParagraphEnd);
+    }
+
+    // 論理位置 (si, off) でセグメントを分割する。前半の終端種別を指定する。後半は元の終端種別を
+    // 引き継ぐ。カーソル位置以外（ページ行設定の分割点計算など）から呼ぶ場合はこちらを直接使う。
+    private void SplitAt(int si, int off, bool firstParagraphEnd)
+    {
+        int idx = EntryIndexOfSegment(si);
+        var seg = (TextSegment)_document.Entries[idx];
         var before = seg.Text[..off];
         var after = seg.Text[off..];
-        var second = new Segment(after, seg.ParagraphEnd, seg.PageBreakMarker);
+        var second = new TextSegment(after, seg.ParagraphEnd);
         seg.Text = before;
         seg.ParagraphEnd = firstParagraphEnd;
-        seg.PageBreakMarker = firstPageBreak;
-        _document.Segments.Insert(si + 1, second);
+        _document.Entries.Insert(idx + 1, second);
         ReformatAndRender(si + 1, 0);
     }
 
@@ -755,8 +869,8 @@ public partial class MainForm : Form
     {
         if (_view != null)
         {
-            if (IsOnHeaderLine()) return;
-            SplitAtCursor(firstParagraphEnd: true, firstPageBreak: null);
+            if (IsOnProtectedLine()) return;
+            SplitAtCursor(firstParagraphEnd: true);
             return;
         }
         richTextBox.SelectedText = "\n";
@@ -767,30 +881,92 @@ public partial class MainForm : Form
     {
         if (_view != null)
         {
-            if (IsOnHeaderLine()) return;
-            SplitAtCursor(firstParagraphEnd: false, firstPageBreak: null);
+            if (IsOnProtectedLine()) return;
+            SplitAtCursor(firstParagraphEnd: false);
             return;
         }
         richTextBox.SelectedText = "\n";
     }
 
-    // Ctrl+Enter: 改ページ（カーソル位置で段落を区切り、その直後で改ページする）。
+    // Ctrl+Enter: 改ページ。カーソルがセグメント境界（行頭/行末）にあれば、テキストは一切
+    // 分割せず PageBreakEntry を挿入するだけ（余計な空段落を作らない）。境界外なら先に分割
+    // してから挿入する。文書先頭では改ページを作れない（先頭が Break になる退化ケースを
+    // そもそも発生させないため）。
     private void InsertPageBreak()
     {
         if (_view != null)
         {
-            if (IsOnHeaderLine()) return;
-            SplitAtCursor(firstParagraphEnd: true, firstPageBreak: "====");
+            if (IsOnProtectedLine()) return;
+            var (si, off) = GetCursor();
+            int idx = EntryIndexOfSegment(si);
+            var seg = (TextSegment)_document.Entries[idx];
+            if (off == 0)
+            {
+                if (idx == 0) return; // 文書先頭では無効化
+                _document.Entries.Insert(idx, new PageBreakEntry());
+                ReformatAndRender(si, 0);
+            }
+            else if (off == seg.Text.Length)
+            {
+                _document.Entries.Insert(idx + 1, new PageBreakEntry());
+                ReformatAndRender(si, off);
+            }
+            else
+            {
+                SplitAt(si, off, firstParagraphEnd: true);
+                int newIdx = EntryIndexOfSegment(si + 1);
+                _document.Entries.Insert(newIdx, new PageBreakEntry());
+                ReformatAndRender(si + 1, 0);
+            }
             return;
         }
         richTextBox.SelectedText = "\n";
+    }
+
+    /// <summary>
+    /// カーソルが改ページ区切り行そのものの上にあれば、その PageBreakEntry を確認なしで
+    /// 1回の操作で削除する（Backspace/Delete どちらでも同じ挙動）。区切りは見える・選択できる
+    /// 独立したオブジェクトとして扱う設計のため、矢印キーで区切り行そのものに移動した状態からも
+    /// 直接削除できる必要がある（隣接セグメント端からの削除だけでは、区切り行に乗った状態からは
+    /// 削除できない）。区切り行上でなければ何もせず false を返す。
+    /// </summary>
+    private bool TryDeleteDividerAtCursor()
+    {
+        if (_view == null) return false;
+        int flatLine = richTextBox.GetLineFromCharIndex(richTextBox.SelectionStart);
+        if (flatLine < 0 || flatLine >= _view.PhysicalLineCount || !_view.IsDividerAt(flatLine)) return false;
+        int entryIdx = _view.EntryIndexAt(flatLine);
+        if (entryIdx < 0) return false;
+
+        // 削除前に、区切りより前にある TextSegment の個数を数えておく。これは
+        // 「区切りの直後にセグメントがあればその si」に一致する（si はエントリ順の
+        // TextSegment 通し番号のため）。
+        int precedingCount = 0;
+        for (int i = 0; i < entryIdx; i++)
+            if (_document.Entries[i] is TextSegment) precedingCount++;
+
+        _document.Entries.RemoveAt(entryIdx);
+
+        // カーソルは削除した区切りの直後のセグメント先頭へ。直後に無ければ直前のセグメント末尾へ。
+        if (EntryIndexOfSegment(precedingCount) >= 0)
+        {
+            ReformatAndRender(precedingCount, 0);
+        }
+        else
+        {
+            int lastSi = precedingCount - 1;
+            var lastSeg = (TextSegment)_document.Entries[EntryIndexOfSegment(lastSi)];
+            ReformatAndRender(lastSi, lastSeg.Text.Length);
+        }
+        return true;
     }
 
     private void SimulateBackspace()
     {
         if (_view != null)
         {
-            if (IsOnHeaderLine()) return;
+            if (TryDeleteDividerAtCursor()) return;
+            if (IsOnProtectedLine()) return;
             if (richTextBox.SelectionLength > 0)
             {
                 // 選択範囲削除（同一セグメント内に限定）
@@ -798,7 +974,7 @@ public partial class MainForm : Form
                 int flatLine = richTextBox.GetLineFromCharIndex(pos);
                 var (si, off) = _view.PhysicalToLogical(flatLine,
                     pos - richTextBox.GetFirstCharIndexFromLine(flatLine));
-                var seg = _document.Segments[si];
+                var seg = (TextSegment)_document.Entries[EntryIndexOfSegment(si)];
                 int delLen = Math.Min(richTextBox.SelectionLength, seg.Text.Length - off);
                 if (delLen > 0)
                 {
@@ -810,20 +986,29 @@ public partial class MainForm : Form
             var (csi, coff) = GetCursor();
             if (coff == 0)
             {
-                // セグメント先頭: 直前のセグメントと結合（間の区切り＝改行/段落/改ページを除去）
+                int idx = EntryIndexOfSegment(csi);
+                if (idx > 0 && _document.Entries[idx - 1] is PageBreakEntry)
+                {
+                    // セグメント先頭が改ページに隣接: 区切りエントリ自体を1回の操作で削除する
+                    // （確認なし）。前後のテキストは自動結合しない（結合したければもう一度
+                    // Backspace を押せば、以下の通常の結合ロジックがそのまま効く）。
+                    _document.Entries.RemoveAt(idx - 1);
+                    ReformatAndRender(csi, 0);
+                    return;
+                }
+                // セグメント先頭: 直前のセグメントと結合
                 if (csi == 0) return;
-                var prev = _document.Segments[csi - 1];
-                var cur = _document.Segments[csi];
+                var prev = (TextSegment)_document.Entries[idx - 1];
+                var cur = (TextSegment)_document.Entries[idx];
                 int prevLen = prev.Text.Length;
                 prev.Text += cur.Text;
                 prev.ParagraphEnd = cur.ParagraphEnd;
-                prev.PageBreakMarker = cur.PageBreakMarker;
-                _document.Segments.RemoveAt(csi);
+                _document.Entries.RemoveAt(idx);
                 ReformatAndRender(csi - 1, prevLen);
                 return;
             }
             // 1文字削除
-            var s = _document.Segments[csi];
+            var s = (TextSegment)_document.Entries[EntryIndexOfSegment(csi)];
             s.Text = s.Text.Remove(coff - 1, 1);
             ReformatAndRender(csi, coff - 1);
             return;
@@ -841,18 +1026,27 @@ public partial class MainForm : Form
     {
         if (_view != null)
         {
-            if (IsOnHeaderLine()) return;
+            if (TryDeleteDividerAtCursor()) return;
+            if (IsOnProtectedLine()) return;
             var (si, off) = GetCursor();
-            var seg = _document.Segments[si];
+            int idx = EntryIndexOfSegment(si);
+            var seg = (TextSegment)_document.Entries[idx];
             if (off >= seg.Text.Length)
             {
+                if (idx + 1 < _document.Entries.Count && _document.Entries[idx + 1] is PageBreakEntry)
+                {
+                    // セグメント末尾が改ページに隣接: 区切りエントリ自体を1回の操作で削除する
+                    // （確認なし）。前後のテキストは自動結合しない。
+                    _document.Entries.RemoveAt(idx + 1);
+                    ReformatAndRender(si, off);
+                    return;
+                }
                 // セグメント末尾: 次のセグメントと結合
-                if (si + 1 >= _document.Segments.Count) return;
-                var next = _document.Segments[si + 1];
+                if (idx + 1 >= _document.Entries.Count) return;
+                var next = (TextSegment)_document.Entries[idx + 1];
                 seg.Text += next.Text;
                 seg.ParagraphEnd = next.ParagraphEnd;
-                seg.PageBreakMarker = next.PageBreakMarker;
-                _document.Segments.RemoveAt(si + 1);
+                _document.Entries.RemoveAt(idx + 1);
                 ReformatAndRender(si, off);
                 return;
             }
@@ -892,7 +1086,7 @@ public partial class MainForm : Form
         if (!Clipboard.ContainsText()) return;
         var text = Clipboard.GetText();
         if (_view == null) { richTextBox.Paste(); return; }
-        if (IsOnHeaderLine()) return;
+        if (IsOnProtectedLine()) return;
         switch (ClassifyClipboard(text))
         {
             case ClipboardKind.Braille:
@@ -913,7 +1107,7 @@ public partial class MainForm : Form
     {
         if (!Clipboard.ContainsText()) return;
         var text = Clipboard.GetText();
-        if (_view == null || IsOnHeaderLine()) return;
+        if (_view == null || IsOnProtectedLine()) return;
         // 点字と非点字が混在しているときは、誤変換を避けるため何もしない。
         if (ClassifyClipboard(text) == ClipboardKind.Mixed) return;
         InsertConvertedText(text);
@@ -933,11 +1127,12 @@ public partial class MainForm : Form
         InsertBrailleLines(Array.ConvertAll(SplitLines(text), line => translate(line)));
     }
 
-    /// <summary>点字データ（複数行）をカーソル位置に挿入する。_view != null かつ非ヘッダ行で呼ぶこと。</summary>
+    /// <summary>点字データ（複数行）をカーソル位置に挿入する。_view != null かつ非保護行で呼ぶこと。</summary>
     private void InsertBrailleLines(string[] parts)
     {
         var (si, off) = GetCursor();
-        var seg = _document.Segments[si];
+        int idx = EntryIndexOfSegment(si);
+        var seg = (TextSegment)_document.Entries[idx];
         if (parts.Length == 1)
         {
             // セグメント内への単純挿入
@@ -945,19 +1140,18 @@ public partial class MainForm : Form
             ReformatAndRender(si, off + parts[0].Length);
             return;
         }
-        // 複数行: 現在のセグメントを分割しながら段落として挿入する。
+        // 複数行: 現在のセグメントを分割しながら段落として挿入する。改ページを跨いだ分割は
+        // 発生しない（PageBreakEntry は独立したエントリで、テキスト分割の対象にならない）。
         var tail = seg.Text[off..];
         var origEnd = seg.ParagraphEnd;
-        var origPageBreak = seg.PageBreakMarker;
         seg.Text = seg.Text[..off] + parts[0];
         seg.ParagraphEnd = true;
-        seg.PageBreakMarker = null;
 
-        int insertAt = si + 1;
+        int insertAt = idx + 1;
         for (int i = 1; i < parts.Length - 1; i++)
-            _document.Segments.Insert(insertAt++, new Segment(parts[i], true));
-        _document.Segments.Insert(insertAt, new Segment(parts[^1] + tail, origEnd, origPageBreak));
-        ReformatAndRender(insertAt, parts[^1].Length);
+            _document.Entries.Insert(insertAt++, new TextSegment(parts[i], true));
+        _document.Entries.Insert(insertAt, new TextSegment(parts[^1] + tail, origEnd));
+        ReformatAndRender(si + parts.Length - 1, parts[^1].Length);
     }
 
     // 改行（CRLF/CR/LF）を正規化して論理行へ分割する。

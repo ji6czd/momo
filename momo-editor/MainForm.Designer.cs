@@ -19,6 +19,7 @@ partial class MainForm
         openMenuItem = new ToolStripMenuItem();
         saveMenuItem = new ToolStripMenuItem();
         saveAsMenuItem = new ToolStripMenuItem();
+        pageSetupMenuItem = new ToolStripMenuItem();
         exitMenuItem = new ToolStripMenuItem();
         editMenu = new ToolStripMenuItem();
         undoMenuItem = new ToolStripMenuItem();
@@ -34,7 +35,7 @@ partial class MainForm
         tableGrade1MenuItem = new ToolStripMenuItem();
         tableGrade2MenuItem = new ToolStripMenuItem();
         formatMenu = new ToolStripMenuItem();
-        pageSetupMenuItem = new ToolStripMenuItem();
+        pageSectionMenuItem = new ToolStripMenuItem();
         viewMenu = new ToolStripMenuItem();
         guideMenuItem = new ToolStripMenuItem();
         speechGuideMenuItem = new ToolStripMenuItem();
@@ -62,6 +63,8 @@ partial class MainForm
             saveMenuItem,
             saveAsMenuItem,
             new ToolStripSeparator(),
+            pageSetupMenuItem,
+            new ToolStripSeparator(),
             exitMenuItem,
         });
 
@@ -80,6 +83,11 @@ partial class MainForm
         saveAsMenuItem.Text = "名前を付けて保存(&A)...";
         saveAsMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.S;
         saveAsMenuItem.Click += SaveAsMenuItem_Click;
+
+        // 文書全体の既定値（1行の文字数・1ページの行数・ページヘッダー・タイトル等）。
+        // ページ単位の設定は書式(&O)メニューの「ページ行設定」で行う。
+        pageSetupMenuItem.Text = "ページ設定(&G)...";
+        pageSetupMenuItem.Click += PageSetupMenuItem_Click;
 
         exitMenuItem.Text = "終了(&X)";
         exitMenuItem.Click += ExitMenuItem_Click;
@@ -161,10 +169,11 @@ partial class MainForm
 
         // formatMenu
         formatMenu.Text = "書式(&O)";
-        formatMenu.DropDownItems.AddRange(new ToolStripItem[] { pageSetupMenuItem });
+        formatMenu.DropDownItems.AddRange(new ToolStripItem[] { pageSectionMenuItem });
 
-        pageSetupMenuItem.Text = "ページ設定(&G)...";
-        pageSetupMenuItem.Click += PageSetupMenuItem_Click;
+        // 今表示されているページ以降に適用するヘッダー表示有無・タイトル・番号・番号スタイル。
+        pageSectionMenuItem.Text = "ページ行設定(&G)...";
+        pageSectionMenuItem.Click += PageSectionMenuItem_Click;
 
         // viewMenu
         viewMenu.Text = "表示(&V)";
@@ -244,6 +253,7 @@ partial class MainForm
     private ToolStripMenuItem openMenuItem;
     private ToolStripMenuItem saveMenuItem;
     private ToolStripMenuItem saveAsMenuItem;
+    private ToolStripMenuItem pageSetupMenuItem;
     private ToolStripMenuItem exitMenuItem;
     private ToolStripMenuItem editMenu;
     private ToolStripMenuItem undoMenuItem;
@@ -255,7 +265,7 @@ partial class MainForm
     private ToolStripMenuItem pageBreakMenuItem;
     private ToolStripMenuItem selectAllMenuItem;
     private ToolStripMenuItem formatMenu;
-    private ToolStripMenuItem pageSetupMenuItem;
+    private ToolStripMenuItem pageSectionMenuItem;
     private ToolStripMenuItem viewMenu;
     private ToolStripMenuItem guideMenuItem;
     private ToolStripMenuItem speechGuideMenuItem;

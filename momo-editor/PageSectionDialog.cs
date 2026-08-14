@@ -3,41 +3,48 @@ using Momo;
 namespace MomoEditor;
 
 /// <summary>
-/// 点字ドキュメントの整形設定（1 行の文字数・1 ページの行数・ページヘッダー・
-/// 開始ページ番号・タイトル）を編集するダイアログ。
-/// スクリーンリーダー利用を考慮し、各入力欄にラベルを関連付けてタブ順を整える。
+/// 「ページ行設定」ダイアログの結果。今表示されているページ以降に適用する、
+/// ヘッダー表示有無・タイトル・開始ページ番号・ページ番号スタイル。
 /// </summary>
-sealed class FormatterConfigDialog : Form
+sealed record PageSectionSettings(bool PageHeader, string? Title, int NumberStart, PageNumberStyle NumberStyle);
+
+/// <summary>
+/// 「今表示されているページ以降」に適用するページヘッダー関連設定を編集するダイアログ。
+/// <see cref="FormatterConfigDialog"/>（文書全体の既定値）とほぼ同じ項目を持つが、
+/// 1 行の文字数・1 ページの行数は文書全体にしか設定できないため対象外。
+/// スクリーンリーダー利用を考慮し、何ページ目以降に効くかを冒頭のラベルで明示する。
+/// </summary>
+sealed class PageSectionDialog : Form
 {
-    private readonly NumericUpDown _lineWidth = new();
-    private readonly NumericUpDown _linesPerPage = new();
     private readonly NumericUpDown _numberStart = new();
     private readonly ComboBox _numberStyle = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly CheckBox _pageHeader = new();
     private readonly TextBox _title = new();
 
     /// <summary>OK で閉じたときの編集結果。元の設定値を基に変更箇所だけ反映する。</summary>
-    public FormatterConfig Result { get; private set; }
+    public PageSectionSettings Result { get; private set; }
 
     /// <summary>
-    /// 現在の設定でダイアログを開く。OK なら編集後の設定、キャンセルなら null を返す。
+    /// 現在の実効設定でダイアログを開く。<paramref name="pageDisplayNumber"/> は
+    /// 冒頭の説明ラベルに表示する1始まりの表示用ページ番号。
+    /// OK なら編集後の設定、キャンセルなら null を返す。
     /// </summary>
-    public static FormatterConfig? Edit(IWin32Window owner, FormatterConfig current)
+    public static PageSectionSettings? Edit(IWin32Window owner, PageSectionSettings current, int pageDisplayNumber)
     {
-        using var dialog = new FormatterConfigDialog(current);
+        using var dialog = new PageSectionDialog(current, pageDisplayNumber);
         return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Result : null;
     }
 
-    private FormatterConfigDialog(FormatterConfig config)
+    private PageSectionDialog(PageSectionSettings config, int pageDisplayNumber)
     {
         Result = config;
-        BuildUi();
+        BuildUi(pageDisplayNumber);
         LoadFrom(config);
     }
 
-    private void BuildUi()
+    private void BuildUi(int pageDisplayNumber)
     {
-        Text = "ページ設定";
+        Text = "ページ行設定";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
@@ -58,17 +65,17 @@ sealed class FormatterConfigDialog : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        // 1 行の文字数
-        _lineWidth.Minimum = 1;
-        _lineWidth.Maximum = 100;
-        _lineWidth.AccessibleName = "1 行の文字数";
-        AddRow(layout, "1 行の文字数(&W):", _lineWidth);
-
-        // 1 ページの行数
-        _linesPerPage.Minimum = 1;
-        _linesPerPage.Maximum = 100;
-        _linesPerPage.AccessibleName = "1 ページの行数";
-        AddRow(layout, "1 ページの行数(&L):", _linesPerPage);
+        // 何ページ目以降に適用されるかを明示する説明ラベル（スクリーンリーダーでも読み上げられる）。
+        var scopeLabel = new Label
+        {
+            Text = $"現在表示中の {pageDisplayNumber} ページ目以降に適用されます。",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(3, 3, 3, 9),
+        };
+        layout.RowCount = 1;
+        layout.Controls.Add(scopeLabel, 0, 0);
+        layout.SetColumnSpan(scopeLabel, 2);
 
         // 開始ページ番号
         _numberStart.Minimum = 1;
@@ -162,27 +169,21 @@ sealed class FormatterConfigDialog : Form
         layout.Controls.Add(input, 1, row);
     }
 
-    private void LoadFrom(FormatterConfig config)
+    private void LoadFrom(PageSectionSettings config)
     {
-        _lineWidth.Value = Math.Clamp(config.LineWidth, (int)_lineWidth.Minimum, (int)_lineWidth.Maximum);
-        _linesPerPage.Value = Math.Clamp(config.LinesPerPage, (int)_linesPerPage.Minimum, (int)_linesPerPage.Maximum);
         _numberStart.Value = Math.Clamp(config.NumberStart, (int)_numberStart.Minimum, (int)_numberStart.Maximum);
         _numberStyle.SelectedIndex = config.NumberStyle == PageNumberStyle.Alternative ? 1 : 0;
-        _pageHeader.Checked = config.PageHeader;
         _title.Text = config.Title ?? "";
+        _pageHeader.Checked = config.PageHeader;
     }
 
     private void Save()
     {
         var title = _title.Text.Trim();
-        Result = Result with
-        {
-            LineWidth = (int)_lineWidth.Value,
-            LinesPerPage = (int)_linesPerPage.Value,
-            NumberStart = (int)_numberStart.Value,
-            NumberStyle = _numberStyle.SelectedIndex == 1 ? PageNumberStyle.Alternative : PageNumberStyle.Standard,
-            PageHeader = _pageHeader.Checked,
-            Title = title.Length > 0 ? title : null,
-        };
+        Result = new PageSectionSettings(
+            _pageHeader.Checked,
+            title.Length > 0 ? title : null,
+            (int)_numberStart.Value,
+            _numberStyle.SelectedIndex == 1 ? PageNumberStyle.Alternative : PageNumberStyle.Standard);
     }
 }

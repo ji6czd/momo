@@ -974,6 +974,7 @@ public partial class MainForm : Form
     private bool TryDeleteDividerAtCursor()
     {
         if (_view == null) return false;
+        if (richTextBox.SelectionLength > 0) return false;   // 選択がある場合は DeleteSelection() に委ねる
         int flatLine = richTextBox.GetLineFromCharIndex(richTextBox.SelectionStart);
         if (flatLine < 0 || flatLine >= _view.PhysicalLineCount || !_view.IsDividerAt(flatLine)) return false;
         int entryIdx = _view.EntryIndexAt(flatLine);
@@ -1002,6 +1003,53 @@ public partial class MainForm : Form
         return true;
     }
 
+    /// <summary>選択範囲（複数行にまたがるものを含む）がヘッダ行または改ページ区切り行の
+    /// いずれかに触れているかどうかを返す。選択が無ければ（SelectionLength == 0）false。</summary>
+    private bool SelectionTouchesProtectedLine()
+    {
+        if (_view == null || richTextBox.SelectionLength == 0) return false;
+        int start = richTextBox.SelectionStart;
+        int end = start + richTextBox.SelectionLength;
+        int startLine = richTextBox.GetLineFromCharIndex(start);
+        int endLine = richTextBox.GetLineFromCharIndex(end);
+        for (int i = startLine; i <= endLine && i < _view.PhysicalLineCount; i++)
+            if (_view.IsHeaderAt(i) || _view.IsDividerAt(i)) return true;
+        return false;
+    }
+
+    /// <summary>選択範囲（複数セグメントにまたがるものを含む）を削除する。選択が保護行
+    /// （ヘッダ行・改ページ区切り行）のいずれかにかかっている場合は何もせず false を返す
+    /// （それらは1回の確定操作でのみ削除できる構造的に保護された行のため）。
+    /// 呼び出し前に richTextBox.SelectionLength > 0 かつ _view != null であることを
+    /// 確認しておくこと。成功時は ReformatAndRender まで完了させて true を返す。</summary>
+    private bool DeleteSelection()
+    {
+        if (SelectionTouchesProtectedLine()) return false;
+
+        int start = richTextBox.SelectionStart;
+        int end = start + richTextBox.SelectionLength;
+        int startLine = richTextBox.GetLineFromCharIndex(start);
+        int endLine = richTextBox.GetLineFromCharIndex(end);
+
+        var (siStart, offStart) = _view!.PhysicalToLogical(startLine, start - richTextBox.GetFirstCharIndexFromLine(startLine));
+        var (siEnd, offEnd) = _view.PhysicalToLogical(endLine, end - richTextBox.GetFirstCharIndexFromLine(endLine));
+
+        int idxStart = EntryIndexOfSegment(siStart);
+        int idxEnd = EntryIndexOfSegment(siEnd);
+        var first = (TextSegment)_document.Entries[idxStart];
+        var last = (TextSegment)_document.Entries[idxEnd];
+
+        offStart = Math.Min(offStart, first.Text.Length);
+        offEnd = Math.Min(offEnd, last.Text.Length);
+
+        first.Text = first.Text[..offStart] + last.Text[offEnd..];
+        first.ParagraphEnd = last.ParagraphEnd;
+        if (idxEnd > idxStart) _document.Entries.RemoveRange(idxStart + 1, idxEnd - idxStart);
+
+        ReformatAndRender(siStart, offStart);
+        return true;
+    }
+
     private void SimulateBackspace()
     {
         if (_view != null)
@@ -1010,18 +1058,7 @@ public partial class MainForm : Form
             if (IsOnProtectedLine()) return;
             if (richTextBox.SelectionLength > 0)
             {
-                // 選択範囲削除（同一セグメント内に限定）
-                int pos = richTextBox.SelectionStart;
-                int flatLine = richTextBox.GetLineFromCharIndex(pos);
-                var (si, off) = _view.PhysicalToLogical(flatLine,
-                    pos - richTextBox.GetFirstCharIndexFromLine(flatLine));
-                var seg = (TextSegment)_document.Entries[EntryIndexOfSegment(si)];
-                int delLen = Math.Min(richTextBox.SelectionLength, seg.Text.Length - off);
-                if (delLen > 0)
-                {
-                    seg.Text = seg.Text.Remove(off, delLen);
-                    ReformatAndRender(si, off);
-                }
+                DeleteSelection();
                 return;
             }
             var (csi, coff) = GetCursor();
@@ -1069,6 +1106,11 @@ public partial class MainForm : Form
         {
             if (TryDeleteDividerAtCursor()) return;
             if (IsOnProtectedLine()) return;
+            if (richTextBox.SelectionLength > 0)
+            {
+                DeleteSelection();
+                return;
+            }
             var (si, off) = GetCursor();
             int idx = EntryIndexOfSegment(si);
             var seg = (TextSegment)_document.Entries[idx];
@@ -1107,6 +1149,7 @@ public partial class MainForm : Form
     private void SmartCut()
     {
         if (richTextBox.SelectionLength == 0) return;
+        if (SelectionTouchesProtectedLine()) return; // 保護行にかかる範囲は切り取らない（コピーもしない）
         richTextBox.Copy();
         SimulateBackspace(); // 選択範囲をモデル経由で削除
     }
@@ -1121,6 +1164,7 @@ public partial class MainForm : Form
         var text = Clipboard.GetText();
         if (_view == null) { richTextBox.Paste(); return; }
         if (IsOnProtectedLine()) return;
+        if (richTextBox.SelectionLength > 0 && !DeleteSelection()) return;
         switch (ClassifyClipboard(text))
         {
             case ClipboardKind.Braille:
@@ -1142,6 +1186,7 @@ public partial class MainForm : Form
         if (!Clipboard.ContainsText()) return;
         var text = Clipboard.GetText();
         if (_view == null || IsOnProtectedLine()) return;
+        if (richTextBox.SelectionLength > 0 && !DeleteSelection()) return;
         // 点字と非点字が混在しているときは、誤変換を避けるため何もしない。
         if (ClassifyClipboard(text) == ClipboardKind.Mixed) return;
         InsertConvertedText(text);

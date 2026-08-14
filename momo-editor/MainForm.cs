@@ -12,6 +12,7 @@ public partial class MainForm : Form
     private bool _suppressModified;
     private BrailleDocument _document = BrailleDocument.NewEmpty();
     private FormattedDocumentView? _view;
+    private readonly AppSettings _settings = AppSettings.Load();
 
     // テキスト→点字変換に使う点訳器。テーブルを切り替えたら破棄し、次の変換時に作り直す。
     private MomoFfi.BrailleTranslatorHandle? _translator;
@@ -59,6 +60,7 @@ public partial class MainForm : Form
         };
         // 英語点字メニューのラベルを実データの表示名に更新する。
         InitTableMenu();
+        RebuildRecentFilesMenu();
 
         // 新規ドキュメントで起動
         LoadDocumentToEditor();
@@ -480,6 +482,39 @@ public partial class MainForm : Form
         OpenPath(dialog.FileName);
     }
 
+    /// <summary>「最近使ったファイル」サブメニューを現在の一覧から組み立て直す。</summary>
+    private void RebuildRecentFilesMenu()
+    {
+        recentFilesMenuItem.DropDownItems.Clear();
+        if (_settings.RecentFiles.Count == 0)
+        {
+            recentFilesMenuItem.DropDownItems.Add(new ToolStripMenuItem("(なし)") { Enabled = false });
+            return;
+        }
+        foreach (var path in _settings.RecentFiles)
+        {
+            var item = new ToolStripMenuItem(Path.GetFileName(path));
+            item.Click += (_, _) => OpenRecentFile(path);
+            recentFilesMenuItem.DropDownItems.Add(item);
+        }
+    }
+
+    /// <summary>「最近使ったファイル」の項目から開く。既に存在しなければ一覧から取り除く。</summary>
+    private void OpenRecentFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            MessageBox.Show($"ファイルが見つかりません。\n{path}", "エラー",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            _settings.RecentFiles.Remove(path);
+            _settings.Save();
+            RebuildRecentFilesMenu();
+            return;
+        }
+        if (!ConfirmDiscard()) return;
+        OpenPath(path);
+    }
+
     /// <summary>
     /// 指定パスのファイルを開いてエディタに取り込む。ダイアログを介さないコア処理で、
     /// メニューの「開く」とコマンドライン引数起動の双方から呼ばれる。
@@ -527,6 +562,10 @@ public partial class MainForm : Form
             LoadDocumentToEditor();
             _filePath = filePath;
             IsModified = modified;
+            // 実ファイルを読み込んだ場合のみ最近使ったファイルに記録する。
+            // 漢字かな交じり文からの取り込み（.mbr への拡張子付け替え）は
+            // まだ何も書き出していないパスなので対象外（保存時に SaveToFile 側で拾われる）。
+            if (!modified) { _settings.AddRecentFile(filePath); RebuildRecentFilesMenu(); }
             richTextBox.Focus();
         }
         catch (Exception ex)
@@ -579,6 +618,8 @@ public partial class MainForm : Form
             }
             _filePath = path;
             IsModified = false;
+            _settings.AddRecentFile(path);
+            RebuildRecentFilesMenu();
         }
         catch (Exception ex)
         {

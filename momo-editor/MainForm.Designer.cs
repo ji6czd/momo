@@ -17,6 +17,7 @@ partial class MainForm
         fileMenu = new ToolStripMenuItem();
         newMenuItem = new ToolStripMenuItem();
         openMenuItem = new ToolStripMenuItem();
+        recentFilesMenuItem = new ToolStripMenuItem();
         saveMenuItem = new ToolStripMenuItem();
         saveAsMenuItem = new ToolStripMenuItem();
         pageSetupMenuItem = new ToolStripMenuItem();
@@ -60,6 +61,7 @@ partial class MainForm
         fileMenu.DropDownItems.AddRange(new ToolStripItem[] {
             newMenuItem,
             openMenuItem,
+            recentFilesMenuItem,
             new ToolStripSeparator(),
             saveMenuItem,
             saveAsMenuItem,
@@ -76,6 +78,9 @@ partial class MainForm
         openMenuItem.Text = "開く(&O)...";
         openMenuItem.ShortcutKeys = Keys.Control | Keys.O;
         openMenuItem.Click += OpenMenuItem_Click;
+
+        // 一覧は起動時・追加のたびに RebuildRecentFilesMenu() が動的に組み立てる。
+        recentFilesMenuItem.Text = "最近使ったファイル(&R)";
 
         saveMenuItem.Text = "保存(&S)";
         saveMenuItem.ShortcutKeys = Keys.Control | Keys.S;
@@ -266,6 +271,7 @@ partial class MainForm
     private ToolStripMenuItem fileMenu;
     private ToolStripMenuItem newMenuItem;
     private ToolStripMenuItem openMenuItem;
+    private ToolStripMenuItem recentFilesMenuItem;
     private ToolStripMenuItem saveMenuItem;
     private ToolStripMenuItem saveAsMenuItem;
     private ToolStripMenuItem pageSetupMenuItem;

@@ -8,8 +8,6 @@ namespace MomoEditor;
 // 「編集前の状態そのもの」を保持するため、正しさの検証が容易。
 public partial class MainForm
 {
-    private const int MaxUndoSteps = 64; // 将来の設定ダイアログで可変化予定（今は固定）
-
     private sealed record EditSnapshot(BrailleDocument Document, int CursorSegment, int CursorOffset);
 
     // 直近の ReformatAndRender 完了直後の状態（次の編集が来たとき Undo スタックへ積む対象）。
@@ -19,10 +17,10 @@ public partial class MainForm
     private readonly List<EditSnapshot> _undoStack = [];
     private readonly List<EditSnapshot> _redoStack = [];
 
-    private static void PushCapped(List<EditSnapshot> stack, EditSnapshot snapshot)
+    private void PushCapped(List<EditSnapshot> stack, EditSnapshot snapshot)
     {
         stack.Add(snapshot);
-        if (stack.Count > MaxUndoSteps) stack.RemoveAt(0);
+        if (stack.Count > _settings.UndoStackSize) stack.RemoveAt(0);
     }
 
     private static BrailleDocument CloneDocument(BrailleDocument doc)

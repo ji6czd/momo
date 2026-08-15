@@ -11,9 +11,19 @@
 //!   - `0x00` = 線形（`.mbm` は int8 量子化、`.mbmf` は float32 のまま）
 //!   - `0x01` = 木のアンサンブル（`.mbm`/`.mbmf` で完全に同一バイト列、量子化しない）
 //!
-//! 線形のスコア計算は読みモデルと共有する vocab テーブルへの参照が要るが、
-//! このモジュール自体は vocab テーブルを持たない（`model.rs`/`float_model.rs` が
-//! `vocab_find` をクロージャで渡す）。
+//! ## 統合語彙（version 0x07）
+//!
+//! このモジュールは vocab テーブルを一切持たない。線形も GBDT も、特徴量キー →
+//! 情報の解決は `model.rs`/`float_model.rs` が持つ**統合語彙テーブル**に委譲し、
+//! [`VocabRef`] を返すクロージャ (`resolve`) で受け取る:
+//!   - 線形は `feature_id`（one-hot 列）を使う。
+//!   - GBDT は `cat`（カテゴリカル列と code）を使う。
+//!
+//! version 0x06 までは GBDT が自前の `cat_vocab`（読み語彙とほぼ同一のキー集合を
+//! `(column, code)` に写す表）を丸ごと持っており、読み語彙とペイロードが二重に
+//! 格納されていた。0x07 で読み語彙に `(column, code)` を吸収し、GBDT
+//! セクションは木だけを持つようにした。前提として**カテゴリカルキーは読み語彙の
+//! 部分集合**（exporter が保証。cat 専用キーがあると解決できず欠損扱いになる）。
 
 use std::io::Read;
 use std::path::Path;
@@ -21,13 +31,24 @@ use std::path::Path;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::feature::FeatureKey;
-use crate::loader::{MAX_REASONABLE_COUNT, io_err, read_f32_vec, read_feature_key, read_i8_vec};
+use crate::loader::{MAX_REASONABLE_COUNT, io_err, read_f32_vec, read_i8_vec};
 use crate::{Error, Result};
 
 /// カテゴリカル境界列数の妥当性上限（スコア計算時の固定長スタック配列のサイズ）。
 /// 現状の列数（momo_py.categorical、window=7で38列）に対して十分な余裕を持たせる。
 /// これを超える列数のモデルファイルは `CorruptModel` として拒否する。
-const MAX_BOUNDARY_CAT_COLUMNS: usize = 64;
+pub(crate) const MAX_BOUNDARY_CAT_COLUMNS: usize = 64;
+
+/// 統合語彙テーブル（version 0x07）1エントリのうち、境界モデルのスコア計算が
+/// 必要とする部分。`model.rs`/`float_model.rs` の `resolve` クロージャが返す。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct VocabRef {
+    /// one-hot 特徴量ID（線形境界モデル・読みモデル用）。
+    pub(crate) feature_id: u32,
+    /// GBDT カテゴリカル `(column, code)`。カテゴリカル列を持たないキー（Bias 等）
+    /// や、そもそもカテゴリカル情報を持たない（線形境界）モデルでは `None`。
+    pub(crate) cat: Option<(u32, u32)>,
+}
 
 /// 木の再帰の深さの妥当性上限。壊れたファイルによる過大な再帰を防ぐ。
 const MAX_TREE_DEPTH: u32 = 256;
@@ -57,11 +78,12 @@ pub(crate) enum FloatBoundary {
 
 /// GBDT境界モデルの木のアンサンブル。`.mbm`/`.mbmf` で完全に同一のデータ
 /// （量子化しない）なので `Boundary`/`FloatBoundary` の両方で共有する。
+///
+/// version 0x07 で自前の `cat_vocab` を廃止した。カテゴリカル `(column, code)` は
+/// 統合語彙テーブル（`model.rs`/`float_model.rs`）が持ち、スコア計算時に
+/// `resolve` クロージャ経由で受け取る。
 #[derive(Debug)]
 pub(crate) struct TreeEnsemble {
-    /// (FeatureKey, column_index, code) を FeatureKey でソートした語彙表。
-    /// `column_index` は LightGBM の `split_feature` と同じ空間（0-based）。
-    cat_vocab: Vec<(FeatureKey, u32, u32)>,
     trees: Vec<TreeNode>,
 }
 
@@ -89,12 +111,12 @@ enum TreeNode {
 impl Boundary {
     /// 境界モデルの生スコア（sigmoid 前）を計算する。
     ///
-    /// 線形の場合は `vocab_find` で読みモデルと共有する語彙テーブルを引く
-    /// （呼び出し側の `model.rs` が `|k| self.vocab_find(k)` を渡す）。
+    /// `resolve` は特徴量キーを統合語彙テーブル（`model.rs`）で引くクロージャ。
+    /// 線形は [`VocabRef::feature_id`]、GBDT は [`VocabRef::cat`] を使う。
     pub(crate) fn compute_score(
         &self,
         feat_keys: &[FeatureKey],
-        vocab_find: impl Fn(&FeatureKey) -> Option<u32>,
+        resolve: impl Fn(&FeatureKey) -> Option<VocabRef>,
     ) -> f32 {
         match self {
             Boundary::Linear {
@@ -104,15 +126,15 @@ impl Boundary {
             } => {
                 let mut score = intercept[1];
                 for key in feat_keys {
-                    if let Some(id) = vocab_find(key)
-                        && (id as usize) < data.len()
+                    if let Some(vr) = resolve(key)
+                        && (vr.feature_id as usize) < data.len()
                     {
-                        score += (data[id as usize] as f32) * scale;
+                        score += (data[vr.feature_id as usize] as f32) * scale;
                     }
                 }
                 score
             }
-            Boundary::Tree(tree) => tree.compute_score(feat_keys),
+            Boundary::Tree(tree) => tree.compute_score(feat_keys, resolve),
         }
     }
 }
@@ -123,37 +145,43 @@ impl FloatBoundary {
     pub(crate) fn compute_score(
         &self,
         feat_keys: &[FeatureKey],
-        vocab_find: impl Fn(&FeatureKey) -> Option<u32>,
+        resolve: impl Fn(&FeatureKey) -> Option<VocabRef>,
     ) -> f32 {
         match self {
             FloatBoundary::Linear { data, intercept } => {
                 let mut score = intercept[1];
                 for key in feat_keys {
-                    if let Some(id) = vocab_find(key)
-                        && (id as usize) < data.len()
+                    if let Some(vr) = resolve(key)
+                        && (vr.feature_id as usize) < data.len()
                     {
-                        score += data[id as usize];
+                        score += data[vr.feature_id as usize];
                     }
                 }
                 score
             }
-            FloatBoundary::Tree(tree) => tree.compute_score(feat_keys),
+            FloatBoundary::Tree(tree) => tree.compute_score(feat_keys, resolve),
         }
     }
 }
 
 impl TreeEnsemble {
     /// 全木のリーフ値の合計（追加の intercept はない）。
-    fn compute_score(&self, feat_keys: &[FeatureKey]) -> f32 {
+    ///
+    /// アクティブな各特徴量キーを `resolve` で統合語彙に引き、カテゴリカル
+    /// `(column, code)` を持つものだけを列コード表に反映する。
+    fn compute_score(
+        &self,
+        feat_keys: &[FeatureKey],
+        resolve: impl Fn(&FeatureKey) -> Option<VocabRef>,
+    ) -> f32 {
         // 列ごとのコードを解決する。同じ列に複数の FeatureKey が対応することは
-        // 通常ないが、あれば最後に見つかったものが勝つ（vocab_find と同じ扱い）。
+        // 通常ないが、あれば最後に見つかったものが勝つ。
         let mut col_codes = [None::<u32>; MAX_BOUNDARY_CAT_COLUMNS];
         for key in feat_keys {
-            if let Ok(idx) = self.cat_vocab.binary_search_by(|entry| entry.0.cmp(key)) {
-                let (_, column, code) = self.cat_vocab[idx];
-                if let Some(slot) = col_codes.get_mut(column as usize) {
-                    *slot = Some(code);
-                }
+            if let Some((column, code)) = resolve(key).and_then(|vr| vr.cat)
+                && let Some(slot) = col_codes.get_mut(column as usize)
+            {
+                *slot = Some(code);
             }
         }
         self.trees
@@ -245,20 +273,10 @@ fn read_intercept<R: Read>(reader: &mut R, path: &Path) -> Result<[f32; 2]> {
     ])
 }
 
-/// カテゴリカル語彙テーブルを読む。戻り値: `(語彙表, n_cat_columns)`。
-fn parse_cat_vocab<R: Read>(
-    reader: &mut R,
-    path: &Path,
-) -> Result<(Vec<(FeatureKey, u32, u32)>, u32)> {
+fn parse_tree_ensemble<R: Read>(reader: &mut R, path: &Path) -> Result<TreeEnsemble> {
+    // version 0x07: 木のアンサンブルは cat_vocab を持たず、n_columns と木だけ。
+    // カテゴリカル `(column, code)` は統合語彙テーブル（loader.rs の read_vocab）が持つ。
     let n_columns = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-    let n_entries = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-    if n_entries > MAX_REASONABLE_COUNT {
-        return Err(Error::CorruptModel {
-            reason: format!(
-                "境界モデルのカテゴリカル語彙エントリ数={n_entries}が大きすぎます（上限 {MAX_REASONABLE_COUNT}）"
-            ),
-        });
-    }
     if n_columns as usize > MAX_BOUNDARY_CAT_COLUMNS {
         return Err(Error::CorruptModel {
             reason: format!(
@@ -266,29 +284,6 @@ fn parse_cat_vocab<R: Read>(
             ),
         });
     }
-
-    let mut cat_vocab = Vec::with_capacity(n_entries as usize);
-    for _ in 0..n_entries {
-        let key = read_feature_key(reader, path)?;
-        let column = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-        let code = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-        if column >= n_columns {
-            return Err(Error::CorruptModel {
-                reason: format!(
-                    "境界モデルのcolumn_index={column}がn_cat_columns={n_columns}以上です"
-                ),
-            });
-        }
-        cat_vocab.push((key, column, code));
-    }
-    // FeatureKey でソートし、後で binary_search できるようにする
-    // （読みモデル語彙テーブルの後処理ソートと同じ理由）。
-    cat_vocab.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok((cat_vocab, n_columns))
-}
-
-fn parse_tree_ensemble<R: Read>(reader: &mut R, path: &Path) -> Result<TreeEnsemble> {
-    let (cat_vocab, n_columns) = parse_cat_vocab(reader, path)?;
 
     let n_trees = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     if n_trees > MAX_REASONABLE_COUNT {
@@ -302,7 +297,7 @@ fn parse_tree_ensemble<R: Read>(reader: &mut R, path: &Path) -> Result<TreeEnsem
     for _ in 0..n_trees {
         trees.push(parse_tree_node(reader, path, n_columns, 0)?);
     }
-    Ok(TreeEnsemble { cat_vocab, trees })
+    Ok(TreeEnsemble { trees })
 }
 
 fn parse_tree_node<R: Read>(
@@ -402,28 +397,42 @@ mod tests {
         TreeNode::Leaf { value }
     }
 
-    fn ensemble(mut cat_vocab: Vec<(FeatureKey, u32, u32)>, trees: Vec<TreeNode>) -> TreeEnsemble {
-        // 本番の parse_cat_vocab と同じく、binary_search できるよう FeatureKey でソートする。
-        cat_vocab.sort_by(|a, b| a.0.cmp(&b.0));
-        TreeEnsemble { cat_vocab, trees }
+    fn tree(trees: Vec<TreeNode>) -> TreeEnsemble {
+        TreeEnsemble { trees }
+    }
+
+    /// テスト用: `(FeatureKey, column, code)` の一覧から、本番の統合語彙が返すのと
+    /// 同じ `resolve` クロージャを作る（feature_id は木のスコアでは使わないのでダミー）。
+    fn resolver(
+        cat_vocab: Vec<(FeatureKey, u32, u32)>,
+    ) -> impl Fn(&FeatureKey) -> Option<VocabRef> {
+        move |k: &FeatureKey| {
+            cat_vocab
+                .iter()
+                .find(|(key, _, _)| key == k)
+                .map(|&(_, col, code)| VocabRef {
+                    feature_id: 0,
+                    cat: Some((col, code)),
+                })
+        }
     }
 
     #[test]
     fn tree_score_sums_across_trees() {
-        let vocab = vec![(
+        let r = resolver(vec![(
             FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji),
             0,
             7,
-        )];
-        let t = ensemble(vocab, vec![leaf(0.5), leaf(-0.25), leaf(1.0)]);
+        )]);
+        let t = tree(vec![leaf(0.5), leaf(-0.25), leaf(1.0)]);
         let keys = vec![FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji)];
-        assert!((t.compute_score(&keys) - 1.25).abs() < 1e-6);
+        assert!((t.compute_score(&keys, &r) - 1.25).abs() < 1e-6);
     }
 
     #[test]
     fn tree_split_routes_by_category_membership() {
         // 列0の値が {7, 9} なら左(leaf=1.0)、それ以外なら右(leaf=-1.0)。
-        let vocab = vec![
+        let r = resolver(vec![
             (
                 FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji),
                 0,
@@ -439,80 +448,76 @@ mod tests {
                 0,
                 99,
             ),
-        ];
-        let split = TreeNode::Split {
+        ]);
+        let t = tree(vec![TreeNode::Split {
             column: 0,
             default_left: false,
             cats: vec![7, 9],
             left: Box::new(leaf(1.0)),
             right: Box::new(leaf(-1.0)),
-        };
-        let t = ensemble(vocab, vec![split]);
+        }]);
 
         let kanji = vec![FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji)];
-        assert_eq!(t.compute_score(&kanji), 1.0);
+        assert_eq!(t.compute_score(&kanji, &r), 1.0);
 
         let katakana = vec![FeatureKey::type_1(
             FeatureType::TypeSelf,
             CharType::Katakana,
         )];
-        assert_eq!(t.compute_score(&katakana), -1.0);
+        assert_eq!(t.compute_score(&katakana, &r), -1.0);
     }
 
     #[test]
     fn tree_split_missing_feature_uses_default_left() {
-        let vocab = vec![(
+        let r = resolver(vec![(
             FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji),
             0,
             7,
-        )];
+        )]);
 
-        let default_left_true = TreeNode::Split {
+        let t = tree(vec![TreeNode::Split {
             column: 0,
             default_left: true,
             cats: vec![7],
             left: Box::new(leaf(1.0)),
             right: Box::new(leaf(-1.0)),
-        };
-        let t = ensemble(vocab.clone(), vec![default_left_true]);
+        }]);
         // 空 = この列に対応する FeatureKey がこの位置に存在しない（欠損）。
-        assert_eq!(t.compute_score(&[]), 1.0);
+        assert_eq!(t.compute_score(&[], &r), 1.0);
 
-        let default_left_false = TreeNode::Split {
+        let t = tree(vec![TreeNode::Split {
             column: 0,
             default_left: false,
             cats: vec![7],
             left: Box::new(leaf(1.0)),
             right: Box::new(leaf(-1.0)),
-        };
-        let t = ensemble(vocab, vec![default_left_false]);
-        assert_eq!(t.compute_score(&[]), -1.0);
+        }]);
+        assert_eq!(t.compute_score(&[], &r), -1.0);
     }
 
     #[test]
     fn tree_score_unknown_category_code_treated_as_missing() {
-        // 訓練時に見なかった値（cat_vocabに載っていない FeatureKey）は
-        // vocab_find が None を返すのと同じ扱い＝欠損として default_left に従う。
-        let vocab = vec![(
+        // 訓練時に見なかった値（統合語彙に載っていない FeatureKey）は
+        // resolve が None を返すのと同じ扱い＝欠損として default_left に従う。
+        let r = resolver(vec![(
             FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji),
             0,
             7,
-        )];
-        let split = TreeNode::Split {
+        )]);
+        let t = tree(vec![TreeNode::Split {
             column: 0,
             default_left: true,
             cats: vec![7],
             left: Box::new(leaf(1.0)),
             right: Box::new(leaf(-1.0)),
-        };
-        let t = ensemble(vocab, vec![split]);
+        }]);
 
         // Hiragana は語彙表に無い。
         let unknown = vec![FeatureKey::type_1(
             FeatureType::TypeSelf,
             CharType::Hiragana,
         )];
-        assert_eq!(t.compute_score(&unknown), 1.0);
+        assert_eq!(t.compute_score(&unknown, &r), 1.0);
     }
 
     #[test]
@@ -528,13 +533,17 @@ mod tests {
         ];
         // key0 -> id 0 (10*0.5=5.0), key1 -> id 2 (30*0.5=15.0), intercept[1]=-0.2
         let score = b.compute_score(&keys, |k| {
-            if *k == keys[0] {
+            let id = if *k == keys[0] {
                 Some(0)
             } else if *k == keys[1] {
                 Some(2)
             } else {
                 None
-            }
+            };
+            id.map(|feature_id| VocabRef {
+                feature_id,
+                cat: None,
+            })
         });
         assert!((score - (5.0 + 15.0 - 0.2)).abs() < 1e-6);
     }

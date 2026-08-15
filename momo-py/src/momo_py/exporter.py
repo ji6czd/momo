@@ -6,17 +6,21 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 
 [ファイルヘッダ]          16 bytes
   magic        : uint8[4]   "MOMO"
-  version      : uint8      0x06
-  _reserved    : uint8[3]   0x00 x3
+  version      : uint8      0x07
+  flags        : uint8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
+  _reserved    : uint8[2]   0x00 x2
   n_classes    : uint32     読みラベル数
   n_features   : uint32     特徴量次元数（語彙サイズ）
 
-[語彙テーブル]            n_features エントリ
+[統合語彙テーブル]        n_features エントリ（feature_id 昇順 → feature_id は行番号で暗黙）
   feature_type : uint8      FeatureType 値
   chartype[N]  : uint8 × N  N = chartype_count(feature_type)
   char32[M]    : uint32 × M M = char32_count(feature_type)
   uint8_val    : uint8      is_uint8_payload(feature_type) のときのみ
-  feature_id   : uint32     DictVectorizer の feature_id（ソート用インデックス）
+  （flags bit0 のときのみ、各エントリ末尾に:）
+  cat_column   : uint32     GBDT カテゴリカル列（0xFFFFFFFF = 列なし。LightGBM の
+                            split_feature と一致する 0-based 列）
+  cat_code     : uint32     列内での序数コード（momo_py.categorical の vocab コード）
 
 [読みラベルテーブル]      n_classes エントリ
   len          : uint8      UTF-8バイト長
@@ -41,17 +45,10 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
     intercept    : float32 × 2         （クラス0, クラス1）
 
   --- algo_tag == 0x01 (木。.mbm/.mbmf で完全に同一バイト列、量子化しない) ---
-    [カテゴリカル語彙テーブル]
-      n_cat_columns      : uint32   カテゴリカル列数（momo_py.categorical の列数）
-      n_cat_vocab_entries: uint32   全列合計のエントリ数
-      以下 n_cat_vocab_entries エントリ（語彙テーブルと同じペイロード方式を列ごとに使う）:
-        feature_type : uint8
-        chartype[N]  : uint8 × N   N = chartype_count(feature_type)
-        char32[M]    : uint32 × M  M = char32_count(feature_type)
-        uint8_val    : uint8       is_uint8_payload(feature_type) のときのみ
-        column_index : uint32      この値が属するカテゴリカル列（0-based。LightGBM の
-                                    split_feature と一致する）
-        code         : uint32      列内での序数コード（momo_py.categorical の vocab コード）
+    n_cat_columns : uint32   カテゴリカル列数（momo_py.categorical の列数）
+    （version 0x07 で cat_vocab を統合語彙テーブルに移動。境界セクションは列数と木だけ。
+      カテゴリカル (column, code) は統合語彙の各エントリ末尾が持つ。前提として
+      カテゴリカルキーは読み語彙の部分集合であること。exporter が突合して保証する）
     [木のアンサンブル]
       n_trees : uint32
       以下 n_trees 本、各木は先行順（深さ優先）の再帰的ノード列（長さプレフィックス不要）:
@@ -118,12 +115,20 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
         GBDT（LightGBM、カテゴリカル特徴量）の木のアンサンブルを書き出せるように
         変更。線形の0x05までのバイト列はalgo_tag=0x00として据え置き。
         0x05 ファイルは読み込み時にエラーになるため再エクスポートすること。
+  0x07: 語彙を1枚に統合。0x06 までは GBDT の cat_vocab が読み語彙とほぼ同一のキー集合を
+        丸ごと二重に格納していた（実測で語彙2枚がファイルの約6割）。読み語彙の各エントリに
+        カテゴリカル (column, code) を吸収し（ヘッダ flags bit0）、feature_id を行番号で
+        暗黙化して 4 バイト削減。GBDT 境界セクションは n_columns と木だけになった。
+        実測でファイル・ロード時ピークともに約 1/3 削減（推論結果は不変）。前提は
+        「カテゴリカルキーは読み語彙の部分集合」（exporter が突合して保証）。
+        0x06 ファイルは読み込み時にエラーになるため再エクスポートすること。
 
 .mbmf フォーマット（量子化前の float32 サイドカー）
 ====================================================
 
 `.mbm` と量子化前の状態を比較するための補助フォーマット。セクション構成は
-`.mbm` と完全に同一だが、以下の2セクションだけ量子化せず float32 のまま格納する
+`.mbm` と完全に同一（ヘッダ flags・統合語彙の feature_id 暗黙化・GBDT カテゴリカルの
+埋め込みも同じ）だが、以下の2セクションだけ量子化せず float32 のまま格納する
 （`quant_scale` は書かない）:
 
   [読みモデル重み（CSC・float32・量子化なし）]
@@ -168,11 +173,18 @@ from .utils import parse_single_char_dict_tsv
 # `.mbm` と `.mbmf` はセクション構成を共通に保つ設計なので、バージョン番号も
 # 共有する（採番を分けると「どちらの 0x02 か」を常に意識する羽目になる）。
 # 区別は magic だけで行う。
-VERSION = 0x06
+VERSION = 0x07
 
 # 境界モデルセクションの algo_tag（version 0x06 で追加）
 BOUNDARY_ALGO_LINEAR = 0x00
 BOUNDARY_ALGO_TREE = 0x01
+
+# ヘッダ flags バイト（reserved[0]、version 0x07 で追加）。Rust 側 loader.rs の
+# FLAG_VOCAB_HAS_CAT と一致。bit0 = 統合語彙が GBDT カテゴリカル (column, code) を持つ。
+FLAG_VOCAB_HAS_CAT = 0x01
+
+# カテゴリカル列なしの番兵（Rust 側 loader.rs の NO_CAT_COLUMN と一致）。
+NO_CAT_COLUMN = 0xFFFFFFFF
 
 MAGIC_MBM = b"MOMO"
 MAGIC_MBMF = b"MBMF"
@@ -608,39 +620,6 @@ def _load_bundle(zip_path: str) -> Tuple[Any, list, str]:
     return bundle, name_entries, single_char_text
 
 
-def _build_boundary_cat_vocab_bytes(cat_names: list, cat_vocabs: dict) -> bytes:
-    """GBDT境界モデルのカテゴリカル列語彙表（値文字列→コード）をバイト列に変換する。
-
-    列の値は読みモデル語彙テーブルの値と同じ種類（文字・CharType・run長バケット等）
-    なので、既存の `parse_feature_key` / `_build_vocab_bytes` と同じペイロード方式を
-    列ごとに再利用する。ペイロードなし系（kanji_pos_first）は "name=value" の形では
-    解析できないため、素の特徴量名にフォールバックする。
-    """
-    entries = bytearray()
-    n_entries = 0
-    for col_idx, name in enumerate(cat_names):
-        vocab = cat_vocabs[name]
-        for value_str, code in vocab.items():
-            try:
-                ft, ct_vals, cp_vals, u8_val = parse_feature_key(f"{name}={value_str}")
-            except ValueError:
-                ft, ct_vals, cp_vals, u8_val = parse_feature_key(name)
-            entries.append(ft)
-            for ct in ct_vals:
-                entries.append(ct)
-            for cp in cp_vals:
-                entries += struct.pack("<I", cp)
-            if u8_val is not None:
-                entries.append(u8_val)
-            entries += struct.pack("<II", col_idx, code)
-            n_entries += 1
-
-    out = bytearray()
-    out += struct.pack("<II", len(cat_names), n_entries)
-    out += entries
-    return bytes(out)
-
-
 def _build_tree_node_bytes(node: dict) -> bytes:
     """LightGBMの木構造（dump_model()の1ノード）を再帰的にバイト列へ変換する。"""
     if "leaf_value" in node:
@@ -709,9 +688,11 @@ def _build_boundary_bytes(bundle: Any, quantize: bool) -> bytes:
         return bytes(out)
 
     if algo == "gbdt":
+        # version 0x07: cat_vocab は統合語彙テーブルに吸収したので、境界セクションは
+        # n_columns と木だけ。カテゴリカル (column, code) は _build_vocab_bytes 側が書く。
         out = bytearray()
         out.append(BOUNDARY_ALGO_TREE)
-        out += _build_boundary_cat_vocab_bytes(bundle.boundary_cat_names, bundle.boundary_cat_vocabs)
+        out += struct.pack("<I", len(bundle.boundary_cat_names))  # n_columns
         out += _build_boundary_tree_bytes(bundle.model_boundary.booster_)
         return bytes(out)
 
@@ -723,15 +704,79 @@ def _build_boundary_bytes(bundle: Any, quantize: bool) -> bytes:
 # =====================================================================
 
 
-def _build_vocab_bytes(vocab: dict) -> bytes:
-    """DictVectorizer の vocabulary_ ({key_str: feature_id}) を、
-    feature_id 順に並べた語彙テーブルのバイト列に変換する。"""
+def _canon_feature_key(key: str):
+    """特徴量キー文字列を正準タプル (ft, ct_tuple, cp_tuple, u8) に落とす。
+
+    読み語彙のキー文字列（例 "char_s=漢"）とカテゴリカル語彙のキー文字列
+    （"{name}={value}"）は生の文字列が微妙に違っても、正準化すると同じキーは
+    一致する（Rust 側の FeatureKey と同じ比較基準）。cat ⊆ 読み の突合に使う。
+    """
+    ft, ct_vals, cp_vals, u8_val = parse_feature_key(key)
+    return (ft, tuple(ct_vals), tuple(cp_vals), u8_val)
+
+
+def _build_cat_by_feature_id(vocab: dict, cat_names: list, cat_vocabs: dict) -> dict:
+    """GBDT カテゴリカル `(column, code)` を feature_id ごとに引く辞書を作る。
+
+    統合語彙テーブル（version 0x07）は**カテゴリカルキーが読み語彙の部分集合**である
+    ことを前提とする。読み語彙に無いカテゴリカルキーがあれば、統合語彙に居場所が
+    ないので `ValueError` で明示的に失敗させる（黙って欠損扱いにすると境界判定が
+    静かに壊れるため）。
+    """
+    key_to_id = {}
+    for key_str, fid in vocab.items():
+        key_to_id[_canon_feature_key(key_str)] = fid
+
+    cat_by_id: dict = {}
+    for col_idx, name in enumerate(cat_names):
+        for value_str, code in cat_vocabs[name].items():
+            try:
+                canon = _canon_feature_key(f"{name}={value_str}")
+            except (ValueError, KeyError):
+                canon = _canon_feature_key(name)
+            fid = key_to_id.get(canon)
+            if fid is None:
+                raise ValueError(
+                    f"境界モデルのカテゴリカルキー {name}={value_str!r} が読み語彙に"
+                    "存在しません。統合語彙（version 0x07）はカテゴリカルキーが読み語彙の"
+                    "部分集合であることを前提とします（読み・境界で特徴量抽出を"
+                    "共有しているか確認してください）。"
+                )
+            cat_by_id[fid] = (col_idx, code)
+    return cat_by_id
+
+
+def _unified_cat(bundle: Any, vocab: dict, boundary_algo: str) -> Tuple[dict | None, int]:
+    """統合語彙に埋め込むカテゴリカル写像とヘッダ flags を決める。
+
+    GBDT 境界のときだけ `({feature_id: (column, code)}, FLAG_VOCAB_HAS_CAT)` を返す。
+    線形境界のときは `(None, 0x00)`（統合語彙にカテゴリカルを書かない）。
+    """
+    if boundary_algo == "gbdt":
+        cat_by_id = _build_cat_by_feature_id(
+            vocab, bundle.boundary_cat_names, bundle.boundary_cat_vocabs
+        )
+        return cat_by_id, FLAG_VOCAB_HAS_CAT
+    return None, 0x00
+
+
+def _build_vocab_bytes(vocab: dict, cat_by_id: dict | None = None) -> bytes:
+    """DictVectorizer の vocabulary_ ({key_str: feature_id}) を統合語彙テーブル
+    （version 0x07）のバイト列に変換する。
+
+    feature_id はファイル内の並び順（0..n_features）で暗黙に決まるため書き出さない
+    （CSC 重み行列の列インデックスと一致させるため feature_id 昇順で格納する）。
+
+    `cat_by_id`（GBDT 境界のとき、`{feature_id: (column, code)}`）を渡すと各エントリ
+    末尾に `(column, code)` を書く。カテゴリカル列を持たない feature_id は番兵で埋める。
+    None（線形境界）のときは書かない。ヘッダ flags bit0 と対応させること。
+    """
     n_features = len(vocab)
     id_to_key = {v: k for k, v in vocab.items()}
     sorted_keys = [id_to_key[i] for i in range(n_features)]
 
     vocab_bytes = bytearray()
-    for key in sorted_keys:
+    for fid, key in enumerate(sorted_keys):
         try:
             ft, ct_vals, cp_vals, u8_val = parse_feature_key(key)
         except (ValueError, KeyError) as e:
@@ -748,7 +793,9 @@ def _build_vocab_bytes(vocab: dict) -> bytes:
             vocab_bytes += struct.pack("<I", cp)  # uint32 LE
         if u8_val is not None:
             vocab_bytes.append(u8_val)
-        vocab_bytes += struct.pack("<I", vocab[key])  # feature_id
+        if cat_by_id is not None:
+            column, code = cat_by_id.get(fid, (NO_CAT_COLUMN, 0))
+            vocab_bytes += struct.pack("<II", column, code)
     return bytes(vocab_bytes)
 
 
@@ -852,8 +899,11 @@ def export(zip_path: str, out_path: str) -> None:
     print(f"   クラス数    : {n_classes}")
     print(f"   特徴量次元数: {n_features}")
 
-    print("🔨 語彙テーブル変換中...")
-    vocab_bytes = _build_vocab_bytes(vocab)
+    # GBDT 境界のときだけ、カテゴリカル (column, code) を統合語彙に埋め込む。
+    cat_by_id, flags = _unified_cat(bundle, vocab, boundary_algo)
+
+    print("🔨 統合語彙テーブル変換中...")
+    vocab_bytes = _build_vocab_bytes(vocab, cat_by_id)
 
     print("🔨 読みラベルテーブル変換中...")
     label_bytes = _build_label_bytes(read_classes)
@@ -882,15 +932,13 @@ def export(zip_path: str, out_path: str) -> None:
     print(f"🔨 単一文字辞書テーブル変換中... ({len(single_char_dict)} エントリ)")
     single_char_dict_bytes = _build_single_char_dict_bytes(single_char_dict)
 
-    # version 0x04: 人名辞書テーブルにユニット別読みを追加
-    #               （アルファ期間中に単一文字辞書テーブルも追加、番号据え置き）
     header = struct.pack(
         "<4sBBBBII",
         MAGIC_MBM,
         VERSION,
+        flags,  # reserved[0] = flags
         0x00,
-        0x00,
-        0x00,  # reserved
+        0x00,  # reserved[1..2]
         n_classes,
         n_features,
     )
@@ -947,8 +995,11 @@ def export_float(zip_path: str, out_path: str) -> None:
     print(f"   クラス数    : {n_classes}")
     print(f"   特徴量次元数: {n_features}")
 
-    print("🔨 語彙テーブル変換中...")
-    vocab_bytes = _build_vocab_bytes(vocab)
+    # .mbm と同一の統合語彙（feature_id 暗黙 + 任意のカテゴリカル）。
+    cat_by_id, flags = _unified_cat(bundle, vocab, boundary_algo)
+
+    print("🔨 統合語彙テーブル変換中...")
+    vocab_bytes = _build_vocab_bytes(vocab, cat_by_id)
 
     print("🔨 読みラベルテーブル変換中...")
     label_bytes = _build_label_bytes(read_classes)
@@ -979,9 +1030,9 @@ def export_float(zip_path: str, out_path: str) -> None:
         "<4sBBBBII",
         MAGIC_MBMF,
         VERSION,
+        flags,  # reserved[0] = flags
         0x00,
-        0x00,
-        0x00,  # reserved
+        0x00,  # reserved[1..2]
         n_classes,
         n_features,
     )

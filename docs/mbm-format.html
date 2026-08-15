@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inside the .mbm File</title>
+<style>
+  :root {
+    --ground: #eef1f6;
+    --surface: #ffffff;
+    --surface-2: #f6f8fc;
+    --ink: #161a22;
+    --ink-soft: #586274;
+    --ink-faint: #8b94a4;
+    --line: #dbe1ec;
+    --line-soft: #e7ecf4;
+    --accent: #3a56e0;
+    --accent-soft: #eaeeff;
+    --role-read: #3a56e0;
+    --role-bound: #0d8a99;
+    --role-dict: #7c53d6;
+    --role-struct: #7a8494;
+    --read-tint: #f2f4ff;
+    --shadow: 0 1px 2px rgba(20,26,40,.05), 0 8px 24px -16px rgba(20,26,40,.22);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e1219;
+      --surface: #161b24;
+      --surface-2: #1b212c;
+      --ink: #e7ebf3;
+      --ink-soft: #a2acbe;
+      --ink-faint: #6c7688;
+      --line: #29313e;
+      --line-soft: #222a35;
+      --accent: #7f96ff;
+      --accent-soft: #1c2540;
+      --role-read: #7f96ff;
+      --role-bound: #2bbccb;
+      --role-dict: #b195f5;
+      --role-struct: #8894a6;
+      --read-tint: #171f33;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -18px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1219;
+    --surface: #161b24;
+    --surface-2: #1b212c;
+    --ink: #e7ebf3;
+    --ink-soft: #a2acbe;
+    --ink-faint: #6c7688;
+    --line: #29313e;
+    --line-soft: #222a35;
+    --accent: #7f96ff;
+    --accent-soft: #1c2540;
+    --role-read: #7f96ff;
+    --role-bound: #2bbccb;
+    --role-dict: #b195f5;
+    --role-struct: #8894a6;
+    --read-tint: #171f33;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -18px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: clamp(1.4rem, 4vw, 3.5rem) clamp(1rem, 4vw, 2rem) 4rem;
+  }
+
+  /* ---- header ---- */
+  .id-line {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .04em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+  .id-line .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+  h1 {
+    font-size: clamp(2rem, 6vw, 2.9rem);
+    line-height: 1.05;
+    letter-spacing: -.02em;
+    margin: .5rem 0 .1rem;
+    text-wrap: balance;
+    font-weight: 760;
+  }
+  h1 .mono { font-family: var(--mono); font-weight: 640; letter-spacing: -.03em; }
+  .lede {
+    font-size: 1.06rem;
+    color: var(--ink-soft);
+    max-width: 60ch;
+    margin: .35rem 0 1.6rem;
+    text-wrap: pretty;
+  }
+
+  /* ---- identity strip ---- */
+  .strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    margin-bottom: 1.5rem;
+  }
+  .strip > div {
+    flex: 1 1 120px;
+    padding: .8rem 1.1rem;
+    border-right: 1px solid var(--line-soft);
+  }
+  .strip > div:last-child { border-right: 0; }
+  .strip dt {
+    font-size: .66rem;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--ink-faint);
+    margin-bottom: .25rem;
+  }
+  .strip dd {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 1.02rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* ---- reading guide ---- */
+  .guide {
+    display: flex;
+    gap: .75rem;
+    align-items: flex-start;
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    border-radius: 12px;
+    padding: .9rem 1.1rem;
+    margin-bottom: 1.9rem;
+    font-size: .92rem;
+    color: var(--ink);
+  }
+  .guide b { color: var(--accent); }
+  .guide .arrow { font-family: var(--mono); color: var(--accent); font-weight: 700; }
+
+  /* ---- legend ---- */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.2rem;
+    margin-bottom: 2rem;
+    padding-bottom: 1.6rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .legend .item { display: flex; align-items: baseline; gap: .5rem; font-size: .86rem; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 3px; transform: translateY(1px); }
+  .legend .name { font-weight: 640; }
+  .legend .desc { color: var(--ink-soft); }
+
+  /* ---- section cards ---- */
+  .stack { display: flex; flex-direction: column; gap: 1rem; }
+  .sec {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--rail, var(--role-struct));
+    border-radius: 10px;
+    padding: 1.05rem 1.2rem 1.15rem;
+    box-shadow: var(--shadow);
+  }
+  .sec.star { background: var(--read-tint); border-color: color-mix(in srgb, var(--role-read) 30%, var(--line)); }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: .5rem .7rem;
+    margin-bottom: .2rem;
+  }
+  .idx {
+    font-family: var(--mono);
+    font-size: .74rem;
+    font-weight: 700;
+    color: var(--rail, var(--role-struct));
+    background: color-mix(in srgb, var(--rail, var(--role-struct)) 12%, transparent);
+    padding: .1rem .4rem;
+    border-radius: 5px;
+    letter-spacing: .02em;
+  }
+  .sec-title { font-size: 1.08rem; font-weight: 680; letter-spacing: -.01em; }
+  .sec-title .en { color: var(--ink-faint); font-weight: 500; font-size: .82rem; margin-left: .1rem; }
+  .tag {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .02em;
+    color: var(--ink-soft);
+    background: var(--surface-2);
+    border: 1px solid var(--line-soft);
+    padding: .12rem .5rem;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .purpose { color: var(--ink-soft); font-size: .92rem; margin: .15rem 0 .8rem; text-wrap: pretty; }
+
+  .fields {
+    display: grid;
+    grid-template-columns: max-content max-content 1fr;
+    gap: .28rem 1rem;
+    font-size: .82rem;
+    overflow-x: auto;
+    padding-bottom: .1rem;
+  }
+  .fields .fname { font-family: var(--mono); font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .fields .ftype { font-family: var(--mono); color: var(--role-bound); white-space: nowrap; }
+  .sec[style*="role-read"] .ftype, .sec.star .ftype { color: var(--role-read); }
+  .fields .fnote { color: var(--ink-soft); }
+  .fields .fnote em { font-style: normal; color: var(--ink-faint); }
+  .fields .fnote .hl { color: var(--accent); font-weight: 600; font-family: var(--mono); font-size: .95em; }
+  .subhead {
+    grid-column: 1 / -1;
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--ink-faint);
+    margin-top: .5rem;
+    padding-top: .45rem;
+    border-top: 1px dashed var(--line);
+  }
+  .subhead:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
+  /* ---- footer note ---- */
+  .payoff {
+    margin-top: 2.2rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1.3rem 1.4rem;
+    box-shadow: var(--shadow);
+  }
+  .payoff h2 { font-size: 1.12rem; margin: 0 0 .6rem; letter-spacing: -.01em; }
+  .bars { display: flex; flex-direction: column; gap: .5rem; margin: .9rem 0 1.1rem; }
+  .bar { display: grid; grid-template-columns: 12.5rem 1fr auto; align-items: center; gap: .7rem; font-size: .82rem; }
+  .bar .bl { color: var(--ink); white-space: nowrap; }
+  .bar .bl em { font-style: normal; font-family: var(--mono); font-size: .82em; color: var(--ink-faint); letter-spacing: .02em; }
+  .bar .bt { height: 12px; border-radius: 3px; background: var(--c); width: var(--pct); min-width: 2px; }
+  .bar .bv { font-family: var(--mono); font-size: .78rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; text-align: right; }
+  @media (max-width: 520px) {
+    .bar { grid-template-columns: 1fr auto; }
+    .bar .bt { grid-column: 1 / -1; order: 3; }
+  }
+  .payoff p { margin: .5rem 0; color: var(--ink-soft); font-size: .93rem; }
+  .payoff p .k { font-family: var(--mono); color: var(--ink); font-size: .9em; }
+  .payoff .accent { color: var(--accent); font-weight: 600; }
+  .footnote {
+    margin-top: 1.6rem;
+    font-size: .78rem;
+    color: var(--ink-faint);
+    text-align: center;
+    font-family: var(--mono);
+  }
+  @media (max-width: 460px) {
+    .fields { grid-template-columns: max-content 1fr; }
+    .fields .fnote { grid-column: 1 / -1; padding-left: 0; margin-top: -.15rem; padding-bottom: .2rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="id-line"><span class="dot"></span> MOMO&nbsp;·&nbsp;quantized model bundle</div>
+  <h1>Inside the <span class="mono">.mbm</span> file</h1>
+  <p class="lede">A single binary blob holds everything the Rust engine needs to turn Japanese text into Braille — no Python, no external tables. Here is what those bytes are, in the exact order the loader reads them.</p>
+
+  <dl class="strip">
+    <div><dt>Magic</dt><dd>MOMO</dd></div>
+    <div><dt>Version</dt><dd>0x07</dd></div>
+    <div><dt>Byte order</dt><dd>little-endian</dd></div>
+    <div><dt>Reader</dt><dd>streaming</dd></div>
+  </dl>
+
+  <div class="guide">
+    <span class="arrow">↳</span>
+    <div>The file is read <b>top to bottom in one pass</b>. Only the 16-byte header has a fixed size; every section after it is sized from <b>n_classes</b> (kana labels) and <b>n_features</b> (feature dimensions) read out of that header. Nothing can be reordered.</div>
+  </div>
+
+  <div class="legend">
+    <div class="item"><span class="swatch" style="background:var(--role-read)"></span><span class="name">読みモデル</span><span class="desc">predicts the kana for each character</span></div>
+    <div class="item"><span class="swatch" style="background:var(--role-bound)"></span><span class="name">境界モデル</span><span class="desc">decides where spaces (分かち書き) go</span></div>
+    <div class="item"><span class="swatch" style="background:var(--role-dict)"></span><span class="name">辞書</span><span class="desc">constrain readings &amp; fallbacks</span></div>
+  </div>
+
+  <div class="stack">
+
+    <!-- header -->
+    <section class="sec" style="--rail:var(--role-struct)">
+      <div class="sec-head">
+        <span class="idx">§0</span>
+        <span class="sec-title">ファイルヘッダ <span class="en">File header</span></span>
+        <span class="tag">16 bytes · fixed</span>
+      </div>
+      <p class="purpose">Identifies the format and carries the two dimensions that size everything below.</p>
+      <div class="fields">
+        <span class="fname">magic</span><span class="ftype">u8[4]</span><span class="fnote"><span class="hl">"MOMO"</span> — distinguishes it from the <span class="hl">.mbmf</span> float sidecar</span>
+        <span class="fname">version</span><span class="ftype">u8</span><span class="fnote"><span class="hl">0x07</span>. Older versions are rejected, never silently misread</span>
+        <span class="fname">flags</span><span class="ftype">u8</span><span class="fnote">bit0 = the vocab carries GBDT categorical <span class="hl">(column, code)</span></span>
+        <span class="fname">_reserved</span><span class="ftype">u8[2]</span><span class="fnote"><em>padding to a 16-byte header</em></span>
+        <span class="fname">n_classes</span><span class="ftype">u32</span><span class="fnote">number of kana reading labels (≈ 1,587)</span>
+        <span class="fname">n_features</span><span class="ftype">u32</span><span class="fnote">feature-vector dimensions (grows with the context window)</span>
+      </div>
+    </section>
+
+    <!-- vocab -->
+    <section class="sec" style="--rail:var(--role-read)">
+      <div class="sec-head">
+        <span class="idx">§1</span>
+        <span class="sec-title">統合語彙テーブル <span class="en">Unified vocabulary</span></span>
+        <span class="tag">× n_features</span>
+      </div>
+      <p class="purpose">Maps each feature key to everything the models need for it: the reading/linear <span class="k">feature_id</span> and, for GBDT, the categorical <span class="k">(column, code)</span>. One binary search serves all three consumers. <em>feature_id is implicit — the row order is the id</em>, so it isn't stored.</p>
+      <div class="fields">
+        <span class="subhead">one entry per feature, in feature_id order (variable length)</span>
+        <span class="fname">feature_type</span><span class="ftype">u8</span><span class="fnote">selects how many payload fields follow</span>
+        <span class="fname">chartype[N]</span><span class="ftype">u8×N</span><span class="fnote"><em>N depends on feature_type</em></span>
+        <span class="fname">char32[M]</span><span class="ftype">u32×M</span><span class="fnote"><em>code points, M depends on feature_type</em></span>
+        <span class="fname">uint8_val</span><span class="ftype">u8</span><span class="fnote"><em>only for payload feature types</em></span>
+        <span class="subhead">only when flags bit0 (GBDT boundary)</span>
+        <span class="fname">cat_column</span><span class="ftype">u32</span><span class="fnote">GBDT categorical column, or <span class="hl">0xFFFFFFFF</span> = none</span>
+        <span class="fname">cat_code</span><span class="ftype">u32</span><span class="fnote">the code within that column</span>
+      </div>
+    </section>
+
+    <!-- labels -->
+    <section class="sec" style="--rail:var(--role-read)">
+      <div class="sec-head">
+        <span class="idx">§2</span>
+        <span class="sec-title">読みラベルテーブル <span class="en">Reading labels</span></span>
+        <span class="tag">× n_classes</span>
+      </div>
+      <p class="purpose">class_id → the kana string that class stands for. This is what a prediction ultimately names.</p>
+      <div class="fields">
+        <span class="fname">len</span><span class="ftype">u8</span><span class="fnote">UTF-8 byte length</span>
+        <span class="fname">utf8</span><span class="ftype">u8[len]</span><span class="fnote">the label, e.g. <span class="hl">カ</span> / <span class="hl">続</span> / <span class="hl">_</span></span>
+      </div>
+    </section>
+
+    <!-- weights (star) -->
+    <section class="sec star" style="--rail:var(--role-read)">
+      <div class="sec-head">
+        <span class="idx">§3</span>
+        <span class="sec-title">読みモデル重み <span class="en">Reading weights · CSC</span></span>
+        <span class="tag">× n_nonzero · the bulk</span>
+      </div>
+      <p class="purpose">The sparse weight matrix (n_classes × n_features), int8-quantized with a per-class scale. Stored column-major (CSC) so the loaded array is already the shape inference walks.</p>
+      <div class="fields">
+        <span class="fname">quant_scale</span><span class="ftype">f32×n_classes</span><span class="fnote">per-class dequant scale — real weight = <span class="hl">data × scale</span></span>
+        <span class="fname">n_nonzero</span><span class="ftype">u32</span><span class="fnote">number of stored (non-zero) weights</span>
+        <span class="fname">colptr</span><span class="ftype">u32×(n_features+1)</span><span class="fnote">start offset of each feature's column</span>
+        <span class="fname">rowind</span><span class="ftype">u16×n_nonzero</span><span class="fnote">= class id. <span class="hl">u16</span>, not u32 — halves this array, the file's second-largest</span>
+        <span class="fname">data</span><span class="ftype">i8×n_nonzero</span><span class="fnote">the quantized weight itself, 1 byte each</span>
+      </div>
+    </section>
+
+    <!-- intercept -->
+    <section class="sec" style="--rail:var(--role-read)">
+      <div class="sec-head">
+        <span class="idx">§4</span>
+        <span class="sec-title">読みモデル intercept <span class="en">Reading intercepts</span></span>
+        <span class="tag">× n_classes</span>
+      </div>
+      <p class="purpose">The bias term added to each class's score before argmax — kept as full f32, it is tiny.</p>
+      <div class="fields">
+        <span class="fname">intercept</span><span class="ftype">f32×n_classes</span><span class="fnote">one bias per reading class</span>
+      </div>
+    </section>
+
+    <!-- boundary -->
+    <section class="sec" style="--rail:var(--role-bound)">
+      <div class="sec-head">
+        <span class="idx">§5</span>
+        <span class="sec-title">境界モデル <span class="en">Boundary model</span></span>
+        <span class="tag">algo_tag · self-describing</span>
+      </div>
+      <p class="purpose">Decides spacing between segments. A one-byte tag says which of two algorithms follows. Since v0x07 the GBDT variant carries only its trees — its categorical mappings live in §1 — so this section is now ~1 MB.</p>
+      <div class="fields">
+        <span class="fname">algo_tag</span><span class="ftype">u8</span><span class="fnote"><span class="hl">0x00</span> linear&nbsp;·&nbsp;<span class="hl">0x01</span> tree ensemble (GBDT)</span>
+        <span class="subhead">0x00 — linear (int8-quantized, resolves feature_id from §1)</span>
+        <span class="fname">quant_scale</span><span class="ftype">f32</span><span class="fnote">single dequant scale</span>
+        <span class="fname">data</span><span class="ftype">i8×n_features</span><span class="fnote">class-1 weight vector</span>
+        <span class="fname">intercept</span><span class="ftype">f32×2</span><span class="fnote">[class 0, class 1]</span>
+        <span class="subhead">0x01 — GBDT (trees only; categorical (column,code) is in §1)</span>
+        <span class="fname">n_columns</span><span class="ftype">u32</span><span class="fnote">number of categorical columns</span>
+        <span class="fname">trees</span><span class="ftype">ensemble</span><span class="fnote">300 trees, ~1 MB. score = Σ leaf values; categorical splits route by code membership, resolved via §1</span>
+      </div>
+    </section>
+
+    <!-- name dict -->
+    <section class="sec" style="--rail:var(--role-dict)">
+      <div class="sec-head">
+        <span class="idx">§6</span>
+        <span class="sec-title">人名辞書テーブル <span class="en">Person-name dictionary</span></span>
+        <span class="tag">× n_names</span>
+      </div>
+      <p class="purpose">Surface forms of names, each with optional per-unit readings — feeds the B/I name-flag features and a fixed-reading fallback. Empty (0) for dictionary-less models.</p>
+      <div class="fields">
+        <span class="fname">n_names</span><span class="ftype">u32</span><span class="fnote">entry count</span>
+        <span class="subhead">per entry</span>
+        <span class="fname">len + utf8</span><span class="ftype">u8, u8[len]</span><span class="fnote">surface form, e.g. <span class="hl">佐藤</span></span>
+        <span class="fname">n_readings</span><span class="ftype">u8</span><span class="fnote">0 = surface only, no reading</span>
+        <span class="fname">len + utf8 …</span><span class="ftype">u8, u8[len]</span><span class="fnote">each unit reading in katakana</span>
+      </div>
+    </section>
+
+    <!-- kanji dict -->
+    <section class="sec" style="--rail:var(--role-dict)">
+      <div class="sec-head">
+        <span class="idx">§7</span>
+        <span class="sec-title">単一漢字辞書テーブル <span class="en">Single-kanji dictionary</span></span>
+        <span class="tag">× n_entries</span>
+      </div>
+      <p class="purpose">For each listed kanji, its known readings — constrains the reading model's argmax to plausible candidates. Embedded so the model needs no side file.</p>
+      <div class="fields">
+        <span class="fname">n_entries</span><span class="ftype">u32</span><span class="fnote">entry count</span>
+        <span class="subhead">per entry</span>
+        <span class="fname">len + utf8</span><span class="ftype">u8, u8[len]</span><span class="fnote">the kanji (one character)</span>
+        <span class="fname">n_readings</span><span class="ftype">u8</span><span class="fnote">number of known readings</span>
+        <span class="fname">len + utf8 …</span><span class="ftype">u8, u8[len]</span><span class="fnote">each reading in katakana</span>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="payoff">
+    <h2>Where the bytes actually go</h2>
+    <p>Measured on a real model (window=5, <span class="k">22.5&nbsp;MB</span> at v0x07), two sections carry almost everything:</p>
+    <div class="bars">
+      <div class="bar"><span class="bl">統合語彙 §1</span><span class="bt" style="--pct:58.6%; --c:var(--role-read)"></span><span class="bv">59%</span></div>
+      <div class="bar"><span class="bl">読み重み §3 <em>CSC</em></span><span class="bt" style="--pct:36.3%; --c:var(--role-read)"></span><span class="bv">36%</span></div>
+      <div class="bar"><span class="bl">境界 §5 <em>trees</em> · 辞書</span><span class="bt" style="--pct:5.0%; --c:var(--role-bound)"></span><span class="bv">5%</span></div>
+      <div class="bar"><span class="bl">ラベル · intercept</span><span class="bt" style="--pct:0.1%; --c:var(--ink-faint)"></span><span class="bv">&lt;1%</span></div>
+    </div>
+    <p><strong>v0x07 unified the vocabulary.</strong> Through v0x06 the GBDT boundary shipped its own <span class="k">cat_vocab</span> — a categorical re-encoding of essentially the same <span class="k">~n_features</span> keys already in §1 — so the file stored the vocabulary <em>twice</em> (the two copies were ~60% of the file). v0x07 folds the categorical <span class="k">(column, code)</span> into each §1 entry and drops the explicit feature_id (now the row index), leaving one vocabulary. The boundary section keeps only its ~1&nbsp;MB of trees. Measured effect: file and load-time peak both fell ~1/3 (window=5: 32.9→22.5&nbsp;MB), with zero change to any predicted result.</p>
+    <p>Inside the <span class="accent">reading weights</span> (§3), the sparse layout costs, per non-zero, a value <em>plus</em> the index of where it sits. Storing that index as <span class="k">u16</span> not <span class="k">u32</span>, and going column-major (<span class="k">CSC</span>) so no transpose happens at load, trims both the file and the load-time peak.</p>
+    <p>The <span class="k">.mbmf</span> sidecar shares this layout byte-for-byte, except §3 and the linear §5 keep raw <span class="k">f32</span> weights (no quant_scale). Same version number; only the magic — <span class="k">MBMF</span> vs <span class="k">MOMO</span> — tells them apart.</p>
+  </div>
+
+  <p class="footnote">source of truth · momors-core/src/loader.rs</p>
+
+</div>
+
+</body>
+</html>

@@ -62,9 +62,25 @@ impl FloatMomoModel {
     #[inline]
     fn vocab_find(&self, key: &FeatureKey) -> Option<u32> {
         self.vocab
-            .binary_search_by(|entry| entry.0.cmp(key))
+            .binary_search_by(|entry| entry.key.cmp(key))
             .ok()
-            .map(|idx| self.vocab[idx].1)
+            .map(|idx| self.vocab[idx].feature_id)
+    }
+
+    /// 統合語彙テーブルを引いて [`crate::boundary::VocabRef`] を返す。
+    /// [`crate::model::MomoModel::resolve`] の float 版。
+    #[inline]
+    fn resolve(&self, key: &FeatureKey) -> Option<crate::boundary::VocabRef> {
+        self.vocab
+            .binary_search_by(|entry| entry.key.cmp(key))
+            .ok()
+            .map(|idx| {
+                let e = &self.vocab[idx];
+                crate::boundary::VocabRef {
+                    feature_id: e.feature_id,
+                    cat: e.cat(),
+                }
+            })
     }
 }
 
@@ -149,8 +165,7 @@ impl WeightModel for FloatMomoModel {
     }
 
     fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32 {
-        self.boundary
-            .compute_score(feat_keys, |k| self.vocab_find(k))
+        self.boundary.compute_score(feat_keys, |k| self.resolve(k))
     }
 
     fn read_feature_column(&self, feat_id: u32) -> Vec<(u32, f32)> {

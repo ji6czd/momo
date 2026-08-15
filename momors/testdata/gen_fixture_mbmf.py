@@ -29,10 +29,10 @@ OUT_PATH = Path(__file__).parent.parent / "testdata" / "fixture.mbmf"
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
-def build_header() -> bytes:
+def build_header(flags: int = 0x00) -> bytes:
     return struct.pack(
         '<4sBBBBII',
-        MAGIC, VERSION, 0x00, 0x00, 0x00,
+        MAGIC, VERSION, flags, 0x00, 0x00,
         base.N_CLASSES, base.N_FEATURES,
     )
 

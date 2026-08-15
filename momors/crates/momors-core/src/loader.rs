@@ -9,17 +9,20 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x06
-//!   _reserved    : u8[3]   0x00 × 3
+//!   version      : u8      0x07
+//!   flags        : u8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
+//!   _reserved    : u8[2]   0x00 × 2
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
 //!
-//! [語彙テーブル]            n_features エントリ
+//! [統合語彙テーブル]        n_features エントリ（feature_id 昇順 → feature_id は行番号で暗黙）
 //!   feature_type : u8
 //!   chartype[N]  : u8 × N    N = chartype_count(feature_type)
 //!   char32[M]    : u32 × M   M = char32_count(feature_type)
 //!   uint8_val    : u8        is_uint8_payload(feature_type) のときのみ
-//!   feature_id   : u32 LE
+//!   （flags bit0 のときのみ、各エントリ末尾に:）
+//!   cat_column   : u32 LE    GBDT カテゴリカル列（0xFFFFFFFF = 列なし）
+//!   cat_code     : u32 LE    列内コード
 //!
 //! [読みラベルテーブル]      n_classes エントリ
 //!   len          : u8
@@ -35,13 +38,16 @@
 //! [読みモデル intercept]
 //!   intercept    : f32 × n_classes
 //!
-//! [境界モデル]              algo_tag プレフィックス付き（version 0x06、`boundary.rs`）
+//! [境界モデル]              algo_tag プレフィックス付き（`boundary.rs`）
 //!   algo_tag     : u8      0x00 = 線形, 0x01 = 木のアンサンブル (GBDT)
-//!   --- 0x00 (線形。0x05 までと同一バイト列) ---
+//!   --- 0x00 (線形。flags bit0 = 0) ---
 //!     quant_scale  : f32
 //!     data         : i8 × n_features
 //!     intercept    : f32 × 2
-//!   --- 0x01 (木。カテゴリカル語彙テーブル + 木のアンサンブル。詳細は boundary.rs) ---
+//!   --- 0x01 (木。flags bit0 = 1。version 0x07 で cat_vocab を統合語彙へ移動) ---
+//!     n_columns    : u32 LE  カテゴリカル列数
+//!     n_trees      : u32 LE
+//!     trees…       先行順（深さ優先）の再帰ノード列。詳細は boundary.rs
 //!
 //! [人名辞書テーブル]        version 0x03 で追加、0x04 で読みを追加
 //!   n_names      : u32 LE  人名エントリ数（辞書なしモデルは 0）
@@ -64,9 +70,17 @@
 //!       utf8     : u8[len] 読み (カタカナ、UTF-8)
 //! ```
 //!
-//! version 0x04 以前は読めない。フォーマット互換性を装って誤動作するより
-//! 明示的にエラーにする方針（人名特徴量・読みの有無が精度に直結するため）。
-//! 旧バージョンのファイルは再エクスポートが必要。
+//! version 0x06 以前は読めない。フォーマット互換性を装って誤動作するより
+//! 明示的にエラーにする方針（人名特徴量・読みの有無・語彙レイアウトが精度に
+//! 直結するため）。旧バージョンのファイルは再エクスポートが必要。
+//!
+//! ## 統合語彙（version 0x07）で保存する理由
+//!
+//! 0x06 までは、GBDT 境界モデルが自前の `cat_vocab`（読み語彙とほぼ同一のキー集合を
+//! `(column, code)` に写す表）を丸ごと持っており、読み語彙とペイロードが二重に
+//! 格納されていた（実測で語彙2枚がファイルの約6割）。0x07 で読み語彙に
+//! `(column, code)` を吸収し、feature_id を行番号で暗黙化して、語彙を1枚にした。
+//! 前提は「カテゴリカルキーは読み語彙の部分集合」（exporter が保証）。
 //!
 //! ## CSC 形式で保存する理由
 //!
@@ -87,9 +101,10 @@ use std::path::{Path, PathBuf};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
+use crate::boundary::MAX_BOUNDARY_CAT_COLUMNS;
 use crate::char_type::CharType;
 use crate::feature::{FeatureKey, FeatureType};
-use crate::model::MomoModel;
+use crate::model::{MomoModel, NO_CAT_COLUMN, VocabEntry};
 use crate::{Error, Result};
 
 // ============================================================
@@ -101,7 +116,13 @@ const MAGIC: [u8; 4] = *b"MOMO";
 /// フォーマットのバージョン。`.mbmf` (`float_loader.rs`) と同じ番号を共有する
 /// ―― 両者はセクション構成を共通に保つ設計なので、採番を分けると
 /// 「どちらの 0x02 か」を常に意識する羽目になる。
-pub(crate) const VERSION: u8 = 6;
+pub(crate) const VERSION: u8 = 7;
+
+/// ヘッダの flags バイト（`_reserved[0]`）のビット定義。
+///
+/// bit0: 統合語彙テーブルの各エントリが GBDT カテゴリカル `(column, code)` を持つ。
+///       GBDT 境界モデル（algo_tag=0x01）のとき立てる。線形境界では 0。
+pub(crate) const FLAG_VOCAB_HAS_CAT: u8 = 0x01;
 
 /// ヘッダ由来のカウント値（n_classes / n_features / n_nonzero）の妥当性上限。
 /// これを超える値をそのまま `Vec::with_capacity` 等に渡すと、壊れた/不正な
@@ -156,9 +177,10 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
         return Err(Error::UnsupportedVersion { version });
     }
 
-    // reserved 3 bytes をスキップ
+    // reserved[0] は flags バイト。reserved[1..2] は未使用。
     let mut reserved = [0u8; 3];
     reader.read_exact(&mut reserved).map_err(io_err(path))?;
+    let has_cat = reserved[0] & FLAG_VOCAB_HAS_CAT != 0;
 
     let n_classes = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     let n_features = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
@@ -188,8 +210,8 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     model.n_classes = n_classes;
     model.n_features = n_features;
 
-    // ---- 語彙テーブル ----
-    model.vocab = read_vocab(reader, n_features, path)?;
+    // ---- 統合語彙テーブル ----
+    model.vocab = read_vocab(reader, n_features, has_cat, path)?;
 
     // ---- 読みラベルテーブル ----
     model.read_classes = read_labels(reader, n_classes, path)?;
@@ -206,6 +228,14 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 
     // ---- 境界モデル (algo_tag で線形/木を分岐、boundary.rs) ----
     model.boundary = crate::boundary::parse_int8(reader, n_features as usize, path)?;
+    // GBDT 境界はカテゴリカル `(column, code)` を統合語彙から引くため、has_cat 必須。
+    // flags と algo_tag の不整合（GBDT なのに語彙にカテゴリカル情報がない）は、
+    // 全キーが欠損扱いになり境界判定が壊れるので、明示的に弾く。
+    if matches!(model.boundary, crate::boundary::Boundary::Tree(_)) && !has_cat {
+        return Err(Error::CorruptModel {
+            reason: "GBDT 境界モデルですが flags に VOCAB_HAS_CAT が立っていません（統合語彙にカテゴリカル情報がありません）".to_string(),
+        });
+    }
 
     // ---- 人名辞書テーブル (version 0x04: 表層形 + ユニット別読み) ----
     let names = read_name_dict(reader, path)?;
@@ -216,7 +246,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 
     // ---- 後処理: vocab を Rust の Ord で再ソート ----
     // C++ 版とソート順が異なるため、binary_search できるように改めて整列する。
-    model.vocab.sort_by(|a, b| a.0.cmp(&b.0));
+    model.vocab.sort_by(|a, b| a.key.cmp(&b.key));
 
     Ok(model)
 }
@@ -225,29 +255,53 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 // セクション別読み込み
 // ============================================================
 
-/// 語彙テーブルを読む。
+/// 統合語彙テーブルを読む（version 0x07）。
 ///
-/// `.mbm` (`loader.rs`) と `.mbmf` (`float_loader.rs`) で語彙テーブルのバイト列は
-/// 完全に同一のため、`pub(crate)` にして両方から呼べるようにしている。
+/// `.mbm` (`loader.rs`) と `.mbmf` (`float_loader.rs`) でバイト列は完全に同一のため、
+/// `pub(crate)` にして両方から呼べるようにしている。
+///
+/// - `feature_id` はファイル内の並び順（0..n_features）で暗黙に決まる（明示格納しない）。
+///   CSC 重み行列の列インデックスと一致させるため、ファイルは feature_id 昇順で格納する。
+/// - `has_cat` が真のとき、各エントリの `FeatureKey` の後に GBDT カテゴリカル
+///   `column: u32` + `code: u32` が続く（GBDT 境界モデルのとき。ヘッダの flags で決まる）。
+///   `column == NO_CAT_COLUMN` はカテゴリカル列なし（Bias 等）。
 pub(crate) fn read_vocab<R: Read>(
     reader: &mut R,
     n_features: u32,
+    has_cat: bool,
     path: &Path,
-) -> Result<Vec<(FeatureKey, u32)>> {
+) -> Result<Vec<VocabEntry>> {
     let mut vocab = Vec::with_capacity(n_features as usize);
-    for _ in 0..n_features {
+    for feature_id in 0..n_features {
         let key = read_feature_key(reader, path)?;
-        let feature_id = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-        vocab.push((key, feature_id));
+        let (cat_column, cat_code) = if has_cat {
+            let column = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+            let code = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+            // 番兵でなければ、木のスコア計算の固定長配列に収まる列番号であること。
+            if column != NO_CAT_COLUMN && column as usize >= MAX_BOUNDARY_CAT_COLUMNS {
+                return Err(Error::CorruptModel {
+                    reason: format!(
+                        "統合語彙のカテゴリカル列番号 {column} が上限 {MAX_BOUNDARY_CAT_COLUMNS} 以上です"
+                    ),
+                });
+            }
+            (column, code)
+        } else {
+            (NO_CAT_COLUMN, 0)
+        };
+        vocab.push(VocabEntry {
+            key,
+            feature_id,
+            cat_column,
+            cat_code,
+        });
     }
     Ok(vocab)
 }
 
-/// 語彙テーブルの1エントリ分の `FeatureKey`（`feature_id` 等の付随フィールドを
-/// 除いたペイロードのみ）を読む。`read_vocab`（読みモデル語彙テーブル、末尾に
-/// `feature_id: u32`）と `boundary.rs` のカテゴリカル語彙テーブル（末尾に
-/// `column_index: u32` + `code: u32`）の両方が、この同一のペイロード読み込み
-/// ロジックを共有する。
+/// 語彙エントリ1個分の `FeatureKey` ペイロードのみを読む（feature_id や
+/// カテゴリカル `(column, code)` などの付随フィールドは呼び出し側が読む）。
+/// 統合語彙テーブル (`read_vocab`) が使う。
 pub(crate) fn read_feature_key<R: Read>(reader: &mut R, path: &Path) -> Result<FeatureKey> {
     let ft_byte = reader.read_u8().map_err(io_err(path))?;
     let feature_type =
@@ -548,17 +602,16 @@ mod tests {
         let model = load(fixture_gbdt_path()).expect("fixture_gbdt.mbm が読めること");
         assert!(matches!(model.boundary, crate::boundary::Boundary::Tree(_)));
 
-        // gen_fixture_mbm_gbdt.py のコメント通りの期待値。
-        let kanji = vec![FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji)];
+        // gen_fixture_mbm_gbdt.py のコメント通りの期待値。カテゴリカル (column, code) は
+        // 統合語彙に埋め込まれ、char_s=漢 → 列0 コード0、char_s=字 → 列0 コード1。
+        let kanji = vec![FeatureKey::char_1(FeatureType::CharSelf, 0x6F22)]; // 漢
         assert!((model.compute_boundary_score(&kanji) - 0.75).abs() < 1e-6);
 
-        let hiragana = vec![FeatureKey::type_1(
-            FeatureType::TypeSelf,
-            CharType::Hiragana,
-        )];
-        assert!((model.compute_boundary_score(&hiragana) - (-0.25)).abs() < 1e-6);
+        // char_s=字（コード1）は cats={0} に含まれない → 右の葉。
+        let ji = vec![FeatureKey::char_1(FeatureType::CharSelf, 0x5B57)]; // 字
+        assert!((model.compute_boundary_score(&ji) - (-0.25)).abs() < 1e-6);
 
-        // type_s キーが無い（欠損） → default_left=False → 右の葉。
+        // char_s キーが無い（欠損） → default_left=False → 右の葉。
         assert!((model.compute_boundary_score(&[]) - (-0.25)).abs() < 1e-6);
     }
 
@@ -694,7 +747,7 @@ mod tests {
     fn n_classes_over_u16_returns_error() {
         // csc_rowind がクラスIDを u16 で持つため、n_classes は MAX_CLASSES (65536)
         // を超えてはならない。ここでは 65537 (0x00010001) を与えて弾かれることを確認する。
-        let bad_data = b"MOMO\x06\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MOMO\x07\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
@@ -748,6 +801,19 @@ mod tests {
         assert!(matches!(
             result,
             Err(Error::UnsupportedVersion { version: 0x05 })
+        ));
+    }
+
+    #[test]
+    fn old_version_v6_returns_error() {
+        // v6（GBDT が自前 cat_vocab を持つ・語彙が feature_id 明示）も読めない。
+        // 統合語彙化でレイアウトが変わったため、黙って読むとずれて誤動作する。
+        let bad_data = b"MOMO\x06\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut cursor = std::io::Cursor::new(&bad_data[..]);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedVersion { version: 0x06 })
         ));
     }
 

@@ -15,12 +15,13 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MBMF"
-//!   version      : u8      0x06    ← .mbm と同じ番号を共有する
-//!   _reserved    : u8[3]   0x00 × 3
+//!   version      : u8      0x07    ← .mbm と同じ番号を共有する
+//!   flags        : u8      ← .mbm と同じ（bit0 = 統合語彙がカテゴリカルを持つ）
+//!   _reserved    : u8[2]   0x00 × 2
 //!   n_classes    : u32 LE
 //!   n_features   : u32 LE
 //!
-//! [語彙テーブル]            .mbm と同一
+//! [統合語彙テーブル]        .mbm と同一（feature_id 暗黙 + 任意のカテゴリカル）
 //! [読みラベルテーブル]      .mbm と同一
 //!
 //! [読みモデル重み (CSC・float32・量子化なし)]
@@ -47,8 +48,8 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::float_model::FloatMomoModel;
 use crate::loader::{
-    MAX_CLASSES, MAX_REASONABLE_COUNT, VERSION, io_err, read_csc_structure, read_f32_vec,
-    read_labels, read_name_dict, read_single_char_dict, read_vocab,
+    FLAG_VOCAB_HAS_CAT, MAX_CLASSES, MAX_REASONABLE_COUNT, VERSION, io_err, read_csc_structure,
+    read_f32_vec, read_labels, read_name_dict, read_single_char_dict, read_vocab,
 };
 use crate::{Error, Result};
 
@@ -90,8 +91,10 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
         return Err(Error::UnsupportedVersion { version });
     }
 
+    // reserved[0] は flags バイト（.mbm と共通）。
     let mut reserved = [0u8; 3];
     reader.read_exact(&mut reserved).map_err(io_err(path))?;
+    let has_cat = reserved[0] & FLAG_VOCAB_HAS_CAT != 0;
 
     let n_classes = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     let n_features = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
@@ -120,8 +123,8 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
     model.n_classes = n_classes;
     model.n_features = n_features;
 
-    // ---- 語彙テーブル / 読みラベルテーブル (.mbm と共通実装) ----
-    model.vocab = read_vocab(reader, n_features, path)?;
+    // ---- 統合語彙テーブル / 読みラベルテーブル (.mbm と共通実装) ----
+    model.vocab = read_vocab(reader, n_features, has_cat, path)?;
     model.read_classes = read_labels(reader, n_classes, path)?;
 
     // ---- 読みモデル重み (CSC・float32・量子化なし) ----
@@ -135,6 +138,11 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
 
     // ---- 境界モデル (algo_tag で線形/木を分岐、boundary.rs) ----
     model.boundary = crate::boundary::parse_float(reader, n_features as usize, path)?;
+    if matches!(model.boundary, crate::boundary::FloatBoundary::Tree(_)) && !has_cat {
+        return Err(Error::CorruptModel {
+            reason: "GBDT 境界モデルですが flags に VOCAB_HAS_CAT が立っていません（統合語彙にカテゴリカル情報がありません）".to_string(),
+        });
+    }
 
     // ---- 人名辞書テーブル / 単一文字辞書テーブル (.mbm と共通実装) ----
     let names = read_name_dict(reader, path)?;
@@ -142,7 +150,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
     model.single_char_dict = read_single_char_dict(reader, path)?;
 
     // ---- 後処理: vocab を Rust の Ord で再ソート (.mbm の loader と同じ理由) ----
-    model.vocab.sort_by(|a, b| a.0.cmp(&b.0));
+    model.vocab.sort_by(|a, b| a.key.cmp(&b.key));
 
     Ok(model)
 }
@@ -170,8 +178,6 @@ mod tests {
 
     #[test]
     fn load_fixture_gbdt_boundary_is_tree() {
-        use crate::char_type::CharType;
-
         let model = load(fixture_gbdt_path()).expect("fixture_gbdt.mbmf が読めること");
         assert!(matches!(
             model.boundary,
@@ -179,15 +185,12 @@ mod tests {
         ));
 
         // .mbm 版と完全に同一バイト列のはずなので、期待値も同じ
-        // (gen_fixture_mbm_gbdt.py のコメント参照)。
-        let kanji = vec![FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji)];
+        // (gen_fixture_mbm_gbdt.py のコメント参照)。char_s=漢 → 0.75、char_s=字 → -0.25。
+        let kanji = vec![FeatureKey::char_1(FeatureType::CharSelf, 0x6F22)];
         assert!((model.compute_boundary_score(&kanji) - 0.75).abs() < 1e-6);
 
-        let hiragana = vec![FeatureKey::type_1(
-            FeatureType::TypeSelf,
-            CharType::Hiragana,
-        )];
-        assert!((model.compute_boundary_score(&hiragana) - (-0.25)).abs() < 1e-6);
+        let ji = vec![FeatureKey::char_1(FeatureType::CharSelf, 0x5B57)];
+        assert!((model.compute_boundary_score(&ji) - (-0.25)).abs() < 1e-6);
 
         assert!((model.compute_boundary_score(&[]) - (-0.25)).abs() < 1e-6);
     }
@@ -248,7 +251,7 @@ mod tests {
     #[test]
     fn n_classes_over_u16_returns_error() {
         // .mbm 側と同じ理由 (csc_rowind が u16) で 65537 は弾かれる。
-        let bad_data = b"MBMF\x06\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MBMF\x07\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));

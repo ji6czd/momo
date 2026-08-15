@@ -16,14 +16,41 @@ use crate::weight_model::WeightModel;
 // 語彙テーブル
 // ============================================================
 
-/// 語彙テーブルのエントリ。
+/// カテゴリカル列なしを表す番兵（統合語彙テーブル version 0x07）。
 ///
-/// `(FeatureKey, feature_id)` のタプル。
-/// `Vec<VocabEntry>` をキーでソートしてバイナリサーチで使う。
+/// GBDT 境界モデルのカテゴリカル `(column, code)` を持たないキー（Bias や、
+/// そもそも境界モデルが線形のモデル）で `cat_column` に入る。
+pub(crate) const NO_CAT_COLUMN: u32 = u32::MAX;
+
+/// 統合語彙テーブルのエントリ（version 0x07）。
 ///
-/// 注意: C++ 版の `operator<` とソート順が異なる可能性があるため、
-/// loader が読み込み後に Rust の `Ord` で必ず再ソートすること。
-pub type VocabEntry = (FeatureKey, u32);
+/// 読みモデルの one-hot `feature_id` と、GBDT 境界モデルのカテゴリカル
+/// `(cat_column, cat_code)` を1つのキーにまとめて持つ。0x06 までは読み語彙
+/// (`FeatureKey → feature_id`) と GBDT の `cat_vocab` (`FeatureKey → (col, code)`)
+/// が別テーブルで、同じキー集合のペイロードを二重に格納していた。
+///
+/// - `feature_id` はファイル内の並び順（0..n_features）で暗黙に決まる。CSC 重み
+///   行列の列インデックスと一致させるため、ファイルは feature_id 昇順で格納する。
+/// - `cat_column == NO_CAT_COLUMN` はカテゴリカル列を持たないことを表す。
+///
+/// `Vec<VocabEntry>` を `key` でソートしてバイナリサーチで使う。C++ 版の
+/// `operator<` とソート順が異なる可能性があるため、loader が読み込み後に Rust の
+/// `Ord` で必ず再ソートすること。
+#[derive(Debug, Clone)]
+pub struct VocabEntry {
+    pub(crate) key: FeatureKey,
+    pub(crate) feature_id: u32,
+    pub(crate) cat_column: u32,
+    pub(crate) cat_code: u32,
+}
+
+impl VocabEntry {
+    /// GBDT カテゴリカル `(column, code)`。列を持たないキーでは `None`。
+    #[inline]
+    pub(crate) fn cat(&self) -> Option<(u32, u32)> {
+        (self.cat_column != NO_CAT_COLUMN).then_some((self.cat_column, self.cat_code))
+    }
+}
 
 // ============================================================
 // MomoModel
@@ -119,12 +146,27 @@ impl MomoModel {
     /// 見つからない場合は `None`。
     #[inline]
     pub(crate) fn vocab_find(&self, key: &FeatureKey) -> Option<u32> {
-        // `binary_search_by` でキーだけを比較する。
-        // 第一要素 (FeatureKey) で比較し、第二要素 (feature_id) は無視。
         self.vocab
-            .binary_search_by(|entry| entry.0.cmp(key))
+            .binary_search_by(|entry| entry.key.cmp(key))
             .ok()
-            .map(|idx| self.vocab[idx].1)
+            .map(|idx| self.vocab[idx].feature_id)
+    }
+
+    /// 統合語彙テーブルを1回のバイナリサーチで引き、境界モデルが必要とする
+    /// [`crate::boundary::VocabRef`]（`feature_id` と カテゴリカル `(column, code)`）を返す。
+    /// 線形境界は `feature_id`、GBDT は `cat` を使う。
+    #[inline]
+    pub(crate) fn resolve(&self, key: &FeatureKey) -> Option<crate::boundary::VocabRef> {
+        self.vocab
+            .binary_search_by(|entry| entry.key.cmp(key))
+            .ok()
+            .map(|idx| {
+                let e = &self.vocab[idx];
+                crate::boundary::VocabRef {
+                    feature_id: e.feature_id,
+                    cat: e.cat(),
+                }
+            })
     }
 
     /// 特徴量次元数。
@@ -241,8 +283,7 @@ impl WeightModel for MomoModel {
     }
 
     fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32 {
-        self.boundary
-            .compute_score(feat_keys, |k| self.vocab_find(k))
+        self.boundary.compute_score(feat_keys, |k| self.resolve(k))
     }
 
     fn read_feature_column(&self, feat_id: u32) -> Vec<(u32, f32)> {
@@ -304,17 +345,23 @@ mod tests {
 
         // Rust の Ord でソート済みになるように構築する。
         // (実装としては loader 側で sort() を呼ぶことになる)
+        let ve = |key, feature_id| VocabEntry {
+            key,
+            feature_id,
+            cat_column: NO_CAT_COLUMN,
+            cat_code: 0,
+        };
         m.vocab = vec![
-            (FeatureKey::no_payload(FeatureType::Bias), 0),
-            (
+            ve(FeatureKey::no_payload(FeatureType::Bias), 0),
+            ve(
                 FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji),
                 1,
             ),
-            (FeatureKey::char_1(FeatureType::CharSelf, 0x4E00), 2),
-            (FeatureKey::char_1(FeatureType::CharSelf, 0x4E01), 3),
+            ve(FeatureKey::char_1(FeatureType::CharSelf, 0x4E00), 2),
+            ve(FeatureKey::char_1(FeatureType::CharSelf, 0x4E01), 3),
         ];
         // 念のため明示的にソート
-        m.vocab.sort_by(|a, b| a.0.cmp(&b.0));
+        m.vocab.sort_by(|a, b| a.key.cmp(&b.key));
 
         // 存在するキー
         let k0 = FeatureKey::no_payload(FeatureType::Bias);

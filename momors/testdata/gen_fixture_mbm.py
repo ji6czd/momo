@@ -35,10 +35,17 @@ CT_KANJI = 0x42
 
 # ファイル識別情報（exporter.py の MAGIC_MBM / VERSION と同期）
 MAGIC = b'MOMO'
-# バージョンは `.mbmf` と共有する（gen_fixture_mbmf.py が base.VERSION を使う）
-VERSION = 0x06
+# バージョンは `.mbmf`・GBDT フィクスチャと共有する（それぞれ base.VERSION を使う）
+VERSION = 0x07
 
-# 境界モデルの algo_tag（version 0x06 で追加。このフィクスチャは線形のみ）
+# ヘッダ flags（version 0x07）。bit0 = 統合語彙が GBDT カテゴリカルを持つ。
+# このフィクスチャは線形境界なので flags=0（vocab に column/code を書かない）。
+FLAG_VOCAB_HAS_CAT = 0x01
+
+# カテゴリカル列なしの番兵（loader.rs の NO_CAT_COLUMN と一致）
+NO_CAT_COLUMN = 0xFFFFFFFF
+
+# 境界モデルの algo_tag（このフィクスチャは線形のみ）
 BOUNDARY_ALGO_LINEAR = 0x00
 
 # 出力先
@@ -122,17 +129,27 @@ def is_uint8_payload(ft: int) -> bool:
     return (ft & 0xC0) == 0xC0
 
 
-def build_header() -> bytes:
+def build_header(flags: int = 0x00) -> bytes:
     return struct.pack(
         '<4sBBBBII',
-        MAGIC, VERSION, 0x00, 0x00, 0x00,
+        MAGIC, VERSION, flags, 0x00, 0x00,
         N_CLASSES, N_FEATURES,
     )
 
 
-def build_vocab() -> bytes:
+def build_vocab(cat_map: dict | None = None) -> bytes:
+    """統合語彙テーブル（version 0x07）を組む。
+
+    feature_id はファイル内の並び順（VOCAB の順）で暗黙に決まるため書き出さない。
+    VOCAB は feature_id 昇順で定義してある前提。
+
+    `cat_map` を渡すと（GBDT フィクスチャ用、flags bit0=1）、各エントリ末尾に
+    `(column, code)` を書き出す。`cat_map[feature_id]` が無いキーは番兵で埋める。
+    None のとき（線形フィクスチャ、flags=0）は書き出さない。
+    """
     buf = bytearray()
-    for ft, ct_vals, cp_vals, u8_val, fid in VOCAB:
+    for fid, (ft, ct_vals, cp_vals, u8_val, defined_fid) in enumerate(VOCAB):
+        assert defined_fid == fid, f"VOCAB は feature_id 昇順で定義すること: {defined_fid} != {fid}"
         # 整合性チェック
         assert len(ct_vals) == chartype_count(ft), f"FT {ft:#x} ct count"
         assert len(cp_vals) == char32_count(ft), f"FT {ft:#x} cp count"
@@ -145,7 +162,9 @@ def build_vocab() -> bytes:
             buf += struct.pack('<I', cp)
         if u8_val is not None:
             buf.append(u8_val)
-        buf += struct.pack('<I', fid)
+        if cat_map is not None:
+            column, code = cat_map.get(fid, (NO_CAT_COLUMN, 0))
+            buf += struct.pack('<II', column, code)
     return bytes(buf)
 
 

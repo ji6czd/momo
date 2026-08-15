@@ -9,18 +9,18 @@
 //! ## レベルの区別
 //!
 //! - **論理ドキュメント**（本モジュール）: [`ParagraphEntry`] の列。テキスト段落
-//!   （物理行の列）と、改ページそのものを表す独立したエントリが並ぶ。手動改行・
+//!   （[`Segment`] の列）と、改ページそのものを表す独立したエントリが並ぶ。手動改行・
 //!   強制改ページ・ページ番号上書きなど、編集で保持すべき情報をすべて持つ。可逆。
 //! - **印刷イメージ**（[`crate::formatter`]）: ページ×折返し済み行×ヘッダ。非可逆。
 //!
-//! 段落を「物理行の列」として保持するのは、ユーザーが置いた強制物理改行を
+//! 段落を「[`Segment`] の列」として保持するのは、ユーザーが置いた強制改行を
 //! 再ワードラップで失わないため。新規にテキストから組む場合は
 //! [`BrailleDocument::from_paragraphs`] で組み、折返しは [`crate::formatter::render`] が行う。
 //!
 //! ## 改ページは独立したエントリである
 //!
 //! 強制改ページ（と、それに伴うヘッダ有無・タイトル・番号・番号スタイルの上書き）は、
-//! かつて「直前の物理行にぶら下がるプロパティ」として表現されていたが、これは
+//! かつて「直前のセグメントにぶら下がるプロパティ」として表現されていたが、これは
 //! テキスト編集（結合・分割）のたびに改ページの生死が編集方向に依存してしまう、
 //! 空段落との判定が曖昧になる、といった問題を生んだ。現在は [`ParagraphEntry::Break`]
 //! という、テキストを一切持たない独立したエントリとして表現する。テキスト段落の結合・
@@ -98,15 +98,15 @@ impl PageBreak {
 /// [`crate::formatter::render`] が行幅で折り返す。段落内に複数セグメントがある場合、
 /// セグメント境界は**強制改行**（[`logical_end`](Self::logical_end) = false）を表す。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PhysicalLine {
-    /// 点字セルの文字列（折返し前）。
+pub struct Segment {
+    /// 点字セルの文字列(折返し前)。
     pub content: String,
-    /// このセグメントで論理行（段落）が終わるか。`false` は次セグメントへの強制改行。
+    /// このセグメントで論理行(段落)が終わるか。`false` は次セグメントへの強制改行。
     pub logical_end: bool,
 }
 
-impl PhysicalLine {
-    /// 指定 `logical_end` の物理行を作る。
+impl Segment {
+    /// 指定 `logical_end` のセグメントを作る。
     pub fn new(content: impl Into<String>, logical_end: bool) -> Self {
         Self {
             content: content.into(),
@@ -118,20 +118,20 @@ impl PhysicalLine {
 /// [`BrailleDocument::paragraphs`] の1要素。テキスト段落か、改ページそのものかのどちらか。
 ///
 /// 改ページ（[`Break`](Self::Break)）はテキストを一切持たない独立したエントリであり、
-/// どの物理行にも属さない。これにより、テキストの結合・分割ロジックは常に
+/// どのセグメントにも属さない。これにより、テキストの結合・分割ロジックは常に
 /// [`Text`](Self::Text) だけを扱えばよく、改ページ情報を誤って巻き込む・失うことが
 /// 構造的にあり得なくなる。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParagraphEntry {
-    /// 通常のテキスト段落（物理行の列）。
-    Text(Vec<PhysicalLine>),
+    /// 通常のテキスト段落（セグメントの列）。
+    Text(Vec<Segment>),
     /// 改ページそのもの（上書き情報込み）。テキストを持たない。
     Break(PageBreak),
 }
 
 impl ParagraphEntry {
-    /// テキスト段落なら物理行の列を返す。改ページなら `None`。
-    pub fn as_text(&self) -> Option<&[PhysicalLine]> {
+    /// テキスト段落ならセグメントの列を返す。改ページなら `None`。
+    pub fn as_text(&self) -> Option<&[Segment]> {
         match self {
             ParagraphEntry::Text(lines) => Some(lines),
             ParagraphEntry::Break(_) => None,
@@ -225,7 +225,7 @@ impl BrailleDocument {
     pub fn from_paragraphs(paragraphs: &[String], config: DocumentConfig) -> Self {
         let paragraphs = paragraphs
             .iter()
-            .map(|para| ParagraphEntry::Text(vec![PhysicalLine::new(para.clone(), true)]))
+            .map(|para| ParagraphEntry::Text(vec![Segment::new(para.clone(), true)]))
             .collect();
         Self { paragraphs, config }
     }
@@ -282,7 +282,7 @@ impl BrailleDocument {
         let mut paragraphs: Vec<ParagraphEntry> = Vec::new();
         for group in groups {
             if group.is_empty() {
-                paragraphs.push(ParagraphEntry::Text(vec![PhysicalLine::new(
+                paragraphs.push(ParagraphEntry::Text(vec![Segment::new(
                     String::new(),
                     true,
                 )]));
@@ -297,12 +297,12 @@ impl BrailleDocument {
                 }
             }
 
-            let mut phys: Vec<PhysicalLine> = group
+            let mut segs: Vec<Segment> = group
                 .iter()
-                .map(|&line| PhysicalLine::new(line, false))
+                .map(|&line| Segment::new(line, false))
                 .collect();
-            phys.last_mut().unwrap().logical_end = true;
-            paragraphs.push(ParagraphEntry::Text(phys));
+            segs.last_mut().unwrap().logical_end = true;
+            paragraphs.push(ParagraphEntry::Text(segs));
         }
 
         Self { paragraphs, config }

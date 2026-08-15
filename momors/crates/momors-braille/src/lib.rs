@@ -41,15 +41,15 @@ pub mod writer;
 pub use backtranslator::{
     BackTransResult, BackTransSegment, BackTransState, BrailleBackTranslator, StepResult,
 };
-pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, PhysicalLine};
-pub use english_translator::{embedded_english_displayname, EnglishResult, EnglishTranslator};
+pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, Segment};
+pub use english_translator::{EnglishResult, EnglishTranslator, embedded_english_displayname};
 pub use error::{Error, Result};
-pub use formatter::{render, FormattedDocument, RenderedLine};
+pub use formatter::{FormattedDocument, RenderedLine, render};
 pub use japanese_translator::{JapaneseResult, JapaneseTranslator, UnknownCharPolicy};
-pub use reader::{read_bes, read_bet};
-pub use table::{embedded_table, embedded_tables, Table};
-pub use translator::{
-    detect_language, is_japanese_char, BrailleResult, BrailleTranslator, Language,
-};
 pub use nabcc::NabccCase;
+pub use reader::{read_bes, read_bet};
+pub use table::{Table, embedded_table, embedded_tables};
+pub use translator::{
+    BrailleResult, BrailleTranslator, Language, detect_language, is_japanese_char,
+};
 pub use writer::OutputFormat;

@@ -9,7 +9,7 @@
 //!
 //! 両形式とも印刷イメージを保持し、ヘッダ行・強制/暗黙の改ページが
 //! すべてファイル中に焼き込まれている。本リーダはバイト列をデコードし、
-//! 段落（物理行の列）へ復元する。方針:
+//! 段落（[`crate::document::Segment`] の列）へ復元する。方針:
 //!
 //! - 行末コード: `0x0D 0xFE` = 論理行終端、`0xFE` 単独 = 物理行のみ終端（論理行継続）、
 //!   末尾の `0x0D` 単独 = ドキュメント終端（論理行終端扱い）。
@@ -20,7 +20,7 @@
 //!   （タイトル・ページ番号の中身の復元は点字→数字の逆変換が入ってから。）
 
 use crate::document::{
-    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, ParagraphEntry, PhysicalLine,
+    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, ParagraphEntry, Segment,
 };
 
 const HEADER_SIZE: usize = 512;
@@ -176,15 +176,16 @@ fn assemble_document(
         raw.extend(page);
     }
 
-    // 物理行を logical_end で区切って段落へまとめる。強制改ページが起きた場合は
-    // Break エントリを独立して挿入する（段落途中で強制改ページが起きた場合も、
-    // その時点までの物理行の logical_end はそのまま保つ＝段落は Break の後に継続する）。
+    // 物理行を logical_end で区切って段落（セグメント列）へまとめる。強制改ページが
+    // 起きた場合は Break エントリを独立して挿入する（段落途中で強制改ページが起きた
+    // 場合も、その時点までのセグメントの logical_end はそのまま保つ＝段落は Break の
+    // 後に継続する）。
     let mut paragraphs: Vec<ParagraphEntry> = Vec::new();
-    let mut current: Vec<PhysicalLine> = Vec::new();
+    let mut current: Vec<Segment> = Vec::new();
     for line in raw {
         let logical_end = line.logical_end;
         let forced = line.page_break;
-        current.push(PhysicalLine {
+        current.push(Segment {
             content: line.content,
             logical_end,
         });

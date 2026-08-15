@@ -8,7 +8,7 @@
 //! - [`wrap_line`] / [`wrap_suffix`]: 1セグメントの点字文字列をワードラップして
 //!   表示行に分割する低レベル関数。`render` 内部や FFI の逐次折返しに使う。
 
-use crate::document::{BrailleDocument, PageBreak, PageNumberStyle, ParagraphEntry, PhysicalLine};
+use crate::document::{BrailleDocument, PageBreak, PageNumberStyle, ParagraphEntry};
 
 const BRAILLE_SPACE: char = '⠀'; // U+2800
 const BRAILLE_NUM_PREFIX: char = '⠼';
@@ -158,8 +158,8 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
     let mut seg_idx: i32 = 0;
     for entry in &doc.paragraphs {
         match entry {
-            ParagraphEntry::Text(lines) => {
-                if lines.is_empty() {
+            ParagraphEntry::Text(segments) => {
+                if segments.is_empty() {
                     flat.push(FlatItem::Row {
                         content: String::new(),
                         logical_end: true,
@@ -168,7 +168,7 @@ pub fn render(doc: &BrailleDocument) -> FormattedDocument {
                     seg_idx += 1;
                     continue;
                 }
-                for seg in lines {
+                for seg in segments {
                     // セグメントを折返す。空セグメントは空行1行。
                     let mut rows = wrap_line(&seg.content, line_width);
                     if rows.is_empty() {
@@ -334,6 +334,30 @@ fn make_header(title: &str, page_num: u32, style: PageNumberStyle, line_width: u
 // ワードラップ（低レベル）
 // ============================================================
 
+/// [`crate::document::Segment`] を `line_width` マスで折り返して得られる、
+/// **真に物理的な**（`line_width` セル以内に収まることが保証された）1行。
+///
+/// [`Segment`] とは異なるレベルの概念であることに注意。`Segment` は改行未処理の
+/// 論理単位（`content` が `line_width` を超えうる）だが、`PhysicalLine` は
+/// [`wrap_line`] / [`wrap_suffix`] の出力であり、常に折返し済み。ページ・ヘッダ
+/// まで含めた最終的な表示行が欲しい場合は [`RenderedLine`]（[`render`] の出力）を使う。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhysicalLine {
+    /// 点字セルの文字列（`line_width` セル以内）。
+    pub content: String,
+    /// この行で論理行（段落）が終わるか。
+    pub logical_end: bool,
+}
+
+impl PhysicalLine {
+    fn new(content: impl Into<String>, logical_end: bool) -> Self {
+        Self {
+            content: content.into(),
+            logical_end,
+        }
+    }
+}
+
 /// 1論理行（点字文字列）を `line_width` マスで折り返して物理行に分割する。
 ///
 /// 空文字列は空リストを返す。最後の物理行は常に `logical_end = true`。
@@ -431,7 +455,7 @@ fn word_wrap_from(text: &str, first_line_width: usize, full_width: usize) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::DocumentConfig;
+    use crate::document::{DocumentConfig, Segment};
 
     fn braille_str(n: usize) -> String {
         std::iter::repeat('⠁').take(n).collect()
@@ -555,8 +579,8 @@ mod tests {
         // 段落0: 強制改行で2セグメント、段落1: 1セグメント → segment_index 0,1,2
         let mut doc = doc_from(&[braille_str(3), braille_str(3)], config(32, 25, false));
         doc.paragraphs[0] = ParagraphEntry::Text(vec![
-            PhysicalLine::new(braille_str(3), false), // 強制改行（seg 0）
-            PhysicalLine::new(braille_str(3), true),  // 段落終端（seg 1）
+            Segment::new(braille_str(3), false), // 強制改行（seg 0）
+            Segment::new(braille_str(3), true),  // 段落終端（seg 1）
         ]);
         // 段落1 は seg 2
         let f = render(&doc);
@@ -608,9 +632,9 @@ mod tests {
         // Text/Break/Text の3エントリ。ヘッダなし、行/ページ=25。
         let mut doc = doc_from(&[braille_str(5)], config(32, 25, false));
         doc.paragraphs = vec![
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(5), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(5), true)]),
             ParagraphEntry::Break(PageBreak::default()),
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(5), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(5), true)]),
         ];
         let f = render(&doc);
         assert_eq!(f.page_count(), 2);
@@ -620,12 +644,12 @@ mod tests {
     fn render_page_break_number_start_override() {
         let mut doc = doc_from(&[braille_str(1)], config(32, 25, true));
         doc.paragraphs = vec![
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
             ParagraphEntry::Break(PageBreak {
                 number_start: Some(10),
                 ..PageBreak::default()
             }),
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
         ];
         let f = render(&doc);
         assert_eq!(f.page_count(), 2);
@@ -692,13 +716,13 @@ mod tests {
         // ページ番号スタイルは改ページ単位の上書きで切り替える（文書全体の既定は標準）。
         let mut doc = doc_from(&[braille_str(1)], config(32, 25, true));
         doc.paragraphs = vec![
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
             ParagraphEntry::Break(PageBreak {
                 number_start: Some(1),
                 number_style: Some(PageNumberStyle::Alternative),
                 ..PageBreak::default()
             }),
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
         ];
         let f = render(&doc);
         assert_eq!(f.page_count(), 2);
@@ -720,12 +744,12 @@ mod tests {
         let mut doc = doc_from(&[braille_str(1)], config(32, 25, true));
         doc.config.title = Some(braille_str(3));
         doc.paragraphs = vec![
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
             ParagraphEntry::Break(PageBreak {
                 header_override: Some("⠭⠭".to_string()),
                 ..PageBreak::default()
             }),
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
         ];
         let f = render(&doc);
         assert_eq!(f.page_count(), 2);
@@ -740,12 +764,12 @@ mod tests {
         // その後の暗黙のページ分割で生じるページ(3枚目)でもタイトル上書きが継続することを確認する。
         // 改ページ直前は1行だけにして、暗黙のページ確定（収容行数ちょうど）と重ならないようにする。
         let mut doc = doc_from(&[braille_str(1)], config(32, 3, true));
-        let mut after: Vec<PhysicalLine> = (0..3)
-            .map(|_| PhysicalLine::new(braille_str(1), false))
+        let mut after: Vec<Segment> = (0..3)
+            .map(|_| Segment::new(braille_str(1), false))
             .collect();
-        after.push(PhysicalLine::new(braille_str(1), true));
+        after.push(Segment::new(braille_str(1), true));
         doc.paragraphs = vec![
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), false)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), false)]),
             ParagraphEntry::Break(PageBreak {
                 header_override: Some("⠭".to_string()),
                 ..PageBreak::default()
@@ -766,13 +790,13 @@ mod tests {
         // 倍数からずらしてあり（7行/5、9行/4）、暗黙のページ確定と改ページ自体の確定が
         // 重ならないようにしている。
         let mut doc = doc_from(&[braille_str(1)], config(32, 5, false));
-        let before: Vec<PhysicalLine> = (0..7)
-            .map(|_| PhysicalLine::new(braille_str(1), false))
+        let before: Vec<Segment> = (0..7)
+            .map(|_| Segment::new(braille_str(1), false))
             .collect();
-        let mut after: Vec<PhysicalLine> = (0..8)
-            .map(|_| PhysicalLine::new(braille_str(1), false))
+        let mut after: Vec<Segment> = (0..8)
+            .map(|_| Segment::new(braille_str(1), false))
             .collect();
-        after.push(PhysicalLine::new(braille_str(1), true));
+        after.push(Segment::new(braille_str(1), true));
         doc.paragraphs = vec![
             ParagraphEntry::Text(before),
             ParagraphEntry::Break(PageBreak {
@@ -803,9 +827,9 @@ mod tests {
         // MBR の ==== show_header=false マーカー経由でも同じ状態遷移が機能することを確認する。
         let mut doc = doc_from(&[braille_str(1)], config(32, 25, true));
         doc.paragraphs = vec![
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
             ParagraphEntry::Break(PageBreak::from_marker("==== show_header=false")),
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
         ];
         let f = render(&doc);
         assert_eq!(f.page_count(), 2);
@@ -834,12 +858,12 @@ mod tests {
         // header_enabled/title/番号/スタイルの4項目すべてが、改ページ上書きの後、
         // 暗黙分割をまたいでも page_info に正しく反映され続けることを確認する。
         let mut doc = doc_from(&[braille_str(1)], config(32, 3, false));
-        let mut after: Vec<PhysicalLine> = (0..3)
-            .map(|_| PhysicalLine::new(braille_str(1), false))
+        let mut after: Vec<Segment> = (0..3)
+            .map(|_| Segment::new(braille_str(1), false))
             .collect();
         after.last_mut().unwrap().logical_end = true;
         doc.paragraphs = vec![
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), false)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), false)]),
             ParagraphEntry::Break(PageBreak {
                 header_enabled: Some(true),
                 header_override: Some("⠭".to_string()),
@@ -877,7 +901,7 @@ mod tests {
         let mut doc = doc_from(&[braille_str(1)], config(32, 25, true));
         doc.paragraphs = vec![
             ParagraphEntry::Break(PageBreak::default()),
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
         ];
         let f = render(&doc);
         assert_eq!(f.page_count(), 2);
@@ -891,10 +915,10 @@ mod tests {
         // Break が連続しても一律に扱い、間に空ページができる。
         let mut doc = doc_from(&[braille_str(1)], config(32, 25, true));
         doc.paragraphs = vec![
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
             ParagraphEntry::Break(PageBreak::default()),
             ParagraphEntry::Break(PageBreak::default()),
-            ParagraphEntry::Text(vec![PhysicalLine::new(braille_str(1), true)]),
+            ParagraphEntry::Text(vec![Segment::new(braille_str(1), true)]),
         ];
         let f = render(&doc);
         assert_eq!(f.page_count(), 3);

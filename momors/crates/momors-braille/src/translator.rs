@@ -21,9 +21,9 @@
 //! you should be here today → 英語   ⠽⠀⠩⠙⠀⠆⠀⠐⠓⠀⠞⠙ （grade2 縮約）
 //! ```
 
+use crate::Result;
 use crate::english_translator::{EnglishResult, EnglishTranslator};
 use crate::japanese_translator::{JapaneseResult, JapaneseTranslator};
-use crate::Result;
 
 /// 行の言語。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

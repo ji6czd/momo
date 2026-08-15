@@ -1,4 +1,4 @@
-use crate::table::{PunctCell, CLASS_DIGIT, CLASS_KANA, CLASS_LATIN, CLASS_NONE};
+use crate::table::{CLASS_DIGIT, CLASS_KANA, CLASS_LATIN, CLASS_NONE, PunctCell};
 use crate::{Result, Table};
 use std::collections::HashSet;
 

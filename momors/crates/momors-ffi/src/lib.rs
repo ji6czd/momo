@@ -121,18 +121,18 @@
 
 use std::os::raw::c_int;
 
-use momors_braille::NabccCase;
 use momors_braille::document::{
-    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, ParagraphEntry, PhysicalLine,
+    BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, ParagraphEntry, Segment,
 };
 use momors_braille::formatter::{
-    FormattedDocument, PageInfo, RenderedLine, render, wrap_line, wrap_suffix,
+    render, wrap_line, wrap_suffix, FormattedDocument, PageInfo, PhysicalLine, RenderedLine,
 };
 use momors_braille::writer::OutputFormat;
+use momors_braille::NabccCase;
 use momors_braille::{
-    BackTransResult, BrailleBackTranslator, BrailleResult, BrailleTranslator, EnglishTranslator,
-    JapaneseTranslator, Language, Table, UnknownCharPolicy, detect_language, embedded_table,
-    embedded_tables,
+    detect_language, embedded_table, embedded_tables, BackTransResult, BrailleBackTranslator,
+    BrailleResult, BrailleTranslator, EnglishTranslator, JapaneseTranslator, Language, Table,
+    UnknownCharPolicy,
 };
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
@@ -1078,7 +1078,7 @@ pub extern "C" fn momo_doc_line_count(h: *const BrailleDocHandle, entry: c_int) 
     }
 }
 
-fn doc_line(h: &BrailleDocHandle, entry: c_int, line: c_int) -> Option<&PhysicalLine> {
+fn doc_line(h: &BrailleDocHandle, entry: c_int, line: c_int) -> Option<&Segment> {
     if entry < 0 {
         return None;
     }
@@ -1152,7 +1152,7 @@ pub extern "C" fn momo_doc_entry_page_break_w(
 pub struct BrailleDocBuilder {
     config: DocumentConfig,
     entries: Vec<ParagraphEntry>,
-    current: Vec<PhysicalLine>,
+    current: Vec<Segment>,
 }
 
 /// ビルダーを作る。number_start: 開始ページ番号。number_style: 0=Standard, 1=Alternative。
@@ -1198,7 +1198,7 @@ pub extern "C" fn momo_doc_builder_add_line(
         None => return,
     };
     let content = unsafe { lpwstr_to_string(content) }.unwrap_or_default();
-    b.current.push(PhysicalLine {
+    b.current.push(Segment {
         content,
         logical_end,
     });

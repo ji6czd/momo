@@ -387,7 +387,8 @@ impl EnglishTranslator {
             chars[s..e].iter().any(|c| c.is_ascii_uppercase())
                 && !chars[s..e].iter().any(|c| c.is_ascii_lowercase())
         };
-        let no_letter = |&(s, e): &(usize, usize)| !chars[s..e].iter().any(|c| c.is_ascii_alphabetic());
+        let no_letter =
+            |&(s, e): &(usize, usize)| !chars[s..e].iter().any(|c| c.is_ascii_alphabetic());
 
         let mut out = Vec::new();
         let mut t = 0;
@@ -558,10 +559,7 @@ impl EnglishTranslator {
             }
             // grade 1 記号符: 数値モード中の a–j は数字と同じセルなので前置して弁別する
             // （"1a" = ⠼⠁⠰⠁）。大文字符が挟まるなら曖昧性は消えるので不要（"4A" = ⠼⠙⠠⠁）。
-            if idx == 0
-                && numeric
-                && caps_cells.is_empty()
-                && Self::digit_ambiguous(*len, chars[i])
+            if idx == 0 && numeric && caps_cells.is_empty() && Self::digit_ambiguous(*len, chars[i])
             {
                 braille.push_str(&self.grade1);
             }
@@ -595,8 +593,7 @@ impl EnglishTranslator {
     ) -> Vec<(usize, String)> {
         let wlen = end - start;
         // best[k] = (最小セル数, 優先順位の合計, その位置で選ぶ長さ, そのセル)
-        let mut best: Vec<(usize, u32, usize, String)> =
-            vec![(0, 0, 0, String::new()); wlen + 1];
+        let mut best: Vec<(usize, u32, usize, String)> = vec![(0, 0, 0, String::new()); wlen + 1];
         for k in (0..wlen).rev() {
             let i = start + k;
             let maxl = self.max_contraction_len.min(wlen - k);
@@ -723,7 +720,9 @@ impl EnglishTranslator {
 
         // §10.5.3: `in` は「その並びに上方の点を持つ記号がある」ときだけ使う。
         // `in-depth`（⠙ に上方の点）は可、`in.`（⠔⠲ はどちらも下方）は不可。
-        if con.needs_upper_dot && whole_word && !self.sequence_has_upper_dot(chars, word_start, word_end)
+        if con.needs_upper_dot
+            && whole_word
+            && !self.sequence_has_upper_dot(chars, word_start, word_end)
         {
             return false;
         }
@@ -1109,13 +1108,16 @@ impl EnglishTranslator {
         while e < n && !chars[e].is_whitespace() {
             e += 1;
         }
-        let mut others = (s..e).filter(|&k| k < word_start || k >= word_end).peekable();
+        let mut others = (s..e)
+            .filter(|&k| k < word_start || k >= word_end)
+            .peekable();
         if others.peek().is_none() {
             return true;
         }
         others.any(|k| {
             let c = chars[k];
-            c.is_ascii_alphanumeric() || (self.punctuation.contains_key(&c) && !self.is_lower_punct(c))
+            c.is_ascii_alphanumeric()
+                || (self.punctuation.contains_key(&c) && !self.is_lower_punct(c))
         })
     }
 
@@ -1341,7 +1343,7 @@ mod tests {
         assert_eq!(t("been"), "⠃⠑⠢"); // b + e + en
         assert_eq!(t("bench"), "⠃⠢⠡"); // b + en + ch
         assert_eq!(t("bed"), "⠃⠫"); // b + ed
-                                    // con が第一音節でない語も同様
+        // con が第一音節でない語も同様
         assert_eq!(t("cone"), "⠉⠐⠕"); // c + one（頭字符）
     }
 
@@ -1752,26 +1754,40 @@ mod tests {
     #[test]
     fn rules_of_ueb_examples() {
         let cases: &[(&str, &str)] = &[
-            ("x", "⠰⠭"), ("it", "⠭"), ("which", "⠱"), ("was", "⠴"), ("al", "⠰⠁⠇"), ("also", "⠁⠇"),
-            ("do-it-yourself", "⠙⠤⠭⠤⠽⠗⠋"), ("out-and-out", "⠳⠤⠯⠤⠳"),
+            ("x", "⠰⠭"),
+            ("it", "⠭"),
+            ("which", "⠱"),
+            ("was", "⠴"),
+            ("al", "⠰⠁⠇"),
+            ("also", "⠁⠇"),
+            ("do-it-yourself", "⠙⠤⠭⠤⠽⠗⠋"),
+            ("out-and-out", "⠳⠤⠯⠤⠳"),
             ("but...not", "⠃⠥⠞⠲⠲⠲⠝⠕⠞"),
-            ("(c", "⠐⠣⠰⠉"), ("[can", "⠨⠣⠉"), ("{af", "⠸⠣⠰⠁⠋"),
-            ("\u{201c}do", "⠦⠙"), ("\u{2018}your", "⠠⠦⠽⠗"),
+            ("(c", "⠐⠣⠰⠉"),
+            ("[can", "⠨⠣⠉"),
+            ("{af", "⠸⠣⠰⠁⠋"),
+            ("\u{201c}do", "⠦⠙"),
+            ("\u{2018}your", "⠠⠦⠽⠗"),
             ("'e 'as", "⠄⠰⠑⠀⠄⠵"),
             ("very, very still; rather good.", "⠧⠂⠀⠧⠀⠌⠆⠀⠗⠀⠛⠙⠲"),
-            ("d:", "⠰⠙⠒"), ("this...", "⠹⠲⠲⠲"), ("rejoice!", "⠗⠚⠉⠖"),
+            ("d:", "⠰⠙⠒"),
+            ("this...", "⠹⠲⠲⠲"),
+            ("rejoice!", "⠗⠚⠉⠖"),
             ("(q, r)", "⠐⠣⠰⠟⠂⠀⠰⠗⠐⠜"),
             ("[quite, rather]", "⠨⠣⠟⠂⠀⠗⠨⠜"),
             ("{k-p}", "⠸⠣⠰⠅⠤⠰⠏⠸⠜"),
             ("children.\u{201d}", "⠡⠝⠲⠴"),
             ("friends' numbers", "⠋⠗⠎⠄⠀⠝⠥⠍⠃⠻⠎"),
-            ("ab/cd", "⠁⠃⠸⠌⠉⠙"), ("could/should", "⠉⠳⠇⠙⠸⠌⠩⠳⠇⠙"),
+            ("ab/cd", "⠁⠃⠸⠌⠉⠙"),
+            ("could/should", "⠉⠳⠇⠙⠸⠌⠩⠳⠇⠙"),
             ("child's?)", "⠡⠄⠎⠦⠐⠜"),
             ("\u{201c}p's and q's\u{201d}", "⠦⠰⠏⠄⠎⠀⠯⠀⠰⠟⠄⠎⠴"),
             ("(Wouldn't)", "⠐⠣⠠⠺⠙⠝⠄⠞⠐⠜"),
             ("Mrs X and Mr O", "⠠⠍⠗⠎⠀⠰⠠⠭⠀⠯⠀⠠⠍⠗⠀⠠⠕"),
             ("J. S. Bach", "⠰⠠⠚⠲⠀⠰⠠⠎⠲⠀⠠⠃⠁⠡"),
-            ("22b", "⠼⠃⠃⠰⠃"), ("22B", "⠼⠃⠃⠠⠃"), ("22p", "⠼⠃⠃⠏"),
+            ("22b", "⠼⠃⠃⠰⠃"),
+            ("22B", "⠼⠃⠃⠠⠃"),
+            ("22p", "⠼⠃⠃⠏"),
             ("jim@take2.com", "⠚⠊⠍⠈⠁⠞⠁⠅⠑⠼⠃⠲⠰⠉⠕⠍"),
             ("7(b)", "⠼⠛⠐⠣⠃⠐⠜"),
             ("Braille4All", "⠠⠃⠗⠁⠊⠇⠇⠑⠼⠙⠠⠁⠇⠇"),
@@ -1782,7 +1798,10 @@ mod tests {
             ("320-foot wingspan", "⠼⠉⠃⠚⠤⠋⠕⠕⠞⠀⠺⠬⠎⠏⠁⠝"),
             ("7:30 a.m.", "⠼⠛⠒⠼⠉⠚⠀⠁⠲⠍⠲"),
             ("1/4 cup", "⠼⠁⠸⠌⠼⠙⠀⠉⠥⠏"),
-            ("the vowels are: a, e, i, o and u", "⠮⠀⠧⠪⠑⠇⠎⠀⠜⠑⠒⠀⠁⠂⠀⠰⠑⠂⠀⠊⠂⠀⠕⠀⠯⠀⠰⠥"),
+            (
+                "the vowels are: a, e, i, o and u",
+                "⠮⠀⠧⠪⠑⠇⠎⠀⠜⠑⠒⠀⠁⠂⠀⠰⠑⠂⠀⠊⠂⠀⠕⠀⠯⠀⠰⠥",
+            ),
         ];
         for (src, want) in cases {
             assert_eq!(t(src), *want, "入力: {src:?}");
@@ -1882,10 +1901,15 @@ mod tests {
             ("THE BBC AFRICA NEWS", "⠠⠠⠠⠮⠀⠃⠃⠉⠀⠁⠋⠗⠊⠉⠁⠀⠝⠑⠺⠎⠠⠄"),
             ("A SELF-MADE MAN", "⠠⠠⠠⠁⠀⠎⠑⠇⠋⠤⠍⠁⠙⠑⠀⠍⠁⠝⠠⠄"),
             ("FOR SALE: 1975 FIREBIRD", "⠠⠠⠠⠿⠀⠎⠁⠇⠑⠒⠀⠼⠁⠊⠛⠑⠀⠋⠊⠗⠑⠃⠊⠗⠙⠠⠄"),
-            ("Please KEEP OFF THE GRASS in this area.",
-             "⠠⠏⠇⠂⠎⠑⠀⠠⠠⠠⠅⠑⠑⠏⠀⠷⠋⠀⠮⠀⠛⠗⠁⠎⠎⠠⠄⠀⠔⠀⠹⠀⠜⠑⠁⠲"),
+            (
+                "Please KEEP OFF THE GRASS in this area.",
+                "⠠⠏⠇⠂⠎⠑⠀⠠⠠⠠⠅⠑⠑⠏⠀⠷⠋⠀⠮⠀⠛⠗⠁⠎⠎⠠⠄⠀⠔⠀⠹⠀⠜⠑⠁⠲",
+            ),
             ("He shouted \"I WILL NOT!\"", "⠠⠓⠑⠀⠩⠳⠞⠫⠀⠦⠠⠠⠠⠊⠀⠺⠀⠝⠖⠠⠄⠴"),
-            ("IT'S A HOAX! (APRIL FOOL!)", "⠠⠠⠠⠭⠄⠎⠀⠁⠀⠓⠕⠁⠭⠖⠀⠐⠣⠁⠏⠗⠊⠇⠀⠋⠕⠕⠇⠖⠐⠜⠠⠄"),
+            (
+                "IT'S A HOAX! (APRIL FOOL!)",
+                "⠠⠠⠠⠭⠄⠎⠀⠁⠀⠓⠕⠁⠭⠖⠀⠐⠣⠁⠏⠗⠊⠇⠀⠋⠕⠕⠇⠖⠐⠜⠠⠄",
+            ),
         ];
         let mut bad = 0;
         for (src, want) in cases {

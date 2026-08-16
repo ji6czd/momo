@@ -544,3 +544,382 @@ fn mmap_bench_memory_mmap() {
         mb(peak1)
     );
 }
+
+// ============================================================
+// 1文字あたりの実推論コスト（読みモデル + 境界モデルの完全版）
+// ============================================================
+//
+// 上の速度計測は語彙bsearchとCSC集計だけを単離したものだが、実際の
+// predict() は文字ごとに境界モデル（GBDTなら木を毎文字走査）も評価する。
+// `docs/esp32-mcu-feasibility.md` が「計算量ワイルドカード」と呼んでいる
+// 部分を含めた、PC上での完全な1文字あたりコストを実測する。
+
+/// テキストを `lines_per_chunk` 行ずつに区切り、各「文字（トークン）」ごとの
+/// 候補特徴量キー列を `on_token` に渡す（[`for_each_chunk_keys`] と違い
+/// チャンク内でも文字単位を保つ。境界モデルは文字ごとに評価するため）。
+#[cfg(windows)]
+fn for_each_token_keys(
+    text: &str,
+    lines_per_chunk: usize,
+    mut on_token: impl FnMut(&[FeatureKey]),
+) {
+    let lines: Vec<&str> = text.lines().collect();
+    for chunk in lines.chunks(lines_per_chunk.max(1)) {
+        let chunk_text = chunk.join("\n");
+        let source_seq = crate::featurize::to_source_seq(&chunk_text);
+        let name_flags = vec![crate::name_dict::NAME_FLAG_OUT; source_seq.len()];
+        let all_keys = crate::featurize::compute_source_features(&source_seq, &name_flags);
+        for keys in &all_keys {
+            on_token(keys);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore]
+fn mmap_bench_char_latency() {
+    let model = MomoModel::load(std::path::Path::new(&model_path())).expect("モデル読み込み失敗");
+    println!(
+        "boundary = {}",
+        match &model.boundary {
+            crate::boundary::Boundary::Linear { .. } => "Linear",
+            crate::boundary::Boundary::Tree(_) => "Tree(GBDT)",
+        }
+    );
+
+    let text = load_corpus_text(&corpus_path(), bench_lines());
+    let mut scratch = vec![0i64; model.n_classes as usize];
+
+    let mut run = || -> (usize, usize, usize) {
+        let mut hits = 0usize;
+        let mut n_queries = 0usize;
+        let mut n_tokens = 0usize;
+        let mut boundary_acc = 0f32;
+        for_each_token_keys(&text, 20, |keys| {
+            n_tokens += 1;
+            n_queries += keys.len();
+            for key in keys {
+                if let Some(feat_id) = model.vocab_find(key) {
+                    hits += 1;
+                    let s = model.csc_colptr[feat_id as usize] as usize;
+                    let e = model.csc_colptr[feat_id as usize + 1] as usize;
+                    for j in s..e {
+                        scratch[model.csc_rowind[j] as usize] += model.csc_data[j] as i64;
+                    }
+                }
+            }
+            boundary_acc += model.compute_boundary_score(keys);
+        });
+        std::hint::black_box(boundary_acc);
+        (hits, n_queries, n_tokens)
+    };
+
+    run(); // ウォームアップ
+
+    let reps = 10;
+    let mut times = Vec::with_capacity(reps);
+    let mut last = (0, 0, 0);
+    for _ in 0..reps {
+        let t0 = Instant::now();
+        last = run();
+        times.push(t0.elapsed());
+    }
+    std::hint::black_box(&scratch);
+
+    let (hits, n_queries, n_tokens) = last;
+    let med = median(&mut times);
+    println!("tokens={n_tokens} queries={n_queries} hits={hits}");
+    println!(
+        "total={:?} -> {:.0} ns/char （読み候補{:.1}件/字・ヒット{:.1}件/字・境界モデル込み）",
+        med,
+        med.as_nanos() as f64 / n_tokens as f64,
+        n_queries as f64 / n_tokens as f64,
+        hits as f64 / n_tokens as f64,
+    );
+}
+
+// ============================================================
+// 境界GBDT木の走査コスト: Boxポインタ木 vs フラット配列(Vec/mmap)
+// ============================================================
+//
+// 1文字コストの実測で境界GBDT（木300本）が総コストの8割強を占めるとわかった。
+// 語彙bsearchはmmapでもほぼ無償だったが、GBDTは木ごとに散らばった小さい
+// ヒープ確保（`Box<TreeNode>`）を辿るポインタチェイスであり、語彙の
+// 単一フラットソート配列とはアクセスパターンが根本的に異なる ── 同じ
+// 結論が成り立つ保証はない。
+//
+// `boundary.rs` の `TreeNode`/`TreeEnsemble.trees` はモジュール内 private
+// なので実木は読めない。代わりに設計メモの規模（木300本・約1MB）に
+// 合わせた合成木を組み、
+//   (1) 今と同じ Box ポインタ木
+//   (2) それをフラット配列へ直列化した Vec 版（同じ常駐メモリだが連続配置）
+//   (3) 同じフラット配列を mmap した版
+// の3段階を比較する。(1)→(2) で「フラット化そのものの効果」、(2)→(3) で
+// 「mmap追加分のコスト」を切り分けられる。
+
+#[cfg(windows)]
+enum SynthNode {
+    Leaf(f32),
+    Split {
+        column: u32,
+        cats: Vec<u32>,
+        left: Box<SynthNode>,
+        right: Box<SynthNode>,
+    },
+}
+
+#[cfg(windows)]
+fn xorshift64(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
+}
+
+/// 深さ `depth` の合成木を1本組む。列は `MAX_BOUNDARY_CAT_COLUMNS` の範囲、
+/// カテゴリ集合は数個程度 ── 実際のGBDT境界モデルの規模感（設計メモの
+/// 「木300本・約1MB」）に合わせた大まかな近似。実木の分岐形状そのものは
+/// 再現していない（private のため読めない）。
+#[cfg(windows)]
+fn build_synth_tree(depth: u32, rng: &mut u64) -> SynthNode {
+    if depth == 0 {
+        return SynthNode::Leaf((xorshift64(rng) % 2000) as f32 / 1000.0 - 1.0);
+    }
+    let column = (xorshift64(rng) as usize % crate::boundary::MAX_BOUNDARY_CAT_COLUMNS) as u32;
+    let n_cats = 1 + (xorshift64(rng) % 8) as usize;
+    let mut cats: Vec<u32> = (0..n_cats)
+        .map(|_| (xorshift64(rng) % 500) as u32)
+        .collect();
+    cats.sort_unstable();
+    cats.dedup();
+    SynthNode::Split {
+        column,
+        cats,
+        left: Box::new(build_synth_tree(depth - 1, rng)),
+        right: Box::new(build_synth_tree(depth - 1, rng)),
+    }
+}
+
+#[cfg(windows)]
+fn eval_synth(
+    node: &SynthNode,
+    col_codes: &[Option<u32>; crate::boundary::MAX_BOUNDARY_CAT_COLUMNS],
+) -> f32 {
+    match node {
+        SynthNode::Leaf(v) => *v,
+        SynthNode::Split {
+            column,
+            cats,
+            left,
+            right,
+        } => {
+            let go_left = match col_codes[*column as usize] {
+                Some(code) => cats.binary_search(&code).is_ok(),
+                None => true,
+            };
+            eval_synth(if go_left { left } else { right }, col_codes)
+        }
+    }
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FlatNode {
+    is_leaf: u32,
+    column: u32,
+    cats_offset: u32,
+    cats_len: u32,
+    left_idx: u32,
+    right_idx: u32,
+    value: f32,
+    _pad: u32,
+}
+
+/// `SynthNode` 木をフラット配列 (`nodes`) + 共有カテゴリプール (`cats_pool`) へ
+/// 直列化する。複数の木で `cats_pool` を共有する（今の統合語彙と同じ発想）。
+/// 戻り値: この木の根ノードの `nodes` 内インデックス。
+#[cfg(windows)]
+fn flatten_synth(node: &SynthNode, nodes: &mut Vec<FlatNode>, cats_pool: &mut Vec<u32>) -> u32 {
+    match node {
+        SynthNode::Leaf(v) => {
+            let idx = nodes.len() as u32;
+            nodes.push(FlatNode {
+                is_leaf: 1,
+                column: 0,
+                cats_offset: 0,
+                cats_len: 0,
+                left_idx: 0,
+                right_idx: 0,
+                value: *v,
+                _pad: 0,
+            });
+            idx
+        }
+        SynthNode::Split {
+            column,
+            cats,
+            left,
+            right,
+        } => {
+            let cats_offset = cats_pool.len() as u32;
+            cats_pool.extend_from_slice(cats);
+            let left_idx = flatten_synth(left, nodes, cats_pool);
+            let right_idx = flatten_synth(right, nodes, cats_pool);
+            let idx = nodes.len() as u32;
+            nodes.push(FlatNode {
+                is_leaf: 0,
+                column: *column,
+                cats_offset,
+                cats_len: cats.len() as u32,
+                left_idx,
+                right_idx,
+                value: 0.0,
+                _pad: 0,
+            });
+            idx
+        }
+    }
+}
+
+#[cfg(windows)]
+fn eval_flat(
+    nodes: &[FlatNode],
+    cats_pool: &[u32],
+    idx: u32,
+    col_codes: &[Option<u32>; crate::boundary::MAX_BOUNDARY_CAT_COLUMNS],
+) -> f32 {
+    let n = nodes[idx as usize];
+    if n.is_leaf != 0 {
+        return n.value;
+    }
+    let go_left = match col_codes[n.column as usize] {
+        Some(code) => {
+            let cats = &cats_pool[n.cats_offset as usize..(n.cats_offset + n.cats_len) as usize];
+            cats.binary_search(&code).is_ok()
+        }
+        None => true,
+    };
+    eval_flat(
+        nodes,
+        cats_pool,
+        if go_left { n.left_idx } else { n.right_idx },
+        col_codes,
+    )
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore]
+fn mmap_bench_tree_walk() {
+    const N_TREES: usize = 300;
+    const DEPTH: u32 = 6; // 2^7-1=127ノード/木 × 300本 ≈ 設計メモの「木300本・約1MB」規模
+    const N_COLS: usize = crate::boundary::MAX_BOUNDARY_CAT_COLUMNS;
+
+    let mut rng: u64 = 0x243F_6A88_85A3_08D3;
+    let mut box_trees = Vec::with_capacity(N_TREES);
+    let mut flat_nodes: Vec<FlatNode> = Vec::new();
+    let mut cats_pool: Vec<u32> = Vec::new();
+    let mut tree_roots: Vec<u32> = Vec::with_capacity(N_TREES);
+    for _ in 0..N_TREES {
+        let t = build_synth_tree(DEPTH, &mut rng);
+        let root = flatten_synth(&t, &mut flat_nodes, &mut cats_pool);
+        tree_roots.push(root);
+        box_trees.push(t);
+    }
+    println!(
+        "synthetic ensemble: trees={N_TREES} depth={DEPTH} nodes={} cats_pool={} (flat ~{:.2}MB)",
+        flat_nodes.len(),
+        cats_pool.len(),
+        (flat_nodes.len() * std::mem::size_of::<FlatNode>() + cats_pool.len() * 4) as f64
+            / (1024.0 * 1024.0)
+    );
+
+    let nodes_tmp =
+        std::env::temp_dir().join(format!("momo_bench_tree_nodes_{}.bin", std::process::id()));
+    let cats_tmp =
+        std::env::temp_dir().join(format!("momo_bench_tree_cats_{}.bin", std::process::id()));
+    write_raw(&nodes_tmp, &flat_nodes);
+    write_raw(&cats_tmp, &cats_pool);
+    let nodes_mmap = mmap_file(&nodes_tmp);
+    let cats_mmap = mmap_file(&cats_tmp);
+    let mmap_nodes: &[FlatNode] = as_slice(&nodes_mmap);
+    let mmap_cats: &[u32] = as_slice(&cats_mmap);
+
+    // 呼び出しごとに異なる col_codes（アクティブな列とコード）を用意する。
+    // 実際は文字ごとに発火する特徴量が違うため、走査経路も文字ごとに変わる。
+    let n_calls = 20_000;
+    let col_codes_sets: Vec<[Option<u32>; N_COLS]> = (0..n_calls)
+        .map(|i| {
+            let mut cc = [None; N_COLS];
+            for col in 0..N_COLS {
+                if hash_index((i, col, 0u8), 100) < 55 {
+                    cc[col] = Some(hash_index((i, col, 1u8), 500) as u32);
+                }
+            }
+            cc
+        })
+        .collect();
+
+    let eval_box =
+        |cc: &[Option<u32>; N_COLS]| -> f32 { box_trees.iter().map(|t| eval_synth(t, cc)).sum() };
+    let eval_flat_vec = |cc: &[Option<u32>; N_COLS]| -> f32 {
+        tree_roots
+            .iter()
+            .map(|&r| eval_flat(&flat_nodes, &cats_pool, r, cc))
+            .sum()
+    };
+    let eval_flat_mmap = |cc: &[Option<u32>; N_COLS]| -> f32 {
+        tree_roots
+            .iter()
+            .map(|&r| eval_flat(mmap_nodes, mmap_cats, r, cc))
+            .sum()
+    };
+
+    // ウォームアップ
+    for cc in &col_codes_sets {
+        std::hint::black_box(eval_box(cc));
+        std::hint::black_box(eval_flat_vec(cc));
+        std::hint::black_box(eval_flat_mmap(cc));
+    }
+
+    let reps = 10;
+    let mut box_times = Vec::with_capacity(reps);
+    let mut vec_times = Vec::with_capacity(reps);
+    let mut mmap_times = Vec::with_capacity(reps);
+    for _ in 0..reps {
+        let t0 = Instant::now();
+        for cc in &col_codes_sets {
+            std::hint::black_box(eval_box(cc));
+        }
+        box_times.push(t0.elapsed());
+
+        let t0 = Instant::now();
+        for cc in &col_codes_sets {
+            std::hint::black_box(eval_flat_vec(cc));
+        }
+        vec_times.push(t0.elapsed());
+
+        let t0 = Instant::now();
+        for cc in &col_codes_sets {
+            std::hint::black_box(eval_flat_mmap(cc));
+        }
+        mmap_times.push(t0.elapsed());
+    }
+
+    let box_ns = report("tree_walk [Box     ]", box_times, n_calls);
+    let vec_ns = report("tree_walk [FlatVec ]", vec_times, n_calls);
+    let mmap_ns = report("tree_walk [FlatMmap]", mmap_times, n_calls);
+    println!(
+        "flat/box = {:.2}x, mmap/flatvec = {:.2}x, mmap/box = {:.2}x",
+        vec_ns / box_ns,
+        mmap_ns / vec_ns,
+        mmap_ns / box_ns
+    );
+
+    let _ = std::fs::remove_file(&nodes_tmp);
+    let _ = std::fs::remove_file(&cats_tmp);
+}

@@ -10,3 +10,15 @@ include = ["src/**", "Cargo.toml"]
 [dependencies]
 thiserror.workspace = true
 byteorder.workspace = true
+
+[dev-dependencies]
+# mmap 対応の速度・メモリ影響を測る使い捨てベンチマーク (src/mmap_experiment.rs) 専用。
+# 本番ビルドには含まれない。
+memmap2 = "0.9"
+
+[target.'cfg(windows)'.dev-dependencies]
+# メモリ計測 (Working Set) 用。Windows 専用 API のため target 限定。
+windows-sys = { version = "0.59", features = [
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }

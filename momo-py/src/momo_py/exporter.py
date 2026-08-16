@@ -6,13 +6,16 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 
 [ファイルヘッダ]          16 bytes
   magic        : uint8[4]   "MOMO"
-  version      : uint8      0x07
+  version      : uint8      0x08
   flags        : uint8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
   _reserved    : uint8[2]   0x00 x2
   n_classes    : uint32     読みラベル数
   n_features   : uint32     特徴量次元数（語彙サイズ）
 
-[統合語彙テーブル]        n_features エントリ（feature_id 昇順 → feature_id は行番号で暗黙）
+[統合語彙テーブル]        n_features エントリ（キー順 = Rust FeatureKey の Ord 順。
+                          version 0x08 で feature_id を明示フィールドに戻した）
+  feature_id   : uint32     元の学習時特徴量ID。CSC 重み行列の列インデックスと対応
+                            （CSC 側は今も feature_id 昇順のまま。行位置とは無関係）
   feature_type : uint8      FeatureType 値
   chartype[N]  : uint8 × N  N = chartype_count(feature_type)
   char32[M]    : uint32 × M M = char32_count(feature_type)
@@ -122,6 +125,18 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
         実測でファイル・ロード時ピークともに約 1/3 削減（推論結果は不変）。前提は
         「カテゴリカルキーは読み語彙の部分集合」（exporter が突合して保証）。
         0x06 ファイルは読み込み時にエラーになるため再エクスポートすること。
+  0x08: mmap 対応（docs/zerocopy-model-plan.md）の下ごしらえとして、統合語彙
+        テーブルを feature_id 順ではなくキー順（Rust FeatureKey の Ord 順）で
+        書くように変更。Rust 側ロード時の再ソートを廃止した（再ソートがある限り
+        全 materialize が必須だった）。feature_id は行位置と一致しなくなるため
+        明示フィールドに戻した（+4バイト/エントリ）。CSC 重み行列の列は今も
+        feature_id 順のまま変更していない。推論結果は不変。
+        （境界GBDT木のフラット配列化も同時に試したが、PC上の合成木ベンチマークでは
+        高速化が見えたものの実モデルで検証したところ逆に40〜60%遅化したため見送った
+        ―― 実モデルは1splitあたり平均約28カテゴリ持ち、共有catsプールへの
+        アクセスがノードごとの専有Vecよりキャッシュに悪かったとみられる。木は
+        引き続き0x07までと同じBoxポインタ+再帰ノード列のまま）。
+        0x07 ファイルは読み込み時にエラーになるため再エクスポートすること。
 
 .mbmf フォーマット（量子化前の float32 サイドカー）
 ====================================================
@@ -173,7 +188,7 @@ from .utils import parse_single_char_dict_tsv
 # `.mbm` と `.mbmf` はセクション構成を共通に保つ設計なので、バージョン番号も
 # 共有する（採番を分けると「どちらの 0x02 か」を常に意識する羽目になる）。
 # 区別は magic だけで行う。
-VERSION = 0x07
+VERSION = 0x08
 
 # 境界モデルセクションの algo_tag（version 0x06 で追加）
 BOUNDARY_ALGO_LINEAR = 0x00
@@ -760,23 +775,37 @@ def _unified_cat(bundle: Any, vocab: dict, boundary_algo: str) -> Tuple[dict | N
     return None, 0x00
 
 
+def _vocab_row_sort_key(ft: int, u8_val: int | None, ct_vals: list, cp_vals: list) -> tuple:
+    """統合語彙テーブルの行を並べる正準ソートキー。
+
+    Rust `FeatureKey` の `derive(Ord)` と同じフィールド優先順位
+    `(feature_type, u8val, ct[0..3], cp[0..3])` で比較できるよう、同じ順で
+    タプルを組む（`_canon_feature_key()` はカテゴリカルキーの一致判定用の
+    別の並びを返すため、ソート専用にこちらを使う）。
+
+    `FeatureType`/`CharType` は Rust 側で宣言順と `#[repr(u8)]` 値の昇順が
+    一致するよう維持されている（`char_type.rs` に明示コメントあり）ため、
+    ここでの単純な数値タプル比較が Rust の `Ord` と同じ順序になる。
+    """
+    return (ft, u8_val if u8_val is not None else 0, tuple(ct_vals), tuple(cp_vals))
+
+
 def _build_vocab_bytes(vocab: dict, cat_by_id: dict | None = None) -> bytes:
     """DictVectorizer の vocabulary_ ({key_str: feature_id}) を統合語彙テーブル
-    （version 0x07）のバイト列に変換する。
+    （version 0x08）のバイト列に変換する。
 
-    feature_id はファイル内の並び順（0..n_features）で暗黙に決まるため書き出さない
-    （CSC 重み行列の列インデックスと一致させるため feature_id 昇順で格納する）。
+    各行は Rust 側 `FeatureKey` の `Ord` と同じキー順（`_vocab_row_sort_key`）で
+    書く（Rust ローダーが binary_search で引くため。version 0x07 までの
+    feature_id 順とは異なる）。`feature_id`（元の sklearn 特徴量ID。CSC 重み
+    行列の列インデックスと対応）は行位置と一致しなくなるため、明示フィールドと
+    して各行の先頭に書く。
 
     `cat_by_id`（GBDT 境界のとき、`{feature_id: (column, code)}`）を渡すと各エントリ
     末尾に `(column, code)` を書く。カテゴリカル列を持たない feature_id は番兵で埋める。
     None（線形境界）のときは書かない。ヘッダ flags bit0 と対応させること。
     """
-    n_features = len(vocab)
-    id_to_key = {v: k for k, v in vocab.items()}
-    sorted_keys = [id_to_key[i] for i in range(n_features)]
-
-    vocab_bytes = bytearray()
-    for fid, key in enumerate(sorted_keys):
+    parsed = []
+    for key, fid in vocab.items():
         try:
             ft, ct_vals, cp_vals, u8_val = parse_feature_key(key)
         except (ValueError, KeyError) as e:
@@ -786,6 +815,13 @@ def _build_vocab_bytes(vocab: dict, cat_by_id: dict | None = None) -> bytes:
                 f"特徴量キーの解析に失敗しました: {key!r} ({e!r})。"
                 "学習TSVの列ズレや不正な文字種が混入していないか確認してください。"
             ) from None
+        parsed.append((fid, ft, ct_vals, cp_vals, u8_val))
+
+    parsed.sort(key=lambda row: _vocab_row_sort_key(row[1], row[4], row[2], row[3]))
+
+    vocab_bytes = bytearray()
+    for fid, ft, ct_vals, cp_vals, u8_val in parsed:
+        vocab_bytes += struct.pack("<I", fid)  # uint32 LE
         vocab_bytes.append(ft)
         for ct in ct_vals:
             vocab_bytes.append(ct)

@@ -36,7 +36,7 @@ CT_KANJI = 0x42
 # ファイル識別情報（exporter.py の MAGIC_MBM / VERSION と同期）
 MAGIC = b'MOMO'
 # バージョンは `.mbmf`・GBDT フィクスチャと共有する（それぞれ base.VERSION を使う）
-VERSION = 0x07
+VERSION = 0x08
 
 # ヘッダ flags（version 0x07）。bit0 = 統合語彙が GBDT カテゴリカルを持つ。
 # このフィクスチャは線形境界なので flags=0（vocab に column/code を書かない）。
@@ -61,6 +61,8 @@ N_FEATURES = 5
 READ_CLASSES = ["カ", "キ", "ク"]
 
 # 語彙テーブル: 各エントリ = (feature_type, [ct_vals], [cp_vals], u8_val, feature_id)
+# feature_id 昇順（=CSC重み行列の列インデックス）で定義する。ファイルへ書き出す
+# ときの行順（キー順）は build_vocab() が並べ替える（この定義順とは無関係）。
 VOCAB = [
     (FT_BIAS,          [],         [],                None, 0),
     (FT_CHAR_SELF,     [],         [0x6F22],          None, 1),  # 漢
@@ -137,24 +139,36 @@ def build_header(flags: int = 0x00) -> bytes:
     )
 
 
-def build_vocab(cat_map: dict | None = None) -> bytes:
-    """統合語彙テーブル（version 0x07）を組む。
+def _vocab_sort_key(entry: tuple) -> tuple:
+    """VOCAB の1行を、Rust `FeatureKey` の `Ord` と同じフィールド優先順位
+    `(feature_type, u8val, ct[0..3], cp[0..3])` で比較できる正準タプルに落とす
+    （momo_py.exporter の `_vocab_row_sort_key` と同じ考え方）。
+    """
+    ft, ct_vals, cp_vals, u8_val, _fid = entry
+    return (ft, u8_val if u8_val is not None else 0, tuple(ct_vals), tuple(cp_vals))
 
-    feature_id はファイル内の並び順（VOCAB の順）で暗黙に決まるため書き出さない。
-    VOCAB は feature_id 昇順で定義してある前提。
+
+def build_vocab(cat_map: dict | None = None) -> bytes:
+    """統合語彙テーブル（version 0x08）を組む。
+
+    各行はキー順（`_vocab_sort_key`、Rust `FeatureKey` の `Ord` と同じ順）で書く。
+    `VOCAB` は feature_id 昇順で定義してあるが、ファイルへの書き出し順（行順）は
+    ここで並べ替える。feature_id は行位置と一致しなくなるため明示フィールドとして書く。
 
     `cat_map` を渡すと（GBDT フィクスチャ用、flags bit0=1）、各エントリ末尾に
     `(column, code)` を書き出す。`cat_map[feature_id]` が無いキーは番兵で埋める。
     None のとき（線形フィクスチャ、flags=0）は書き出さない。
     """
+    sorted_vocab = sorted(VOCAB, key=_vocab_sort_key)
+
     buf = bytearray()
-    for fid, (ft, ct_vals, cp_vals, u8_val, defined_fid) in enumerate(VOCAB):
-        assert defined_fid == fid, f"VOCAB は feature_id 昇順で定義すること: {defined_fid} != {fid}"
+    for ft, ct_vals, cp_vals, u8_val, fid in sorted_vocab:
         # 整合性チェック
         assert len(ct_vals) == chartype_count(ft), f"FT {ft:#x} ct count"
         assert len(cp_vals) == char32_count(ft), f"FT {ft:#x} cp count"
         assert (u8_val is not None) == is_uint8_payload(ft), f"FT {ft:#x} u8"
 
+        buf += struct.pack('<I', fid)
         buf.append(ft)
         for ct in ct_vals:
             buf.append(ct)

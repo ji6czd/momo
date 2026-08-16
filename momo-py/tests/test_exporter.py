@@ -119,7 +119,7 @@ class TestExportNameDict:
 
         data = out.read_bytes()
         assert data[:4] == b"MOMO"
-        assert data[4] == 0x07  # version
+        assert data[4] == 0x08  # version
 
         # 人名辞書テーブル（表層形 + ユニット別読み）+ 末尾に単一文字辞書テーブル
         expected = bytearray(struct.pack("<I", 2))
@@ -146,7 +146,7 @@ class TestExportNameDict:
         export(str(zip_path), str(out))
 
         data = out.read_bytes()
-        assert data[4] == 0x07
+        assert data[4] == 0x08
         # 辞書なしモデルは n_names = 0、続けて単一文字辞書テーブル
         assert data.endswith(struct.pack("<I", 0) + _expected_single_char_section())
 
@@ -155,12 +155,13 @@ class TestExportNameDict:
 # export_float（.mbmf: 量子化前 float32 サイドカー）
 # ------------------------------------------------------------------ #
 def _skip_vocab(buf: bytes, offset: int, n_features: int, has_cat: bool = False) -> int:
-    """統合語彙テーブル（version 0x07）を読み飛ばして直後のオフセットを返す。
+    """統合語彙テーブル（version 0x08）を読み飛ばして直後のオフセットを返す。
 
-    feature_id は行番号で暗黙なので格納されない。`has_cat`（GBDT境界）のとき、
+    各エントリ先頭に feature_id(u32) が明示される。`has_cat`（GBDT境界）のとき、
     各エントリ末尾に column(u32)+code(u32) が付く。
     """
     for _ in range(n_features):
+        offset += 4  # feature_id
         ft = buf[offset]
         offset += 1
         offset += chartype_count(ft)
@@ -205,7 +206,7 @@ class TestExportFloat:
 
         data = out.read_bytes()
         assert data[:4] == b"MBMF"
-        assert data[4] == 0x07  # version（.mbm と共有。区別は magic だけで行う）
+        assert data[4] == 0x08  # version（.mbm と共有。区別は magic だけで行う）
 
     def test_read_weights_are_plain_float32(self, tmp_path):
         zip_path = _make_model_zip(tmp_path, None)
@@ -275,7 +276,8 @@ class TestExportFloat:
 
 
 # ------------------------------------------------------------------ #
-# 統合語彙テーブル（version 0x07）: カテゴリカルの埋め込みと cat⊆読み 強制
+# 統合語彙テーブル（version 0x08）: キー順ソート・feature_id明示・
+# カテゴリカルの埋め込みと cat⊆読み 強制
 # ------------------------------------------------------------------ #
 from momo_py.exporter import (  # noqa: E402
     NO_CAT_COLUMN,
@@ -301,22 +303,40 @@ class TestUnifiedVocab:
         with pytest.raises(ValueError, match="読み語彙に存在しません"):
             _build_cat_by_feature_id(vocab, cat_names, cat_vocabs)
 
-    def test_vocab_bytes_omits_feature_id(self):
-        # feature_id は行番号で暗黙。線形（cat_by_id=None）では column/code も書かない。
+    def test_vocab_bytes_embeds_feature_id(self):
+        # feature_id は各行先頭に明示フィールドとして書かれる（行位置とは無関係）。
+        # 線形（cat_by_id=None）では column/code は書かない。
         vocab = {"bias": 0, "char_s=漢": 1}
-        payload_only = _build_vocab_bytes(vocab, cat_by_id=None)
-        # bias(ft 1byte) + char_s=漢(ft 1 + cp 4) = 1 + 5 = 6 bytes、feature_id なし
-        assert len(payload_only) == 1 + (1 + 4)
+        data = _build_vocab_bytes(vocab, cat_by_id=None)
+        # bias: feature_id(4)+ft(1) = 5。char_s=漢: feature_id(4)+ft(1)+cp(4) = 9
+        assert len(data) == 5 + 9
+        bias_fid, bias_ft = struct.unpack_from("<IB", data, 0)
+        assert (bias_fid, bias_ft) == (0, FT.BIAS)
+        kanji_fid, kanji_ft = struct.unpack_from("<IB", data, 5)
+        assert (kanji_fid, kanji_ft) == (1, FT.CHAR_SELF)
+
+    def test_vocab_bytes_reorders_rows_by_key_not_feature_id(self):
+        # 行順はキー順（Rust FeatureKey の Ord 順）であって feature_id 順ではない。
+        # char_s=漢(ft=0x90) に feature_id=0、bias(ft=0x00) に feature_id=1 を
+        # 割り当てても、書き出しは bias が先頭行になる（ft の値で決まる）。
+        # feature_id は明示フィールドとして元の値を保つ。
+        vocab = {"char_s=漢": 0, "bias": 1}
+        data = _build_vocab_bytes(vocab, cat_by_id=None)
+        fid0, ft0 = struct.unpack_from("<IB", data, 0)
+        assert (fid0, ft0) == (1, FT.BIAS)
+        fid1, ft1 = struct.unpack_from("<IB", data, 5)
+        assert (fid1, ft1) == (0, FT.CHAR_SELF)
 
     def test_vocab_bytes_embeds_cat(self):
         # GBDT（cat_by_id あり）では各エントリ末尾に (column, code)。cat の無い bias は番兵。
         vocab = {"bias": 0, "char_s=漢": 1}
         cat_by_id = {1: (0, 5)}
         data = _build_vocab_bytes(vocab, cat_by_id=cat_by_id)
-        # bias: ft(1) + column(4)+code(4)。char_s=漢: ft(1)+cp(4) + column(4)+code(4)
-        assert len(data) == (1 + 8) + (1 + 4 + 8)
+        # bias: feature_id(4)+ft(1)+column(4)+code(4) = 13。
+        # char_s=漢: feature_id(4)+ft(1)+cp(4)+column(4)+code(4) = 17
+        assert len(data) == 13 + 17
         # bias(feature_id 0): 番兵、続いて char_s=漢(feature_id 1): (0, 5)
-        bias_col, bias_code = struct.unpack_from("<II", data, 1)
+        bias_col, bias_code = struct.unpack_from("<II", data, 4 + 1)
         assert (bias_col, bias_code) == (NO_CAT_COLUMN, 0)
-        kanji_col, kanji_code = struct.unpack_from("<II", data, (1 + 8) + 1 + 4)
+        kanji_col, kanji_code = struct.unpack_from("<II", data, 13 + 4 + 1 + 4)
         assert (kanji_col, kanji_code) == (0, 5)

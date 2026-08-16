@@ -9,13 +9,16 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x07
+//!   version      : u8      0x08
 //!   flags        : u8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
 //!   _reserved    : u8[2]   0x00 × 2
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
 //!
-//! [統合語彙テーブル]        n_features エントリ（feature_id 昇順 → feature_id は行番号で暗黙）
+//! [統合語彙テーブル]        n_features エントリ（キー順 = Rust `FeatureKey` の `Ord` 順。
+//!                          version 0x08 で feature_id を明示フィールドに戻した）
+//!   feature_id   : u32 LE    元の学習時特徴量ID。CSC 重み行列の列インデックスと対応
+//!                            （CSC 側は今も feature_id 昇順のまま。行位置とは無関係）
 //!   feature_type : u8
 //!   chartype[N]  : u8 × N    N = chartype_count(feature_type)
 //!   char32[M]    : u32 × M   M = char32_count(feature_type)
@@ -70,7 +73,7 @@
 //!       utf8     : u8[len] 読み (カタカナ、UTF-8)
 //! ```
 //!
-//! version 0x06 以前は読めない。フォーマット互換性を装って誤動作するより
+//! version 0x07 以前は読めない。フォーマット互換性を装って誤動作するより
 //! 明示的にエラーにする方針（人名特徴量・読みの有無・語彙レイアウトが精度に
 //! 直結するため）。旧バージョンのファイルは再エクスポートが必要。
 //!
@@ -81,6 +84,25 @@
 //! 格納されていた（実測で語彙2枚がファイルの約6割）。0x07 で読み語彙に
 //! `(column, code)` を吸収し、feature_id を行番号で暗黙化して、語彙を1枚にした。
 //! 前提は「カテゴリカルキーは読み語彙の部分集合」（exporter が保証）。
+//!
+//! ## 語彙のキー順ソート化（version 0x08）で変えた理由
+//!
+//! `docs/zerocopy-model-plan.md` の検討（PC上での速度・メモリ計測）を受けて、
+//! 将来 mmap 経由でロードする場合にも同じ解釈コードで読める形へ変更した。
+//! 0x07 まではファイルが feature_id 順（行位置 = feature_id）で、Rust の
+//! `binary_search` で引くには読み込み後に `Vec<VocabEntry>` を Rust `Ord` で
+//! 再ソートする必要があった（全 materialize が前提になる）。0x08 で exporter が
+//! キー順で書くようにし、この再ソートを廃止した。feature_id は行位置と
+//! 一致しなくなるため明示フィールドに戻した（+4B/エントリ。CSC 重み行列の列は
+//! 今も feature_id 順のまま変更していない）。
+//!
+//! ロード戦略（`Vec` に全読み込みするか mmap で借用するか）自体は変えていない。
+//! フォーマットを両対応可能な形にしただけで、今回はロード戦略の切り替えは対象外。
+//!
+//! （境界GBDT木のフラット配列化も同時に試したが、PC上の合成木ベンチマークでは
+//! 高速化が見えたものの実モデルで検証したところ逆に40〜60%遅化したため見送った。
+//! 木は引き続き 0x07 までと同じ `Box<TreeNode>` 再帰構造・再帰ノード列のまま。
+//! 詳細は `docs/zerocopy-model-plan.md`）。
 //!
 //! ## CSC 形式で保存する理由
 //!
@@ -116,7 +138,7 @@ const MAGIC: [u8; 4] = *b"MOMO";
 /// フォーマットのバージョン。`.mbmf` (`float_loader.rs`) と同じ番号を共有する
 /// ―― 両者はセクション構成を共通に保つ設計なので、採番を分けると
 /// 「どちらの 0x02 か」を常に意識する羽目になる。
-pub(crate) const VERSION: u8 = 7;
+pub(crate) const VERSION: u8 = 8;
 
 /// ヘッダの flags バイト（`_reserved[0]`）のビット定義。
 ///
@@ -212,6 +234,18 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 
     // ---- 統合語彙テーブル ----
     model.vocab = read_vocab(reader, n_features, has_cat, path)?;
+    // 検証: vocab がキー順（Rust Ord）にソート済みであること。version 0x08 で
+    // exporter がキー順で書く契約になった（read_vocab の doc 参照）。ここで
+    // 再ソートはしない（それでは全 materialize が必須になり、将来 mmap で
+    // スライスを借用する構成にできない）。契約が破れている（壊れたファイル・
+    // exporter のバグ）場合、黙って進めると binary_search が存在するキーを
+    // 見失い静かに誤動作するため、後続セクションを読む前に明示的エラーにする。
+    if !model.vocab.windows(2).all(|w| w[0].key <= w[1].key) {
+        return Err(Error::CorruptModel {
+            reason: "統合語彙テーブルがキー順（FeatureKey の Ord）にソートされていません"
+                .to_string(),
+        });
+    }
 
     // ---- 読みラベルテーブル ----
     model.read_classes = read_labels(reader, n_classes, path)?;
@@ -244,10 +278,6 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     // ---- 単一文字辞書テーブル (version 0x04 途中で追加) ----
     model.single_char_dict = read_single_char_dict(reader, path)?;
 
-    // ---- 後処理: vocab を Rust の Ord で再ソート ----
-    // C++ 版とソート順が異なるため、binary_search できるように改めて整列する。
-    model.vocab.sort_by(|a, b| a.key.cmp(&b.key));
-
     Ok(model)
 }
 
@@ -255,13 +285,16 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 // セクション別読み込み
 // ============================================================
 
-/// 統合語彙テーブルを読む（version 0x07）。
+/// 統合語彙テーブルを読む（version 0x08）。
 ///
 /// `.mbm` (`loader.rs`) と `.mbmf` (`float_loader.rs`) でバイト列は完全に同一のため、
 /// `pub(crate)` にして両方から呼べるようにしている。
 ///
-/// - `feature_id` はファイル内の並び順（0..n_features）で暗黙に決まる（明示格納しない）。
-///   CSC 重み行列の列インデックスと一致させるため、ファイルは feature_id 昇順で格納する。
+/// - ファイルはキー順（Rust `FeatureKey` の `Ord` 順）で格納されている
+///   （exporter が保証。`load_from_reader` が読了後に検証する）。
+/// - `feature_id`（元の学習時特徴量ID。CSC 重み行列の列インデックスと対応）は
+///   行位置と一致しないため明示フィールドとして読む（version 0x07 までは
+///   行位置=feature_id の暗黙前提だった）。
 /// - `has_cat` が真のとき、各エントリの `FeatureKey` の後に GBDT カテゴリカル
 ///   `column: u32` + `code: u32` が続く（GBDT 境界モデルのとき。ヘッダの flags で決まる）。
 ///   `column == NO_CAT_COLUMN` はカテゴリカル列なし（Bias 等）。
@@ -272,7 +305,15 @@ pub(crate) fn read_vocab<R: Read>(
     path: &Path,
 ) -> Result<Vec<VocabEntry>> {
     let mut vocab = Vec::with_capacity(n_features as usize);
-    for feature_id in 0..n_features {
+    for _ in 0..n_features {
+        let feature_id = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+        if feature_id >= n_features {
+            return Err(Error::CorruptModel {
+                reason: format!(
+                    "統合語彙のfeature_id={feature_id}がn_features={n_features}以上です"
+                ),
+            });
+        }
         let key = read_feature_key(reader, path)?;
         let (cat_column, cat_code) = if has_cat {
             let column = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
@@ -747,7 +788,7 @@ mod tests {
     fn n_classes_over_u16_returns_error() {
         // csc_rowind がクラスIDを u16 で持つため、n_classes は MAX_CLASSES (65536)
         // を超えてはならない。ここでは 65537 (0x00010001) を与えて弾かれることを確認する。
-        let bad_data = b"MOMO\x07\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MOMO\x08\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
@@ -815,6 +856,45 @@ mod tests {
             result,
             Err(Error::UnsupportedVersion { version: 0x06 })
         ));
+    }
+
+    #[test]
+    fn old_version_v7_returns_error() {
+        // v7（語彙が feature_id 順・feature_id 暗黙）も読めない。語彙のキー順
+        // ソート化・feature_id明示化でレイアウトが変わったため、黙って読むと
+        // ずれて誤動作する。
+        let bad_data = b"MOMO\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut cursor = std::io::Cursor::new(&bad_data[..]);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedVersion { version: 0x07 })
+        ));
+    }
+
+    #[test]
+    fn unsorted_vocab_returns_corrupt_model_error() {
+        // version 0x08 は exporter がキー順で書く契約。契約が破れたファイルを
+        // 黙って進めると binary_search が存在するキーを見失い静かに誤動作するため、
+        // 明示的に CorruptModel で弾くことを確認する。
+        // n_classes=1, n_features=2, ヘッダ直後に feature_id 順が逆転した
+        // 2エントリ（どちらも Bias、feature_id だけ違う）を置く。
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"MOMO");
+        bytes.push(VERSION);
+        bytes.extend_from_slice(&[0, 0, 0]); // reserved (flags=0: has_cat無し)
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // n_classes
+        bytes.extend_from_slice(&2u32.to_le_bytes()); // n_features
+        // 統合語彙: Bias キー2個。1個目を type_1(Kanji) 相当の大きいキー、
+        // 2個目を Bias（最小キー）にして、キー順が逆転している状態を作る。
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // feature_id=0
+        bytes.push(FeatureType::TypeSelf as u8);
+        bytes.push(CharType::Kanji as u8);
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // feature_id=1
+        bytes.push(FeatureType::Bias as u8);
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = load_from_reader(&mut cursor, Path::new("test"));
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
     #[test]

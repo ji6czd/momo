@@ -21,9 +21,9 @@ tasks:
     desc: Train the model (Python)
     deps: [createdata]
     cmds:
-      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 4 --jobs {{.JOBS}}
-      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 5 --jobs {{.JOBS}}
-      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 7 --jobs {{.JOBS}}
+      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 4 --jobs {{.JOBS}} --boundary-n-estimators 100 --boundary-num-leaves 23
+      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 5 --jobs {{.JOBS}} --boundary-n-estimators 200
+      - uv run trainer train --tsv '{{.DATASET_DIR}}/basic_data.tsv' --name-dict '{{.DATASET_DIR}}/person_name_dic.tsv' --window 7 --jobs {{.JOBS}} --boundary-n-estimators 200
 
   test:
     desc: Run Python tests

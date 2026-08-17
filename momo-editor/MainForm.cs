@@ -14,6 +14,10 @@ public partial class MainForm : Form
     private FormattedDocumentView? _view;
     private readonly AppSettings _settings = AppSettings.Load();
 
+    // AdjustStartupSize の幅計算に足す安全マージン（ピクセル）。プローブ測定と
+    // 実際の描画幅が環境依存でわずかに食い違うケースへの経験的な余裕代。
+    private const int WidthSafetyMargin = 12;
+
     // テキスト→点字変換に使う点訳器。テーブルを切り替えたら破棄し、次の変換時に作り直す。
     private MomoFfi.BrailleTranslatorHandle? _translator;
 
@@ -42,11 +46,11 @@ public partial class MainForm : Form
     public MainForm(string? initialPath = null)
     {
         InitializeComponent();
-        // DejaVu Sans はインストーラでシステムインストールされる想定だが、インストーラを
+        // SixBraille HLF はインストーラでシステムインストールされる想定だが、インストーラを
         // 経由しない実行（開発時の dotnet run 等）では無いことがある。その場合は
         // Cascadia Mono（Windows 11 標準搭載の等幅コーディングフォント）へフォールバックする。
         // フォントリンク任せにすると環境ごとに描画フォントが変わってしまう。
-        if (richTextBox.Font.Name != "DejaVu Sans")
+        if (richTextBox.Font.Name != "SixBraille HLF")
             richTextBox.Font = new Font("Cascadia Mono", 28F, FontStyle.Regular, GraphicsUnit.Point);
         _keyMap = new()
         {
@@ -87,8 +91,9 @@ public partial class MainForm : Form
     {
         var (textWidth, lineHeight) = MeasureBrailleMetrics(_document.Config.LineWidth);
 
-        // 幅: 縦スクロールバーと内部余白の分を加える。
-        int neededW = textWidth + SystemInformation.VerticalScrollBarWidth + 12;
+        // 幅: 縦スクロールバーと内部余白の分に加え、環境によって実測値と実際の描画幅が
+        // わずかに食い違うことがあるための安全マージンを加える。
+        int neededW = textWidth + SystemInformation.VerticalScrollBarWidth + 12 + WidthSafetyMargin;
         if (ClientSize.Width < neededW)
             ClientSize = new Size(neededW, ClientSize.Height);
         // 1 行分を割り込めないよう最小幅も設定。

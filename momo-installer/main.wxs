@@ -67,14 +67,15 @@
             </Directory>
 
             <!-- Windows Fonts フォルダ。点字セル(U+2800-28FF)をエディタで表示するための
-                 DejaVu Sans を同梱・システムインストールする。ライセンス文言は
-                 licenses\DejaVuSans-LICENSE.txt として APPLICATIONFOLDER に同梱。 -->
+                 SixBraille（横線・枠あり = HLF face を含む12書体入りの .ttc）を同梱・
+                 システムインストールする。ライセンス文言は licenses\SixBraille-LICENSE.txt
+                 として APPLICATIONFOLDER に同梱。 -->
             <Directory Id='FontsFolder'>
-                <Component Id='DejaVuSansFont' Guid='CAB123B9-5630-4E52-BAE5-FF96A8D572E8'>
-                    <File Id='DejaVuSansTtf'
-                          Name='DejaVuSans.ttf'
+                <Component Id='SixBrailleFont' Guid='D3E4F5A6-1B2C-4D8E-9F0A-3C5E7B9D1F24'>
+                    <File Id='SixBrailleTtc'
+                          Name='sixbraille.ttc'
                           DiskId='1'
-                          Source='$(var.StageDir)\fonts\DejaVuSans.ttf'
+                          Source='$(var.StageDir)\fonts\sixbraille.ttc'
                           KeyPath='yes'
                           TrueType='yes'/>
                 </Component>
@@ -185,12 +186,12 @@
                     </Directory>
 
                     <Directory Id='Licenses' Name='licenses'>
-                        <!-- DejaVu Sans のライセンス文言（フォント本体は FontsFolder に別途配置） -->
-                        <Component Id='DejaVuSansLicense' Guid='95C8B935-D058-4275-B81E-D5B42BF1F839'>
-                            <File Id='DejaVuSansLicenseTxt'
-                                  Name='DejaVuSans-LICENSE.txt'
+                        <!-- SixBraille のライセンス文言（フォント本体は FontsFolder に別途配置） -->
+                        <Component Id='SixBrailleLicense' Guid='6A8C2E4F-0D1B-4A3C-8E5F-2B4D6C8A0E31'>
+                            <File Id='SixBrailleLicenseTxt'
+                                  Name='SixBraille-LICENSE.txt'
                                   DiskId='1'
-                                  Source='$(var.StageDir)\licenses\DejaVuSans-LICENSE.txt'
+                                  Source='$(var.StageDir)\licenses\SixBraille-LICENSE.txt'
                                   KeyPath='yes'/>
                         </Component>
                     </Directory>
@@ -242,8 +243,8 @@
             <ComponentRef Id='DataFiles'/>
             <ComponentRef Id='DatasetEnv'/>
             <ComponentRef Id='ApplicationShortcut'/>
-            <ComponentRef Id='DejaVuSansFont'/>
-            <ComponentRef Id='DejaVuSansLicense'/>
+            <ComponentRef Id='SixBrailleFont'/>
+            <ComponentRef Id='SixBrailleLicense'/>
 
             <Feature
                 Id='EnvironmentPath'

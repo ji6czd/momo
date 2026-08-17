@@ -1,0 +1,8 @@
+SixBraille 202002a
+長野高専 電子情報工学科 伊藤祥一 (shoichi@nagano-nct.ac.jp)
+
+License is public domain.
+See below URL for detail.
+http://teacher.nagano-nct.ac.jp/ito/downloads/font/
+
+(出典: sixbraille202002a 同梱 README.txt および Webフォント関連/sixbraille.css)

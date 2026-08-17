@@ -222,12 +222,12 @@ partial class MainForm
 
         // richTextBox
         richTextBox.Dock = DockStyle.Fill;
-        // 点字グリフ（U+2800〜）を256/256完全カバーし、点字グリフ同士は1500unit等幅
-        // （全体はプロポーショナルフォント）。OS/2 の Unicode Range も Braille Patterns を
-        // 宣言済みなのでフォントリンクによる差し替えが起きない。インストーラで
-        // システムインストールされる（momo-installer/fonts/）。無い環境（インストーラを
-        // 経由しない実行等）へのフォールバックは MainForm コンストラクタで行う。
-        richTextBox.Font = new Font("DejaVu Sans", 28F, FontStyle.Regular, GraphicsUnit.Point);
+        // SixBraille HLF（横線・枠付き）。空いている点の位置も枠と横線で見えるため、
+        // プレーンな点だけの書体より読み取りやすい。U+2800〜U+283F（6点点字の全64パターン）
+        // をカバーしており、エディタが表示しうる範囲（日本語１級・UEB grade1/2）はすべて
+        // この範囲に収まる。インストーラでシステムインストールされる（momo-installer/fonts/）。
+        // 無い環境（インストーラを経由しない実行等）へのフォールバックは MainForm コンストラクタで行う。
+        richTextBox.Font = new Font("SixBraille HLF", 28F, FontStyle.Regular, GraphicsUnit.Point);
         richTextBox.ScrollBars = RichTextBoxScrollBars.Both;
         richTextBox.WordWrap = false;
         richTextBox.AcceptsTab = true;

@@ -293,8 +293,8 @@ tasks:
       - cp "{{.DATA}}/basic_data_5.mbm"               "{{.STAGE}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"               "{{.STAGE}}/data/"
       # エディタの点字セル表示用フォント（システムインストール）
-      - cp "{{.ROOT_DIR}}/momo-installer/fonts/DejaVuSans.ttf" "{{.STAGE}}/fonts/"
-      - cp "{{.ROOT_DIR}}/momo-installer/fonts/LICENSE-DejaVu.txt" "{{.STAGE}}/licenses/DejaVuSans-LICENSE.txt"
+      - cp "{{.ROOT_DIR}}/momo-installer/fonts/sixbraille.ttc" "{{.STAGE}}/fonts/"
+      - cp "{{.ROOT_DIR}}/momo-installer/fonts/LICENSE-SixBraille.txt" "{{.STAGE}}/licenses/SixBraille-LICENSE.txt"
 
   dist:msi:
     desc: Build Windows installer (.msi) — requires WiX Toolset v3

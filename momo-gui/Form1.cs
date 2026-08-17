@@ -174,10 +174,10 @@ public partial class MainForm : Form
         {
             var braille = Translate(line);
             if (braille is null) return "点字変換エラーが発生しました";
-            doc.Segments.Add(new Segment(braille, paragraphEnd: true));
+            doc.Entries.Add(new TextSegment(braille, paragraphEnd: true));
         }
-        if (doc.Segments.Count == 0)
-            doc.Segments.Add(new Segment("", paragraphEnd: true));
+        if (doc.Entries.Count == 0)
+            doc.Entries.Add(new TextSegment("", paragraphEnd: true));
 
         // 折返し・ページ分割・ヘッダ生成・符号化はすべて Rust(momors-braille) 側が行う。
         var bytes = MomoFfi.WriteDocument(doc, format);

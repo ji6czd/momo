@@ -69,6 +69,26 @@ def main():
         "実データでBOUNDARY不一致が線形比87%%減、.mbm/.mbmf書き出しにも対応済み。"
         "sgd: 旧SGDClassifier、比較用に残置）",
     )
+    trainer_parser.add_argument(
+        "--boundary-n-estimators",
+        dest="boundary_n_estimators",
+        type=int,
+        default=300,
+        help="境界モデル(gbdt)の木の本数（デフォルト: 300。導入時の初期実験値をそのまま"
+        "使っており、コスト側の探索はされていない。速度と精度(recall_audit)のトレードオフを"
+        "見るための実験用パラメータ）",
+    )
+    trainer_parser.add_argument(
+        "--boundary-num-leaves",
+        dest="boundary_num_leaves",
+        type=int,
+        default=31,
+        help="境界モデル(gbdt)の1本あたりの葉の数（デフォルト: 31。LightGBMのライブラリ既定値の"
+        "まま未調整。速度と精度のトレードオフを見るための実験用パラメータ）。"
+        "参考: カテゴリカル列数は window=4で21列、window=5で28列、window=7で38列"
+        "（葉31は分岐30個ぶんなので、window=4は列数に対して余裕があり、window=7は"
+        "既に列数を下回っている）",
+    )
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -92,6 +112,8 @@ def main():
             n_jobs=args.jobs,
             name_dict=args.name_dict,
             boundary_algo=args.boundary_algo,
+            boundary_n_estimators=args.boundary_n_estimators,
+            boundary_num_leaves=args.boundary_num_leaves,
         )
 
 

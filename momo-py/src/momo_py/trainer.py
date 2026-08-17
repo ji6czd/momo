@@ -586,6 +586,8 @@ def train(
     n_jobs: int = 4,
     name_dict: str | None = None,
     boundary_algo: str = "gbdt",
+    boundary_n_estimators: int = 300,
+    boundary_num_leaves: int = 31,
 ) -> None:
     """
     TSVから読みモデルと境界モデルを学習し、1つのZIPにまとめる。
@@ -768,9 +770,15 @@ def train(
         X_boundary_cat, boundary_cat_names, boundary_cat_vocabs = fit_categorical(X_dicts)
         print(f"   カテゴリカル列数: {len(boundary_cat_names)}")
 
-        print("🏋️  [境界モデル] 学習中 (LGBMClassifier)...")
+        print(
+            f"🏋️  [境界モデル] 学習中 (LGBMClassifier, n_estimators={boundary_n_estimators}, "
+            f"num_leaves={boundary_num_leaves})..."
+        )
         model_boundary = LGBMClassifier(
-            n_estimators=300, num_leaves=31, random_state=42, verbose=-1
+            n_estimators=boundary_n_estimators,
+            num_leaves=boundary_num_leaves,
+            random_state=42,
+            verbose=-1,
         )
         model_boundary.fit(
             X_boundary_cat, Y_boundary, categorical_feature=list(range(len(boundary_cat_names)))

@@ -115,24 +115,22 @@
 //! int32_t momo_back_trans_segment_text_w(MomoBackTrans, int32_t idx, uint16_t* buf, int32_t buf_len);
 //! ```
 
-// cbindgen は #[no_mangle] (Rust 2024) 未対応のため edition 2021 を使用する。
-// 1.82+ で発生する "unsafe attribute used without unsafe" lint を抑制する。
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::os::raw::c_int;
 
+use momors_braille::NabccCase;
 use momors_braille::document::{
     BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, ParagraphEntry, Segment,
 };
 use momors_braille::formatter::{
-    render, wrap_line, wrap_suffix, FormattedDocument, PageInfo, PhysicalLine, RenderedLine,
+    FormattedDocument, PageInfo, PhysicalLine, RenderedLine, render, wrap_line, wrap_suffix,
 };
 use momors_braille::writer::OutputFormat;
-use momors_braille::NabccCase;
 use momors_braille::{
-    detect_language, embedded_table, embedded_tables, BackTransResult, BrailleBackTranslator,
-    BrailleResult, BrailleTranslator, EnglishTranslator, JapaneseTranslator, Language, Table,
-    UnknownCharPolicy,
+    BackTransResult, BrailleBackTranslator, BrailleResult, BrailleTranslator, EnglishTranslator,
+    JapaneseTranslator, Language, Table, UnknownCharPolicy, detect_language, embedded_table,
+    embedded_tables,
 };
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
@@ -308,7 +306,7 @@ fn write_csr(rows: &[Vec<usize>], row_ptr: *mut i32, col_idx: *mut i32) {
 
 /// UTF-16 モデルパス（`.mbm`）から予測器を作る。単一漢字辞書はモデル同梱のものを使う。
 /// 失敗（ファイル不正・NULL）時は NULL を返す。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_predictor_new_w(model_path: *const u16) -> *mut PredictorHandle {
     let model = match unsafe { lpwstr_to_string(model_path) } {
         Some(p) => p,
@@ -322,7 +320,7 @@ pub extern "C" fn momo_predictor_new_w(model_path: *const u16) -> *mut Predictor
 }
 
 /// 予測器を解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_predictor_free(handle: *mut PredictorHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -334,14 +332,14 @@ pub extern "C" fn momo_predictor_free(handle: *mut PredictorHandle) {
 // ============================================================
 
 /// 組み込みテーブルの数。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_embedded_count() -> c_int {
     embedded_tables().len() as c_int
 }
 
 /// 組み込みテーブル idx の name（UTF-16, null 終端）を buf に書く。
 /// 戻り値は必要な u16 要素数。name が None なら 0、idx が範囲外なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_embedded_name_w(idx: c_int, buf: *mut u16, buf_len: c_int) -> c_int {
     match embedded_tables().get(idx as usize) {
         Some(t) => match t.name.as_deref() {
@@ -354,7 +352,7 @@ pub extern "C" fn momo_table_embedded_name_w(idx: c_int, buf: *mut u16, buf_len:
 
 /// 組み込みテーブル idx の displayname（UTF-16, null 終端）を buf に書く。
 /// 戻り値は必要な u16 要素数。displayname が None なら 0、idx が範囲外なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_embedded_displayname_w(
     idx: c_int,
     buf: *mut u16,
@@ -370,7 +368,7 @@ pub extern "C" fn momo_table_embedded_displayname_w(
 }
 
 /// 名前（`[metadata].name`）で組み込みテーブルを引く。見つからない／NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_from_embedded_name_w(name: *const u16) -> *mut TableHandle {
     let name = match unsafe { lpwstr_to_string(name) } {
         Some(n) => n,
@@ -383,7 +381,7 @@ pub extern "C" fn momo_table_from_embedded_name_w(name: *const u16) -> *mut Tabl
 }
 
 /// 日本語スキーマの TOML ファイルからテーブルを読む。失敗時 NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_from_file_w(path: *const u16) -> *mut TableHandle {
     let path = match unsafe { lpwstr_to_string(path) } {
         Some(p) => p,
@@ -396,7 +394,7 @@ pub extern "C" fn momo_table_from_file_w(path: *const u16) -> *mut TableHandle {
 }
 
 /// UEB（英語）スキーマの TOML ファイルからテーブルを読む。失敗時 NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_from_ueb_file_w(path: *const u16) -> *mut TableHandle {
     let path = match unsafe { lpwstr_to_string(path) } {
         Some(p) => p,
@@ -409,7 +407,7 @@ pub extern "C" fn momo_table_from_ueb_file_w(path: *const u16) -> *mut TableHand
 }
 
 /// テーブルの name（UTF-16）。None なら 0、handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_name_w(
     handle: *const TableHandle,
     buf: *mut u16,
@@ -426,7 +424,7 @@ pub extern "C" fn momo_table_name_w(
 }
 
 /// テーブルの displayname（UTF-16）。None なら 0、handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_displayname_w(
     handle: *const TableHandle,
     buf: *mut u16,
@@ -443,7 +441,7 @@ pub extern "C" fn momo_table_displayname_w(
 }
 
 /// テーブルを解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_table_free(handle: *mut TableHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -456,7 +454,7 @@ pub extern "C" fn momo_table_free(handle: *mut TableHandle) {
 
 /// テーブルから日本語変換器を作る。**`table` を消費する**（呼び出し後は無効・
 /// `momo_table_free` に渡してはならない）。table が NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_japanese_translator_new(
     table: *mut TableHandle,
 ) -> *mut JapaneseTranslatorHandle {
@@ -470,7 +468,7 @@ pub extern "C" fn momo_japanese_translator_new(
 }
 
 /// 名前で組み込みテーブルを指定して日本語変換器を作る。失敗時 NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_japanese_translator_from_embedded_name_w(
     name: *const u16,
 ) -> *mut JapaneseTranslatorHandle {
@@ -485,7 +483,7 @@ pub extern "C" fn momo_japanese_translator_from_embedded_name_w(
 }
 
 /// 日本語スキーマの TOML ファイルから日本語変換器を作る。失敗時 NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_japanese_translator_from_file_w(
     path: *const u16,
 ) -> *mut JapaneseTranslatorHandle {
@@ -500,7 +498,7 @@ pub extern "C" fn momo_japanese_translator_from_file_w(
 }
 
 /// テーブル未定義文字のポリシー（0=Space, 1=PassThrough）。handle NULL なら何もしない。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_japanese_translator_set_unknown_char_policy(
     handle: *mut JapaneseTranslatorHandle,
     policy: c_int,
@@ -511,7 +509,7 @@ pub extern "C" fn momo_japanese_translator_set_unknown_char_policy(
 }
 
 /// 日本語変換器を解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_japanese_translator_free(handle: *mut JapaneseTranslatorHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -524,7 +522,7 @@ pub extern "C" fn momo_japanese_translator_free(handle: *mut JapaneseTranslatorH
 
 /// テーブルから英語変換器を作る。**`table` を消費する**（呼び出し後は無効）。
 /// table が NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_english_translator_new(
     table: *mut TableHandle,
 ) -> *mut EnglishTranslatorHandle {
@@ -538,7 +536,7 @@ pub extern "C" fn momo_english_translator_new(
 }
 
 /// 名前で組み込みテーブルを指定して英語変換器を作る（例: `"english_ueb_grade2"`）。失敗時 NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_english_translator_from_embedded_name_w(
     name: *const u16,
 ) -> *mut EnglishTranslatorHandle {
@@ -553,7 +551,7 @@ pub extern "C" fn momo_english_translator_from_embedded_name_w(
 }
 
 /// UEB スキーマの TOML ファイルから英語変換器を作る。失敗時 NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_english_translator_from_file_w(
     path: *const u16,
 ) -> *mut EnglishTranslatorHandle {
@@ -568,7 +566,7 @@ pub extern "C" fn momo_english_translator_from_file_w(
 }
 
 /// テーブル未定義文字のポリシー（0=Space, 1=PassThrough）。handle NULL なら何もしない。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_english_translator_set_unknown_char_policy(
     handle: *mut EnglishTranslatorHandle,
     policy: c_int,
@@ -579,7 +577,7 @@ pub extern "C" fn momo_english_translator_set_unknown_char_policy(
 }
 
 /// 英語変換器を解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_english_translator_free(handle: *mut EnglishTranslatorHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -598,7 +596,7 @@ fn policy_from_i32(policy: c_int) -> UnknownCharPolicy {
 // ============================================================
 
 /// 組み込みテーブル（日本語１級 + UEB grade 2）で点訳器を作る。失敗時 NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_translator_from_embedded() -> *mut BrailleTranslatorHandle {
     match BrailleTranslator::from_embedded() {
         Ok(inner) => Box::into_raw(Box::new(BrailleTranslatorHandle { inner })),
@@ -609,7 +607,7 @@ pub extern "C" fn momo_braille_translator_from_embedded() -> *mut BrailleTransla
 /// 日本語変換器と英語変換器（NULL 可）から点訳器を作る。
 /// **両ハンドルを消費する**（呼び出し後は無効）。japanese が NULL なら NULL。
 /// english が NULL なら英語行も日本語テーブルで点訳する（no conversion 用途）。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_translator_new(
     japanese: *mut JapaneseTranslatorHandle,
     english: *mut EnglishTranslatorHandle,
@@ -630,7 +628,7 @@ pub extern "C" fn momo_braille_translator_new(
 
 /// 英語エンジンを持たない点訳器（全行を日本語テーブルで点訳）。
 /// **`japanese` を消費する**。japanese が NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_translator_japanese_only(
     japanese: *mut JapaneseTranslatorHandle,
 ) -> *mut BrailleTranslatorHandle {
@@ -645,7 +643,7 @@ pub extern "C" fn momo_braille_translator_japanese_only(
 
 /// 組み込みテーブルを名前で指定して点訳器を作る便宜関数。
 /// `english_name` が NULL なら英語エンジンなし。いずれかの名前が無効なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_translator_from_names_w(
     japanese_name: *const u16,
     english_name: *const u16,
@@ -672,7 +670,7 @@ pub extern "C" fn momo_braille_translator_from_names_w(
 
 /// 1行を**言語判定して**点訳する。日本語行のみ predictor を使う。
 /// handle / predictor / line が NULL、または点訳失敗時は NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_translator_translate_w(
     handle: *const BrailleTranslatorHandle,
     line: *const u16,
@@ -697,7 +695,7 @@ pub extern "C" fn momo_braille_translator_translate_w(
 }
 
 /// 1行を**必ず日本語として**点訳する（英字は外字符＋無縮約）。失敗時 NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_translator_translate_japanese_w(
     handle: *const BrailleTranslatorHandle,
     line: *const u16,
@@ -723,7 +721,7 @@ pub extern "C" fn momo_braille_translator_translate_japanese_w(
 
 /// 1行を**必ず英語（UEB）として**点訳する（予測不要）。
 /// 英語エンジンを持たない点訳器・NULL 引数の場合は NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_translator_translate_english_w(
     handle: *const BrailleTranslatorHandle,
     line: *const u16,
@@ -743,7 +741,7 @@ pub extern "C" fn momo_braille_translator_translate_english_w(
 }
 
 /// 点訳器を解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_translator_free(handle: *mut BrailleTranslatorHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -755,7 +753,7 @@ pub extern "C" fn momo_braille_translator_free(handle: *mut BrailleTranslatorHan
 // ============================================================
 
 /// 点訳経路。0=Japanese, 1=English。handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_language(handle: *const BrailleResultHandle) -> c_int {
     match unsafe { handle.as_ref() } {
         Some(h) => match h.inner.language() {
@@ -767,7 +765,7 @@ pub extern "C" fn momo_braille_result_language(handle: *const BrailleResultHandl
 }
 
 /// 原文テキスト（UTF-16, null 終端）。handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_source_text_w(
     handle: *const BrailleResultHandle,
     buf: *mut u16,
@@ -780,7 +778,7 @@ pub extern "C" fn momo_braille_result_source_text_w(
 }
 
 /// 読みテキスト（日本語=かな / 英語=原文。UTF-16, null 終端）。handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_reading_text_w(
     handle: *const BrailleResultHandle,
     buf: *mut u16,
@@ -793,7 +791,7 @@ pub extern "C" fn momo_braille_result_reading_text_w(
 }
 
 /// 点字テキスト（UTF-16, null 終端）。handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_braille_text_w(
     handle: *const BrailleResultHandle,
     buf: *mut u16,
@@ -806,7 +804,7 @@ pub extern "C" fn momo_braille_result_braille_text_w(
 }
 
 /// 原文の文字数（コードポイント）。handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_source_char_count(
     handle: *const BrailleResultHandle,
 ) -> c_int {
@@ -817,7 +815,7 @@ pub extern "C" fn momo_braille_result_source_char_count(
 }
 
 /// 読みの文字数（コードポイント）。handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_reading_char_count(
     handle: *const BrailleResultHandle,
 ) -> c_int {
@@ -828,7 +826,7 @@ pub extern "C" fn momo_braille_result_reading_char_count(
 }
 
 /// 点字の文字数（コードポイント）。handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_braille_char_count(
     handle: *const BrailleResultHandle,
 ) -> c_int {
@@ -840,7 +838,7 @@ pub extern "C" fn momo_braille_result_braille_char_count(
 
 /// 読み→原文 インデックス配列（reading_char_count 要素）を out に書く。
 /// handle / out が NULL なら何もしない。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_reading_to_source(
     handle: *const BrailleResultHandle,
     out: *mut i32,
@@ -852,7 +850,7 @@ pub extern "C" fn momo_braille_result_reading_to_source(
 
 /// 点字→原文 インデックス配列（braille_char_count 要素）を out に書く。
 /// handle / out が NULL なら何もしない。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_braille_to_source(
     handle: *const BrailleResultHandle,
     out: *mut i32,
@@ -864,7 +862,7 @@ pub extern "C" fn momo_braille_result_braille_to_source(
 
 /// 原文→読み インデックスを CSR で書く。
 /// row_ptr: source_char_count+1 要素、col_idx: reading_char_count 要素。各 NULL 可。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_source_to_reading(
     handle: *const BrailleResultHandle,
     row_ptr: *mut i32,
@@ -877,7 +875,7 @@ pub extern "C" fn momo_braille_result_source_to_reading(
 
 /// 原文→点字 インデックスを CSR で書く。
 /// row_ptr: source_char_count+1 要素、col_idx: braille_char_count 要素。各 NULL 可。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_source_to_braille(
     handle: *const BrailleResultHandle,
     row_ptr: *mut i32,
@@ -889,13 +887,13 @@ pub extern "C" fn momo_braille_result_source_to_braille(
 }
 
 /// 日本語予測（かな・確信度）が付随するか。英語行では false。handle NULL でも false。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_has_prediction(handle: *const BrailleResultHandle) -> bool {
     unsafe { handle.as_ref() }.is_some_and(|h| h.has_prediction)
 }
 
 /// 点訳結果を解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_braille_result_free(handle: *mut BrailleResultHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -931,7 +929,7 @@ pub struct BrailleDocHandle {
 
 /// バイト列を点字ドキュメントへ読み込む。format: 0=MBR, 1=BES, 2=BET。
 /// 失敗時（破損・不正 UTF-8・NULL）は NULL を返す。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_read(
     bytes: *const u8,
     len: c_int,
@@ -959,7 +957,7 @@ pub extern "C" fn momo_doc_read(
 }
 
 /// ドキュメントハンドルを解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_free(handle: *mut BrailleDocHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -968,7 +966,7 @@ pub extern "C" fn momo_doc_free(handle: *mut BrailleDocHandle) {
 
 // ---- 設定 getter ----
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_line_width(h: *const BrailleDocHandle) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => h.doc.config.line_width as c_int,
@@ -976,7 +974,7 @@ pub extern "C" fn momo_doc_line_width(h: *const BrailleDocHandle) -> c_int {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_lines_per_page(h: *const BrailleDocHandle) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => h.doc.config.lines_per_page as c_int,
@@ -984,7 +982,7 @@ pub extern "C" fn momo_doc_lines_per_page(h: *const BrailleDocHandle) -> c_int {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_page_header(h: *const BrailleDocHandle) -> bool {
     match unsafe { h.as_ref() } {
         Some(h) => h.doc.config.page_header,
@@ -992,7 +990,7 @@ pub extern "C" fn momo_doc_page_header(h: *const BrailleDocHandle) -> bool {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_number_start(h: *const BrailleDocHandle) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => h.doc.config.number_start as c_int,
@@ -1001,7 +999,7 @@ pub extern "C" fn momo_doc_number_start(h: *const BrailleDocHandle) -> c_int {
 }
 
 /// 先頭ページのページ番号スタイル。0=Standard, 1=Alternative。handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_number_style(h: *const BrailleDocHandle) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => match h.doc.config.number_style {
@@ -1013,7 +1011,7 @@ pub extern "C" fn momo_doc_number_style(h: *const BrailleDocHandle) -> c_int {
 }
 
 /// タイトル（UTF-16, null 終端）を buf に書く。タイトル無しなら 0、handle NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_title_w(
     h: *const BrailleDocHandle,
     buf: *mut u16,
@@ -1035,7 +1033,7 @@ pub extern "C" fn momo_doc_title_w(
 // どの物理行にも属さない独立したエントリなので、2次元の [para][line] ではなく
 // 「フラットなエントリ番号＋種別問い合わせ」でアクセスする。
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_entry_count(h: *const BrailleDocHandle) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => h.doc.paragraphs.len() as c_int,
@@ -1044,7 +1042,7 @@ pub extern "C" fn momo_doc_entry_count(h: *const BrailleDocHandle) -> c_int {
 }
 
 /// エントリの種別。0=テキスト段落, 1=改ページ, 無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_entry_kind(h: *const BrailleDocHandle, entry: c_int) -> c_int {
     let h = match unsafe { h.as_ref() } {
         Some(h) => h,
@@ -1062,7 +1060,7 @@ pub extern "C" fn momo_doc_entry_kind(h: *const BrailleDocHandle, entry: c_int) 
 
 /// テキスト段落の物理行数。改ページエントリなら 0（種別を見ずにループしても安全）。
 /// 無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_line_count(h: *const BrailleDocHandle, entry: c_int) -> c_int {
     let h = match unsafe { h.as_ref() } {
         Some(h) => h,
@@ -1090,7 +1088,7 @@ fn doc_line(h: &BrailleDocHandle, entry: c_int, line: c_int) -> Option<&Segment>
 }
 
 /// 物理行のテキスト（UTF-16, null 終端）。無効な引数（改ページエントリを含む）なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_line_w(
     h: *const BrailleDocHandle,
     entry: c_int,
@@ -1109,7 +1107,7 @@ pub extern "C" fn momo_doc_line_w(
 }
 
 /// 物理行が論理行末尾か。無効な引数（改ページエントリを含む）なら false。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_line_logical_end(
     h: *const BrailleDocHandle,
     entry: c_int,
@@ -1125,7 +1123,7 @@ pub extern "C" fn momo_doc_line_logical_end(
 
 /// 改ページエントリのマーカー文字列（`====` プレフィックス込み、UTF-16, null 終端）を
 /// buf に書く。テキスト段落エントリ/無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_entry_page_break_w(
     h: *const BrailleDocHandle,
     entry: c_int,
@@ -1157,7 +1155,7 @@ pub struct BrailleDocBuilder {
 
 /// ビルダーを作る。number_start: 開始ページ番号。number_style: 0=Standard, 1=Alternative。
 /// title は NULL/空で無し。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_builder_new(
     line_width: c_int,
     lines_per_page: c_int,
@@ -1187,7 +1185,7 @@ pub extern "C" fn momo_doc_builder_new(
 }
 
 /// テキストの物理行を1行追加する。logical_end が true ならその行で段落を確定する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_builder_add_line(
     b: *mut BrailleDocBuilder,
     content: *const u16,
@@ -1212,7 +1210,7 @@ pub extern "C" fn momo_doc_builder_add_line(
 /// marker は `====` マーカー文字列（NULL/空でプレーンな改ページ）。
 /// それまでに `add_line` で積まれていた未確定の物理行があれば、先にテキスト段落として
 /// 確定してから改ページエントリを追加する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_builder_add_page_break(b: *mut BrailleDocBuilder, marker: *const u16) {
     let b = match unsafe { b.as_mut() } {
         Some(b) => b,
@@ -1242,7 +1240,7 @@ pub extern "C" fn momo_doc_builder_add_page_break(b: *mut BrailleDocBuilder, mar
 /// `momo_doc_builder_free` に**絶対に**渡してはならない（use-after-free /
 /// 二重解放になる。呼び出し後にポインタを NULL にすることを推奨する。
 /// `momo_raii.hpp` の `DocBuilder::build()` はこれを内部で行っている）。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_builder_build(b: *mut BrailleDocBuilder) -> *mut BrailleDocHandle {
     if b.is_null() {
         return std::ptr::null_mut();
@@ -1265,7 +1263,7 @@ pub extern "C" fn momo_doc_builder_build(b: *mut BrailleDocBuilder) -> *mut Brai
 }
 
 /// ビルダーを解放する（build を呼ばずに破棄する場合）。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_builder_free(b: *mut BrailleDocBuilder) {
     if !b.is_null() {
         unsafe { drop(Box::from_raw(b)) };
@@ -1301,7 +1299,7 @@ fn output_format_from_code(format: c_int) -> Option<OutputFormat> {
 
 /// ドキュメントを指定形式のバイト列へ書き出す。
 /// format: [`output_format_from_code`] 参照。無効/NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_write(h: *const BrailleDocHandle, format: c_int) -> *mut ByteBuffer {
     let h = match unsafe { h.as_ref() } {
         Some(h) => h,
@@ -1316,7 +1314,7 @@ pub extern "C" fn momo_doc_write(h: *const BrailleDocHandle, format: c_int) -> *
 }
 
 /// バイト列の長さ。NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_bytes_len(b: *const ByteBuffer) -> c_int {
     match unsafe { b.as_ref() } {
         Some(b) => b.bytes.len() as c_int,
@@ -1326,7 +1324,7 @@ pub extern "C" fn momo_bytes_len(b: *const ByteBuffer) -> c_int {
 
 /// バイト列を out へコピーする。out は momo_bytes_len バイト以上確保すること。
 /// b または out が NULL なら何もしない。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_bytes_copy(b: *const ByteBuffer, out: *mut u8) {
     if let Some(b) = unsafe { b.as_ref() } {
         if !out.is_null() {
@@ -1336,7 +1334,7 @@ pub extern "C" fn momo_bytes_copy(b: *const ByteBuffer, out: *mut u8) {
 }
 
 /// バイト列を解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_bytes_free(b: *mut ByteBuffer) {
     if !b.is_null() {
         unsafe { drop(Box::from_raw(b)) };
@@ -1352,7 +1350,7 @@ pub struct FormattedDocHandle {
 }
 
 /// 正本ドキュメントを印刷イメージへ描画してハンドルを返す。NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_render(h: *const BrailleDocHandle) -> *mut FormattedDocHandle {
     let h = match unsafe { h.as_ref() } {
         Some(h) => h,
@@ -1364,14 +1362,14 @@ pub extern "C" fn momo_doc_render(h: *const BrailleDocHandle) -> *mut FormattedD
 }
 
 /// 印刷イメージハンドルを解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_free(h: *mut FormattedDocHandle) {
     if !h.is_null() {
         unsafe { drop(Box::from_raw(h)) };
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_page_count(h: *const FormattedDocHandle) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => h.doc.page_count() as c_int,
@@ -1379,7 +1377,7 @@ pub extern "C" fn momo_formatted_page_count(h: *const FormattedDocHandle) -> c_i
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_line_count(h: *const FormattedDocHandle, page: c_int) -> c_int {
     let h = match unsafe { h.as_ref() } {
         Some(h) => h,
@@ -1399,7 +1397,7 @@ fn fmt_line(h: &FormattedDocHandle, page: c_int, line: c_int) -> Option<&Rendere
 }
 
 /// 印刷イメージの物理行テキスト（UTF-16, null 終端）。無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_line_w(
     h: *const FormattedDocHandle,
     page: c_int,
@@ -1418,7 +1416,7 @@ pub extern "C" fn momo_formatted_line_w(
 }
 
 /// 物理行がページヘッダ行か。無効な引数なら false。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_line_is_header(
     h: *const FormattedDocHandle,
     page: c_int,
@@ -1433,7 +1431,7 @@ pub extern "C" fn momo_formatted_line_is_header(
 }
 
 /// 物理行が論理行末尾か。無効な引数なら false。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_line_logical_end(
     h: *const FormattedDocHandle,
     page: c_int,
@@ -1449,7 +1447,7 @@ pub extern "C" fn momo_formatted_line_logical_end(
 
 /// 物理行の元セグメント通し番号（ヘッダ行や無効な引数なら -1）。
 /// エディタが表示行 ↔ 論理位置（セグメント+オフセット）を対応づけるのに使う。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_line_segment_index(
     h: *const FormattedDocHandle,
     page: c_int,
@@ -1472,7 +1470,7 @@ fn fmt_page_info(h: &FormattedDocHandle, page: c_int) -> Option<&PageInfo> {
 
 /// 指定ページでヘッダ行が表示されているか（セクション単位の継続的状態の実効値）。
 /// 無効な引数なら false。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_page_header_enabled(
     h: *const FormattedDocHandle,
     page: c_int,
@@ -1487,7 +1485,7 @@ pub extern "C" fn momo_formatted_page_header_enabled(
 
 /// 指定ページのヘッダタイトル（UTF-16, null 終端。実効値）。
 /// タイトル無しなら 0、無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_page_title_w(
     h: *const FormattedDocHandle,
     page: c_int,
@@ -1508,7 +1506,7 @@ pub extern "C" fn momo_formatted_page_title_w(
 }
 
 /// 指定ページのページ番号（実効値）。無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_page_number(h: *const FormattedDocHandle, page: c_int) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => fmt_page_info(h, page)
@@ -1519,7 +1517,7 @@ pub extern "C" fn momo_formatted_page_number(h: *const FormattedDocHandle, page:
 }
 
 /// 指定ページのページ番号スタイル（実効値）。0=Standard, 1=Alternative。無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_formatted_page_number_style(
     h: *const FormattedDocHandle,
     page: c_int,
@@ -1545,7 +1543,7 @@ pub struct WrapLinesHandle {
 
 /// 1論理行（UTF-16 点字文字列）を line_width マスで折返して物理行リストを返す。
 /// 空文字列は count=0 のハンドル（NULL ではない）。text が NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_wrap_line_w(text: *const u16, line_width: c_int) -> *mut WrapLinesHandle {
     let s = match unsafe { lpwstr_to_string(text) } {
         Some(s) => s,
@@ -1557,7 +1555,7 @@ pub extern "C" fn momo_wrap_line_w(text: *const u16, line_width: c_int) -> *mut 
 
 /// 論理行のサフィックスを折返す。first_line_remaining は現在行の残りマス数
 /// （0 で先頭に空行を出し以降通常幅）。空文字列は count=0。text が NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_wrap_suffix_w(
     text: *const u16,
     line_width: c_int,
@@ -1576,14 +1574,14 @@ pub extern "C" fn momo_wrap_suffix_w(
 }
 
 /// 折返しハンドルを解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_wrap_lines_free(h: *mut WrapLinesHandle) {
     if !h.is_null() {
         unsafe { drop(Box::from_raw(h)) };
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_wrap_lines_count(h: *const WrapLinesHandle) -> c_int {
     match unsafe { h.as_ref() } {
         Some(h) => h.lines.len() as c_int,
@@ -1592,7 +1590,7 @@ pub extern "C" fn momo_wrap_lines_count(h: *const WrapLinesHandle) -> c_int {
 }
 
 /// 物理行テキスト（UTF-16, null 終端）。無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_wrap_lines_get_w(
     h: *const WrapLinesHandle,
     index: c_int,
@@ -1610,7 +1608,7 @@ pub extern "C" fn momo_wrap_lines_get_w(
 }
 
 /// 物理行が論理行末尾か。無効な引数なら false。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_wrap_lines_logical_end(h: *const WrapLinesHandle, index: c_int) -> bool {
     match unsafe { h.as_ref() } {
         Some(h) => h
@@ -1652,7 +1650,7 @@ fn paragraphs_from_text(text: &str) -> Vec<String> {
 
 /// 段落 `para` の論理テキスト（物理行を連結したもの）を UTF-16 で buf に書く。
 /// 無効な引数なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_logical_text_w(
     h: *const BrailleDocHandle,
     para: c_int,
@@ -1671,7 +1669,7 @@ pub extern "C" fn momo_doc_logical_text_w(
 
 /// 論理段落（UTF-16, `\n` 区切り）を折返し・ページ分割して印刷イメージを返す。
 /// paragraphs が NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_render_from_paragraphs(
     paragraphs: *const u16,
     line_width: c_int,
@@ -1691,7 +1689,7 @@ pub extern "C" fn momo_doc_render_from_paragraphs(
 
 /// 論理段落（UTF-16, `\n` 区切り）を折返した上で指定形式のバイト列へ書き出す。
 /// `format`: [`output_format_from_code`] 参照。paragraphs が NULL／format 不正なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_write_from_paragraphs(
     paragraphs: *const u16,
     line_width: c_int,
@@ -1767,7 +1765,7 @@ impl BackTransHandle {
 }
 
 /// 組み込みテーブルで逆変換器を作る。失敗時は NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_translator_new() -> *mut BackTranslatorHandle {
     match BrailleBackTranslator::from_embedded() {
         Ok(t) => Box::into_raw(Box::new(BackTranslatorHandle { inner: t })),
@@ -1776,7 +1774,7 @@ pub extern "C" fn momo_back_translator_new() -> *mut BackTranslatorHandle {
 }
 
 /// `japanese_grade1_braille.toml`（UTF-16 パス）から逆変換器を作る。失敗時は NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_translator_new_from_file_w(
     toml_path: *const u16,
 ) -> *mut BackTranslatorHandle {
@@ -1791,7 +1789,7 @@ pub extern "C" fn momo_back_translator_new_from_file_w(
 }
 
 /// 逆変換器を解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_translator_free(handle: *mut BackTranslatorHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -1800,7 +1798,7 @@ pub extern "C" fn momo_back_translator_free(handle: *mut BackTranslatorHandle) {
 
 /// 点字文字列（UTF-16）を逆変換し、全文とセグメントを持つハンドルを返す。
 /// handle または braille が NULL なら NULL。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_translate_w(
     handle: *const BackTranslatorHandle,
     braille: *const u16,
@@ -1818,7 +1816,7 @@ pub extern "C" fn momo_back_translate_w(
 }
 
 /// 逆変換結果を解放する。NULL は無視する。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_trans_free(handle: *mut BackTransHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
@@ -1828,7 +1826,7 @@ pub extern "C" fn momo_back_trans_free(handle: *mut BackTransHandle) {
 /// 復元された全文（UTF-16, null 終端）を buf に書く。
 /// 戻り値は必要な u16 要素数（null 含む）。buf 不足／NULL なら書かずにサイズだけ返す。
 /// handle が NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_trans_text_w(
     handle: *const BackTransHandle,
     buf: *mut u16,
@@ -1848,7 +1846,7 @@ pub extern "C" fn momo_back_trans_text_w(
 }
 
 /// セグメント数を返す。handle が NULL なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_trans_segment_count(handle: *const BackTransHandle) -> c_int {
     match unsafe { handle.as_ref() } {
         Some(h) => h.seg_cell_start.len() as c_int,
@@ -1861,7 +1859,7 @@ pub extern "C" fn momo_back_trans_segment_count(handle: *const BackTransHandle) 
 /// 各配列は momo_back_trans_segment_count 要素以上を確保すること。
 /// 範囲は半開区間 `[start, end)`、インデックスは入力点字の UTF-16 位置に対応する。
 /// handle が NULL なら何もしない。片方のみ NULL なら非 NULL 側だけ書く。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_trans_cell_bounds(
     handle: *const BackTransHandle,
     out_start: *mut i32,
@@ -1892,7 +1890,7 @@ pub extern "C" fn momo_back_trans_cell_bounds(
 /// セグメント idx のテキスト（UTF-16, null 終端）を buf に書く。
 /// 戻り値は必要な u16 要素数（null 含む）。buf 不足／NULL なら書かずにサイズだけ返す。
 /// handle が NULL、または idx が範囲外なら -1。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn momo_back_trans_segment_text_w(
     handle: *const BackTransHandle,
     idx: c_int,

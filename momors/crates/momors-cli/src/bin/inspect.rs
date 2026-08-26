@@ -60,6 +60,10 @@ struct Cli {
     #[arg(long, global = true)]
     single_dict: Option<String>,
 
+    /// カスタム辞書（フレーズ辞書）ファイル (.tsv) のパス（省略時は無効）
+    #[arg(long, global = true)]
+    custom_dict: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -129,6 +133,14 @@ fn main() -> ExitCode {
         }
         config = config.with_single_char_dict_path(&p);
     }
+    if let Some(ref path) = cli.custom_dict {
+        let p = PathBuf::from(path);
+        if !p.exists() {
+            eprintln!("カスタム辞書ファイルが見つかりません: {}", p.display());
+            return ExitCode::FAILURE;
+        }
+        config = config.with_custom_dict_path(&p);
+    }
 
     let predictor = match AnyPredictor::load(config) {
         Ok(p) => p,
@@ -163,6 +175,7 @@ fn decision_color(dec: DecisionSource) -> &'static str {
         DecisionSource::FallbackKana => "\x1b[96m",    // 明るいシアン
         DecisionSource::FallbackOrphan => "\x1b[31m",  // 赤
         DecisionSource::DictName => "\x1b[94m",        // 明るい青
+        DecisionSource::DictCustom => "\x1b[95m",      // 明るいマゼンタ
         DecisionSource::Bypass => "\x1b[90m",          // グレー
     }
 }

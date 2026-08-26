@@ -60,6 +60,18 @@ pub enum Error {
     /// 予測時の内部エラー。
     #[error("予測に失敗しました: {reason}")]
     Prediction { reason: String },
+
+    /// カスタム辞書ファイルが開けなかった、または読めなかった。
+    #[error("カスタム辞書ファイルの読み込みに失敗しました: {path}")]
+    CustomDictIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// カスタム辞書の記法が不正（境界マーカーの位置・ユニット数不一致等）。
+    #[error("カスタム辞書が不正です: {reason}")]
+    InvalidCustomDict { reason: String },
 }
 
 /// 本クレート用の `Result` 型エイリアス。

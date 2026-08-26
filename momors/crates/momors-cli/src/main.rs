@@ -58,6 +58,12 @@ struct Cli {
     #[arg(long)]
     single_dict: Option<String>,
 
+    /// カスタム辞書（フレーズ辞書）ファイル (.tsv) のパス。
+    /// マッチしたフレーズの読みを完全に上書きする（docs/dataset_raw_rule.md §8 参照）。
+    /// 省略時は無効
+    #[arg(long)]
+    custom_dict: Option<String>,
+
     // ---- 標準入力モード専用 ----------------------------------------
     /// 自信度スコアも一緒に出力する
     #[arg(long)]
@@ -180,6 +186,16 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         config = config.with_single_char_dict_path(&p);
+    }
+    // カスタム辞書はモデルに同梱されない（ユーザー/文書固有）ため、
+    // --custom-dict の明示指定があるときだけ有効になる。
+    if let Some(ref path) = cli.custom_dict {
+        let p = PathBuf::from(path);
+        if !p.exists() {
+            eprintln!("カスタム辞書ファイルが見つかりません: {}", p.display());
+            return ExitCode::FAILURE;
+        }
+        config = config.with_custom_dict_path(&p);
     }
 
     let predictor = match AnyPredictor::load(config) {

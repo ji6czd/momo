@@ -55,8 +55,8 @@ const LR_LOW_THRESHOLD: f32 = 0.5;
 /// 1文字ごとの読み決定の根拠。trace（`momo-inspect trace`）の色分け・タグ表示に使う。
 ///
 /// Python 版 `predictor.DecisionSource` のうち、Rust core の推論経路が実際に生成する
-/// ものだけを持つ（カスタム辞書経路が無いため `DICT` は無い。単一文字辞書は argmax の
-/// 候補制約であって低自信度フォールバックではないため `FALLBACK_KANJI` も無い）。
+/// ものだけを持つ（単一文字辞書は argmax の候補制約であって低自信度フォールバック
+/// ではないため `FALLBACK_KANJI` は無い）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionSource {
     /// LR（読みモデル）の予測をそのまま採用。
@@ -75,6 +75,8 @@ pub enum DecisionSource {
     FallbackOrphan,
     /// 人名辞書の固定読み（低自信度フォールバック）。
     DictName,
+    /// カスタム辞書（フレーズ辞書）による読みの完全上書き。
+    DictCustom,
     /// 記号・空白・英字などの素通し。
     Bypass,
 }
@@ -91,6 +93,7 @@ impl DecisionSource {
             DecisionSource::FallbackKana => "FALLBACK_KANA",
             DecisionSource::FallbackOrphan => "FALLBACK_ORPH",
             DecisionSource::DictName => "DICT_NAME",
+            DecisionSource::DictCustom => "DICT_CUSTOM",
             DecisionSource::Bypass => "BYPASS",
         }
     }
@@ -151,6 +154,7 @@ pub struct TraceResult {
 pub struct PredictorConfig {
     pub(crate) model_path: PathBuf,
     pub(crate) single_char_dict_path: Option<PathBuf>,
+    pub(crate) custom_dict_path: Option<PathBuf>,
     pub(crate) numeric_confidence_threshold: f32,
 }
 
@@ -161,6 +165,7 @@ impl PredictorConfig {
             model_path: model_path.as_ref().to_path_buf(),
             numeric_confidence_threshold: 0.5,
             single_char_dict_path: None,
+            custom_dict_path: None,
         }
     }
 
@@ -174,6 +179,15 @@ impl PredictorConfig {
     /// 設定すると推論時に辞書の読みに候補が制約される（漢字・算用数字）。
     pub fn with_single_char_dict_path(mut self, path: impl AsRef<Path>) -> Self {
         self.single_char_dict_path = Some(path.as_ref().to_path_buf());
+        self
+    }
+
+    /// カスタム辞書ファイル (.tsv) のパスを設定する。
+    /// 設定すると、辞書にマッチしたフレーズの読みを完全に上書きする
+    /// （`docs/dataset_raw_rule.md` §8 参照）。既定では無効（モデルへの
+    /// 同梱は無い＝ユーザー/文書固有の外部ファイル専用）。
+    pub fn with_custom_dict_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.custom_dict_path = Some(path.as_ref().to_path_buf());
         self
     }
 
@@ -462,6 +476,9 @@ pub struct Predictor<M: WeightModel = MomoModel> {
     model: M,
     /// ソート済み単一文字辞書（漢字・算用数字）。binary_search でルックアップする。
     single_char_dict: Vec<(char, Vec<String>)>,
+    /// カスタム辞書（フレーズ単位の読み完全上書き）。モデル同梱は無く、
+    /// `custom_dict_path` の明示指定が無ければ常に空。
+    custom_dict: crate::custom_dict::CustomDictIndex,
 }
 
 impl<M: WeightModel> Predictor<M> {
@@ -476,10 +493,16 @@ impl<M: WeightModel> Predictor<M> {
         } else {
             model.take_single_char_dict()
         };
+        let custom_dict = if let Some(ref path) = config.custom_dict_path {
+            crate::custom_dict::load_custom_dict(path)?
+        } else {
+            crate::custom_dict::CustomDictIndex::new()
+        };
         Ok(Self {
             config,
             model,
             single_char_dict,
+            custom_dict,
         })
     }
 
@@ -493,12 +516,14 @@ impl<M: WeightModel> Predictor<M> {
             model_path: PathBuf::from("<memory>"),
             numeric_confidence_threshold: 0.5,
             single_char_dict_path: None,
+            custom_dict_path: None,
         };
         let single_char_dict = model.take_single_char_dict();
         Ok(Self {
             config,
             model,
             single_char_dict,
+            custom_dict: crate::custom_dict::CustomDictIndex::new(),
         })
     }
 
@@ -732,6 +757,57 @@ impl<M: WeightModel> Predictor<M> {
         for i in 0..n {
             // 日付助数詞パスが消費済みのインデックスは読み飛ばす。
             if i < skip_until {
+                continue;
+            }
+
+            // ============================================================
+            // カスタム辞書（フレーズ辞書）: マッチしたら読みを完全に上書きする
+            //
+            // 他のどの分岐よりも手前で判定する（辞書は完全に推論へ優先する）。
+            // エントリ内部の境界は辞書が確定済みなので boundary_has_split は
+            // 呼ばない。末尾（次の文字との境界）だけは他の複合ユニット
+            // （助数詞ラン等）と同様、通常どおり境界モデルに委ねる ─
+            // 辞書は読みだけを上書きし、境界モデルの入力特徴量（実文字ベースの
+            // all_feat_keys）には一切触れないため、これで十分。
+            // ============================================================
+            if let Some(m) = crate::custom_dict::match_at(&source_seq, &self.custom_dict, i) {
+                let last = i + m.units.len() - 1;
+                for (k, reading) in m.readings.iter().enumerate() {
+                    let idx = i + k;
+                    self.emit_label(
+                        &source_seq[idx],
+                        reading,
+                        1.0,
+                        DecisionSource::DictCustom,
+                        &mut result,
+                    );
+                    if k + 1 < m.readings.len() && m.forced_split_after[k] {
+                        result.kana_text.push(' ');
+                        result
+                            .kana_to_src_index
+                            .push(source_seq[idx].orig_idx as usize);
+                        result.confidences.push(1.0);
+                        result.decision_sources.push(DecisionSource::DictCustom);
+                    }
+                }
+                let has_split = self.boundary_has_split(&all_feat_keys[last], &source_seq, last);
+                if has_split {
+                    result.kana_text.push(' ');
+                    result
+                        .kana_to_src_index
+                        .push(source_seq[last].orig_idx as usize);
+                    result.confidences.push(1.0);
+                    result.decision_sources.push(DecisionSource::DictCustom);
+                }
+
+                parent_src_idx = Some(last);
+                parent_is_bypass = false;
+                parent_is_kanji = false;
+                parent_has_small_kana = false;
+                parent_kana_byte_end = result.kana_text.len();
+                last_fallback.clear();
+
+                skip_until = last + 1;
                 continue;
             }
 

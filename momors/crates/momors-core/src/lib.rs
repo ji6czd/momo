@@ -36,6 +36,7 @@ mod boundary;
 mod bracket;
 mod char_type;
 mod counter;
+mod custom_dict;
 mod feature;
 mod featurize;
 mod float_loader;

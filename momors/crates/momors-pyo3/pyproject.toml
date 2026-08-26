@@ -1,6 +1,6 @@
 [project]
 name = "momors-py"
-version = "0.9.2"
+version = "0.10.0"
 description = "Python bindings for the MOMO Japanese text-to-Braille engine (Rust backend)"
 authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]
 requires-python = ">=3.13"

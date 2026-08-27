@@ -43,10 +43,16 @@ public static class MomoFfi
     // ---- 予測器（漢字かな交じり文 → かな） ----
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern nint momo_predictor_new_w([MarshalAs(UnmanagedType.LPWStr)] string modelPath);
+    static extern nint momo_predictor_new_w(
+        [MarshalAs(UnmanagedType.LPWStr)] string modelPath,
+        [MarshalAs(UnmanagedType.LPWStr)] string? customDictPath);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void momo_predictor_free(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_custom_dict_validate_w(
+        [MarshalAs(UnmanagedType.LPWStr)] string path, nint errBuf, int errLen);
 
     // ---- 変換テーブル ----
 
@@ -740,6 +746,31 @@ public static class MomoFfi
     // 予測器はアプリ全体で 1 つだけ使い回す（モデル読み込みが重いため）。
     static PredictorHandle? _predictor;
     static bool _predictorLoaded;
+    static string? _customDictPath;
+
+    /// <summary>
+    /// <see cref="GetPredictor"/> が使うカスタム辞書（フレーズ辞書）TSV のパス。
+    /// null なら辞書なし。辞書は利用者・文書ごとに変わるためモデルには同梱されない。
+    /// </summary>
+    /// <remarks>
+    /// 値を変えるとキャッシュ済みの予測器を破棄し、次の <see cref="GetPredictor"/> で
+    /// 作り直す。破棄された予測器を他所が掴んでいると無効になるので、予測中でない
+    /// タイミング（設定ダイアログの確定など、UI スレッド）で設定すること。
+    /// 記法が不正な辞書を渡すと予測器の生成ごと失敗して null になる。設定前に
+    /// <see cref="ValidateCustomDict"/> で確かめて利用者に理由を示すとよい。
+    /// </remarks>
+    public static string? CustomDictPath
+    {
+        get => _customDictPath;
+        set
+        {
+            if (_customDictPath == value) return;
+            _customDictPath = value;
+            _predictor?.Dispose();
+            _predictor = null;
+            _predictorLoaded = false;
+        }
+    }
 
     /// <summary>
     /// 漢字かな交じり文の読みを推定する予測器を返す。日本語行の点訳に必要。
@@ -752,7 +783,7 @@ public static class MomoFfi
 
         var modelPath = FindModelPath();
         if (modelPath == null) return null;
-        _predictor = CreatePredictor(modelPath);
+        _predictor = CreatePredictor(modelPath, _customDictPath);
         return _predictor;
     }
 
@@ -760,14 +791,37 @@ public static class MomoFfi
     /// .mbm モデルのパスを指定して予測器を作る（モデルを利用者に選ばせる UI 向け）。
     /// 呼び出し側が Dispose すること。読み込み失敗・DLL 不在なら null。
     /// </summary>
-    public static PredictorHandle? CreatePredictor(string modelPath)
+    /// <param name="modelPath">.mbm モデルのパス。</param>
+    /// <param name="customDictPath">
+    /// カスタム辞書（フレーズ辞書）TSV のパス。null なら辞書なし。記法が不正なら
+    /// 予測器の生成ごと失敗して null になる（<see cref="ValidateCustomDict"/> 参照）。
+    /// </param>
+    public static PredictorHandle? CreatePredictor(string modelPath, string? customDictPath = null)
     {
         if (_dllAvailable == false) return null;
         try
         {
-            var ptr = momo_predictor_new_w(modelPath);
+            var ptr = momo_predictor_new_w(modelPath, customDictPath);
             _dllAvailable = true;
             return ptr == nint.Zero ? null : new PredictorHandle(ptr);
+        }
+        catch (DllNotFoundException) { _dllAvailable = false; return null; }
+        catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
+    }
+
+    /// <summary>
+    /// カスタム辞書（フレーズ辞書）TSV を検証する。予測器を作らずに記法だけを確かめるので、
+    /// 辞書を選ばせる UI で不正な指定を利用者に説明できる。
+    /// </summary>
+    /// <returns>妥当なら null。不正なら利用者向けの理由（読めない・記法エラー）。</returns>
+    public static string? ValidateCustomDict(string path)
+    {
+        if (_dllAvailable == false) return null;
+        try
+        {
+            var message = ReadString((b, l) => momo_custom_dict_validate_w(path, b, l));
+            _dllAvailable = true;
+            return message.Length == 0 ? null : message;
         }
         catch (DllNotFoundException) { _dllAvailable = false; return null; }
         catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }

@@ -7,9 +7,14 @@
 //! `buf_len` 不足時は書かずにサイズだけ返す。パスは UTF-16（`_w`）。
 //!
 //! ## 予測器（momors-core::Predictor）
+//! `custom_dict_path` はカスタム辞書（フレーズ辞書）TSV。NULL なら辞書なし。
+//! 記法が不正なら予測器の生成ごと失敗する（NULL）ので、利用者に理由を示したい
+//! ときは先に `momo_custom_dict_validate_w` で確かめる。
 //! ```c
-//! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16); // .mbm
+//! MomoPredictor momo_predictor_new_w(const uint16_t* model_path_utf16,        // .mbm
+//!                                    const uint16_t* custom_dict_path_utf16); // NULL可
 //! void          momo_predictor_free(MomoPredictor);
+//! int32_t momo_custom_dict_validate_w(const uint16_t* path, uint16_t* err_buf, int32_t err_len);
 //! ```
 //!
 //! ## 変換テーブル（momors-braille::Table。日本語・英語 両スキーマを同型で保持）
@@ -305,17 +310,49 @@ fn write_csr(rows: &[Vec<usize>], row_ptr: *mut i32, col_idx: *mut i32) {
 // ============================================================
 
 /// UTF-16 モデルパス（`.mbm`）から予測器を作る。単一漢字辞書はモデル同梱のものを使う。
-/// 失敗（ファイル不正・NULL）時は NULL を返す。
+///
+/// `custom_dict_path` はカスタム辞書（フレーズ辞書）TSV のパス。NULL なら辞書を使わない。
+/// 辞書はモデルに同梱されない（利用者・文書ごとに変わる）ため、明示指定のときだけ有効になる。
+/// 失敗（ファイル不正・辞書の記法不正・model_path が NULL）時は NULL を返す。辞書の記法
+/// エラーだけを切り分けたいときは [`momo_custom_dict_validate_w`] を先に呼ぶ。
 #[unsafe(no_mangle)]
-pub extern "C" fn momo_predictor_new_w(model_path: *const u16) -> *mut PredictorHandle {
+pub extern "C" fn momo_predictor_new_w(
+    model_path: *const u16,
+    custom_dict_path: *const u16,
+) -> *mut PredictorHandle {
     let model = match unsafe { lpwstr_to_string(model_path) } {
         Some(p) => p,
         None => return std::ptr::null_mut(),
     };
-    let config = PredictorConfig::new(std::path::Path::new(&model));
+    let mut config = PredictorConfig::new(std::path::Path::new(&model));
+    if let Some(dict) = unsafe { lpwstr_to_string(custom_dict_path) } {
+        config = config.with_custom_dict_path(std::path::Path::new(&dict));
+    }
     match Predictor::load(config) {
         Ok(inner) => Box::into_raw(Box::new(PredictorHandle { inner })),
         Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// カスタム辞書（フレーズ辞書）TSV を検証する。予測器を作らずに記法だけを確かめる。
+///
+/// 戻り値は 0 なら妥当（`err_buf` には触れない）。エラーなら理由（UTF-16, null 終端）を
+/// `err_buf` に書き、必要バッファサイズ（null 終端含む。必ず 2 以上）を返す。他の文字列
+/// 取得関数と同じく `err_len` 不足なら書かずにサイズだけ返すので、返り値で確保し直して
+/// 呼び直せばよい。`path` が NULL なら -1。
+#[unsafe(no_mangle)]
+pub extern "C" fn momo_custom_dict_validate_w(
+    path: *const u16,
+    err_buf: *mut u16,
+    err_len: c_int,
+) -> c_int {
+    let path = match unsafe { lpwstr_to_string(path) } {
+        Some(p) => p,
+        None => return -1,
+    };
+    match momors_core::validate_custom_dict(std::path::Path::new(&path)) {
+        Ok(_) => 0,
+        Err(e) => write_utf16(&e.to_string(), err_buf, err_len),
     }
 }
 
@@ -1912,4 +1949,126 @@ pub extern "C" fn momo_back_trans_segment_text_w(
         }
     }
     needed
+}
+
+// ============================================================
+// テスト
+// ============================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Rust の &str を null 終端 UTF-16 バッファにする（C 呼び出し側の再現）。
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// 一時ディレクトリに辞書 TSV を書き、そのパスを返す。
+    fn write_dict(name: &str, content: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("momo_ffi_test_{name}.tsv"));
+        std::fs::write(&path, content).expect("辞書を書けること");
+        path
+    }
+
+    /// validate を「サイズ問い合わせ → 確保 → 本呼び出し」の 2 段で呼び、
+    /// (戻り値, メッセージ) を返す。C 側の使い方をそのままなぞる。
+    fn validate(path: &std::path::Path) -> (c_int, String) {
+        let p = wide(&path.display().to_string());
+        let needed = momo_custom_dict_validate_w(p.as_ptr(), std::ptr::null_mut(), 0);
+        if needed <= 0 {
+            return (needed, String::new());
+        }
+        let mut buf = vec![0u16; needed as usize];
+        momo_custom_dict_validate_w(p.as_ptr(), buf.as_mut_ptr(), needed);
+        let text = String::from_utf16_lossy(&buf[..buf.len() - 1]);
+        (needed, text)
+    }
+
+    #[test]
+    fn validate_accepts_well_formed_dict() {
+        let path = write_dict(
+            "ok",
+            "# コメント行\n南風原町\tハ/エ/バル/ /チョー\n田原坂\tタ/バル/ザカ\n",
+        );
+        let (ret, msg) = validate(&path);
+        assert_eq!(ret, 0, "妥当な辞書は 0 を返す（msg: {msg}）");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn validate_reports_malformed_reading() {
+        // 末尾の境界マーカー（/ ）はエントリ両端の境界を辞書が持てないためエラー。
+        let path = write_dict("bad", "南風原町\tハ/エ/バル/チョー/ \n");
+        let (ret, msg) = validate(&path);
+        assert!(
+            ret >= 2,
+            "エラーは必要バッファサイズ（null 終端込み）を返す"
+        );
+        assert!(
+            msg.contains("カスタム辞書"),
+            "利用者向けの理由が返ること: {msg}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn validate_reports_missing_file() {
+        let path = std::env::temp_dir().join("momo_ffi_test_no_such_dict.tsv");
+        let _ = std::fs::remove_file(&path);
+        let (ret, msg) = validate(&path);
+        assert!(ret >= 2, "読めないファイルもエラーとして返る");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn validate_rejects_null_path() {
+        assert_eq!(
+            momo_custom_dict_validate_w(std::ptr::null(), std::ptr::null_mut(), 0),
+            -1
+        );
+    }
+
+    #[test]
+    fn predictor_new_rejects_null_model_path() {
+        // 辞書パスが NULL でも非 NULL でも、モデルパスが NULL なら生成しない。
+        assert!(momo_predictor_new_w(std::ptr::null(), std::ptr::null()).is_null());
+        let dict = wide("dummy.tsv");
+        assert!(momo_predictor_new_w(std::ptr::null(), dict.as_ptr()).is_null());
+    }
+
+    fn fixture_model_path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture.mbm")
+    }
+
+    #[test]
+    fn predictor_new_accepts_null_custom_dict() {
+        let model = wide(&fixture_model_path().display().to_string());
+        let handle = momo_predictor_new_w(model.as_ptr(), std::ptr::null());
+        assert!(!handle.is_null(), "辞書 NULL でも予測器は作れること");
+        momo_predictor_free(handle);
+    }
+
+    #[test]
+    fn predictor_new_loads_custom_dict() {
+        let dict = write_dict("load", "南風原町\tハ/エ/バル/ /チョー\n");
+        let model = wide(&fixture_model_path().display().to_string());
+        let dict_w = wide(&dict.display().to_string());
+        let handle = momo_predictor_new_w(model.as_ptr(), dict_w.as_ptr());
+        assert!(!handle.is_null(), "妥当な辞書なら予測器が作れること");
+        momo_predictor_free(handle);
+        let _ = std::fs::remove_file(&dict);
+    }
+
+    #[test]
+    fn predictor_new_fails_on_malformed_custom_dict() {
+        // 記法が不正な辞書は予測器の生成ごと失敗する（だから validate を先に呼ぶ）。
+        let dict = write_dict("load_bad", "佐藤太郎\tサ/トー//タ/ロー\n");
+        let model = wide(&fixture_model_path().display().to_string());
+        let dict_w = wide(&dict.display().to_string());
+        assert!(momo_predictor_new_w(model.as_ptr(), dict_w.as_ptr()).is_null());
+        let (ret, msg) = validate(&dict);
+        assert!(ret >= 2, "validate なら理由が取れる: {msg}");
+        let _ = std::fs::remove_file(&dict);
+    }
 }

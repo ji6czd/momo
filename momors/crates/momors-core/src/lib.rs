@@ -74,3 +74,14 @@ pub use prediction::{
 /// 持つため、量子化前後でテキスト推論の結果を直接比較できる
 /// （`momo-compare-quant` CLI の用途）。
 pub type FloatPredictor = Predictor<float_model::FloatMomoModel>;
+
+/// カスタム辞書（フレーズ辞書）TSV を読み込めるか検証し、エントリ数を返す。
+///
+/// [`PredictorConfig::with_custom_dict_path`] に渡す前の下調べ用。辞書は利用者が
+/// 手で書くため記法ミスが起こりやすく、モデル読み込みごと失敗させる前に理由を
+/// 提示したい場面がある（エディタの辞書設定 UI など）。エラーは `Display` が
+/// そのまま利用者向けの説明になる。
+pub fn validate_custom_dict(path: impl AsRef<std::path::Path>) -> Result<usize> {
+    let index = custom_dict::load_custom_dict(path.as_ref())?;
+    Ok(index.values().map(Vec::len).sum())
+}

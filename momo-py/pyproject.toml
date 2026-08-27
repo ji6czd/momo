@@ -1,6 +1,6 @@
 [project]
 name = "momo-py"
-version = "0.10.1"
+version = "1.0.0"
 description = "Training tool for the MOMO Japanese-to-Braille ML models (reading/boundary models and .mbm export)."
 readme = "README.md"
 authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]

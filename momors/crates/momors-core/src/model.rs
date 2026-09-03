@@ -11,6 +11,7 @@ use crate::boundary::Boundary;
 use crate::feature::FeatureKey;
 use crate::name_dict::NameIndex;
 use crate::weight_model::WeightModel;
+use std::sync::Mutex;
 
 // ============================================================
 // 語彙テーブル
@@ -129,6 +130,84 @@ pub struct MomoModel {
     // --- サイズ情報 ---
     pub(crate) n_classes: u32,
     pub(crate) n_features: u32,
+
+    // --- 密な列の組み合わせ和キャッシュ（DenseSumCache 参照） ---
+    pub(crate) dense_cache: Mutex<DenseSumCache>,
+}
+
+// ============================================================
+// 密な列の組み合わせ和キャッシュ
+// ============================================================
+//
+// 読みモデルの CSC 列は大半が疎（平均 3 要素）だが、文字種など「どの文字にも現れる」
+// 汎用特徴の列はクラスのほぼ全部に非ゼロを持つ（w4 モデルで 67 列、全非ゼロの 9%）。
+// ところが 1 文字あたりに触る非ゼロ要素の約 96% はこの密な列で占められる
+// （1 文字 ≈ 11,400 要素のうち疎な列は ≈ 400）。
+//
+// 密な列の組み合わせは文脈の文字種パターンで決まるため種類が少なく、同じ組み合わせが
+// 繰り返し現れる。そこで「ヒットした密な列の id 集合」をキーに、その列だけを足し合わせた
+// int32 ベクトルをキャッシュし、ヒット時は疎な列だけを足す。整数加算なので順序に依らず
+// 結果は完全に一致する。
+//
+// ESP32-P4（PSRAM 常駐・360MHz）で読みスコア計算が 1 文字 549 µs → 約 100 µs を狙う。
+// PC でも同じ比率で効く。
+
+/// 1 文字分のキーに含めることができる密な列の最大数。超えた分は疎として扱う（結果は同じ）。
+const DENSE_KEY_MAX: usize = 16;
+
+/// キャッシュのスロット数。1 スロット = n_classes × 4 バイト（w4 で約 6KB）。
+const DENSE_CACHE_SLOTS: usize = 64;
+
+#[derive(Debug, Default)]
+struct DenseSlot {
+    key: [u32; DENSE_KEY_MAX],
+    key_len: u8,
+    /// 最終利用時刻（LRU 用）。0 = 空きスロット。
+    stamp: u64,
+    sum: Vec<i32>,
+}
+
+/// 密な列の組み合わせ和キャッシュ本体。[`MomoModel::dense_cache`]。
+#[derive(Debug, Default)]
+pub(crate) struct DenseSumCache {
+    slots: Vec<DenseSlot>,
+    clock: u64,
+}
+
+impl DenseSumCache {
+    /// `key`（昇順ソート済み）に対応する和ベクトルがあれば `dst` にコピーして true。
+    fn get(&mut self, key: &[u32], dst: &mut [i32]) -> bool {
+        self.clock += 1;
+        let clock = self.clock;
+        for slot in &mut self.slots {
+            if slot.stamp != 0
+                && slot.key_len as usize == key.len()
+                && slot.key[..key.len()] == *key
+            {
+                slot.stamp = clock;
+                dst.copy_from_slice(&slot.sum);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// `key` → `sum` を登録する。満杯なら最も長く使われていないスロットを置き換える。
+    fn put(&mut self, key: &[u32], sum: &[i32]) {
+        self.clock += 1;
+        let clock = self.clock;
+        let slot = if self.slots.len() < DENSE_CACHE_SLOTS {
+            self.slots.push(DenseSlot::default());
+            self.slots.last_mut().unwrap()
+        } else {
+            self.slots.iter_mut().min_by_key(|s| s.stamp).unwrap()
+        };
+        slot.key[..key.len()].copy_from_slice(key);
+        slot.key_len = key.len() as u8;
+        slot.stamp = clock;
+        slot.sum.clear();
+        slot.sum.extend_from_slice(sum);
+    }
 }
 
 impl MomoModel {
@@ -138,6 +217,27 @@ impl MomoModel {
     /// 直接外部から使うことは想定していない。
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// 特徴量 `feat_id` の CSC 列を `acc` に加算する（`feat_id < n_features` は呼び出し側で保証）。
+    #[inline]
+    fn add_column(&self, feat_id: u32, acc: &mut [i32]) {
+        let col_start = self.csc_colptr[feat_id as usize] as usize;
+        let col_end = self.csc_colptr[feat_id as usize + 1] as usize;
+        // 列の範囲は loader が colptr の単調性・上限を検証済み（loader.rs read_csc_structure）。
+        // rowind < n_classes も loader が検証済みで、acc の長さは n_classes（new_scratch）。
+        // 組み込み（ESP32-P4）で 1 文字あたり約 1.1 万要素をこのループが処理するため、
+        // 3 つの境界チェックを外す。
+        debug_assert!(col_end <= self.csc_rowind.len() && col_end <= self.csc_data.len());
+        let rows = &self.csc_rowind[col_start..col_end];
+        let vals = &self.csc_data[col_start..col_end];
+        for (&cls, &v) in rows.iter().zip(vals) {
+            debug_assert!((cls as usize) < acc.len());
+            // SAFETY: loader が rowind の各要素 < n_classes を保証し、acc.len() == n_classes。
+            unsafe {
+                *acc.get_unchecked_mut(cls as usize) += v as i32;
+            }
+        }
     }
 
     /// 語彙テーブルから `key` に対応する `feature_id` を引く。
@@ -210,6 +310,7 @@ impl Default for MomoModel {
             single_char_dict: Vec::new(),
             n_classes: 0,
             n_features: 0,
+            dense_cache: Mutex::new(DenseSumCache::default()),
         }
     }
 }
@@ -264,26 +365,80 @@ impl WeightModel for MomoModel {
     }
 
     fn compute_read_scores(&self, feat_ids: &[u32], int_scores: &mut Vec<i32>, scores: &mut [f32]) {
-        int_scores.fill(0);
+        let acc = &mut int_scores[..];
+
+        // 密な列（非ゼロがクラス数の半分以上）と疎な列に分ける。密な列の id は
+        // キャッシュのキーになるので昇順に整列する（挿入ソート、高々 DENSE_KEY_MAX 個）。
+        let dense_threshold = self.n_classes.div_ceil(2);
+        let mut dense_key = [0u32; DENSE_KEY_MAX];
+        let mut n_dense = 0usize;
+        let mut sparse_ids = [0u32; 64];
+        let mut n_sparse = 0usize;
+        let mut overflow: Vec<u32> = Vec::new();
         for &feat_id in feat_ids {
             if feat_id >= self.n_features {
                 continue;
             }
-            let col_start = self.csc_colptr[feat_id as usize] as usize;
-            let col_end = self.csc_colptr[feat_id as usize + 1] as usize;
-            for j in col_start..col_end {
-                let cls = self.csc_rowind[j] as usize;
-                int_scores[cls] += self.csc_data[j] as i32;
+            let nnz = self.csc_colptr[feat_id as usize + 1] - self.csc_colptr[feat_id as usize];
+            if nnz >= dense_threshold && n_dense < DENSE_KEY_MAX {
+                let mut i = n_dense;
+                while i > 0 && dense_key[i - 1] > feat_id {
+                    dense_key[i] = dense_key[i - 1];
+                    i -= 1;
+                }
+                dense_key[i] = feat_id;
+                n_dense += 1;
+            } else if n_sparse < sparse_ids.len() {
+                sparse_ids[n_sparse] = feat_id;
+                n_sparse += 1;
+            } else {
+                overflow.push(feat_id);
             }
         }
-        for cls in 0..scores.len() {
-            scores[cls] =
-                self.intercept_read[cls] + (int_scores[cls] as f32) * self.read_scale[cls];
+        let dense_key = &dense_key[..n_dense];
+
+        // 密な列: キャッシュにあればコピー、無ければ計算して登録する。
+        let cached = if n_dense > 0 {
+            let mut cache = self.dense_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.get(dense_key, acc)
+        } else {
+            false
+        };
+        if !cached {
+            acc.fill(0);
+            for &feat_id in dense_key {
+                self.add_column(feat_id, acc);
+            }
+            if n_dense > 0 {
+                let mut cache = self.dense_cache.lock().unwrap_or_else(|e| e.into_inner());
+                cache.put(dense_key, acc);
+            }
+        }
+
+        // 疎な列
+        for &feat_id in sparse_ids[..n_sparse].iter().chain(&overflow) {
+            self.add_column(feat_id, acc);
+        }
+
+        for ((score, &acc), (&intercept, &scale)) in scores
+            .iter_mut()
+            .zip(acc.iter())
+            .zip(self.intercept_read.iter().zip(&self.read_scale))
+        {
+            *score = intercept + (acc as f32) * scale;
         }
     }
 
     fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32 {
         self.boundary.compute_score(feat_keys, |k| self.resolve(k))
+    }
+
+    fn resolve(&self, key: &FeatureKey) -> Option<crate::boundary::VocabRef> {
+        self.resolve(key)
+    }
+
+    fn compute_boundary_score_resolved(&self, refs: &[crate::boundary::VocabRef]) -> f32 {
+        self.boundary.compute_score_resolved(refs)
     }
 
     fn read_feature_column(&self, feat_id: u32) -> Vec<(u32, f32)> {

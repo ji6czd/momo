@@ -42,7 +42,7 @@ pub(crate) const MAX_BOUNDARY_CAT_COLUMNS: usize = 64;
 /// 統合語彙テーブル（version 0x07）1エントリのうち、境界モデルのスコア計算が
 /// 必要とする部分。`model.rs`/`float_model.rs` の `resolve` クロージャが返す。
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct VocabRef {
+pub struct VocabRef {
     /// one-hot 特徴量ID（線形境界モデル・読みモデル用）。
     pub(crate) feature_id: u32,
     /// GBDT カテゴリカル `(column, code)`。カテゴリカル列を持たないキー（Bias 等）
@@ -118,6 +118,18 @@ impl Boundary {
         feat_keys: &[FeatureKey],
         resolve: impl Fn(&FeatureKey) -> Option<VocabRef>,
     ) -> f32 {
+        self.compute_score_iter(feat_keys.iter().filter_map(resolve))
+    }
+
+    /// [`Self::compute_score`] の、語彙引き済み [`VocabRef`] 列を受け取る版。
+    ///
+    /// 推論ループは読みモデル用に各キーを一度語彙で引いており、その結果を
+    /// 境界モデルにも使い回すことで二分探索を二重に行わずに済む。
+    pub(crate) fn compute_score_resolved(&self, refs: &[VocabRef]) -> f32 {
+        self.compute_score_iter(refs.iter().copied())
+    }
+
+    fn compute_score_iter(&self, refs: impl Iterator<Item = VocabRef>) -> f32 {
         match self {
             Boundary::Linear {
                 scale,
@@ -125,16 +137,14 @@ impl Boundary {
                 intercept,
             } => {
                 let mut score = intercept[1];
-                for key in feat_keys {
-                    if let Some(vr) = resolve(key)
-                        && (vr.feature_id as usize) < data.len()
-                    {
+                for vr in refs {
+                    if (vr.feature_id as usize) < data.len() {
                         score += (data[vr.feature_id as usize] as f32) * scale;
                     }
                 }
                 score
             }
-            Boundary::Tree(tree) => tree.compute_score(feat_keys, resolve),
+            Boundary::Tree(tree) => tree.compute_score_iter(refs),
         }
     }
 }
@@ -147,19 +157,26 @@ impl FloatBoundary {
         feat_keys: &[FeatureKey],
         resolve: impl Fn(&FeatureKey) -> Option<VocabRef>,
     ) -> f32 {
+        self.compute_score_iter(feat_keys.iter().filter_map(resolve))
+    }
+
+    /// [`Boundary::compute_score_resolved`] の float 版。
+    pub(crate) fn compute_score_resolved(&self, refs: &[VocabRef]) -> f32 {
+        self.compute_score_iter(refs.iter().copied())
+    }
+
+    fn compute_score_iter(&self, refs: impl Iterator<Item = VocabRef>) -> f32 {
         match self {
             FloatBoundary::Linear { data, intercept } => {
                 let mut score = intercept[1];
-                for key in feat_keys {
-                    if let Some(vr) = resolve(key)
-                        && (vr.feature_id as usize) < data.len()
-                    {
+                for vr in refs {
+                    if (vr.feature_id as usize) < data.len() {
                         score += data[vr.feature_id as usize];
                     }
                 }
                 score
             }
-            FloatBoundary::Tree(tree) => tree.compute_score(feat_keys, resolve),
+            FloatBoundary::Tree(tree) => tree.compute_score_iter(refs),
         }
     }
 }
@@ -169,16 +186,21 @@ impl TreeEnsemble {
     ///
     /// アクティブな各特徴量キーを `resolve` で統合語彙に引き、カテゴリカル
     /// `(column, code)` を持つものだけを列コード表に反映する。
+    #[cfg(test)]
     fn compute_score(
         &self,
         feat_keys: &[FeatureKey],
         resolve: impl Fn(&FeatureKey) -> Option<VocabRef>,
     ) -> f32 {
+        self.compute_score_iter(feat_keys.iter().filter_map(resolve))
+    }
+
+    fn compute_score_iter(&self, refs: impl Iterator<Item = VocabRef>) -> f32 {
         // 列ごとのコードを解決する。同じ列に複数の FeatureKey が対応することは
         // 通常ないが、あれば最後に見つかったものが勝つ。
         let mut col_codes = [None::<u32>; MAX_BOUNDARY_CAT_COLUMNS];
-        for key in feat_keys {
-            if let Some((column, code)) = resolve(key).and_then(|vr| vr.cat)
+        for vr in refs {
+            if let Some((column, code)) = vr.cat
                 && let Some(slot) = col_codes.get_mut(column as usize)
             {
                 *slot = Some(code);

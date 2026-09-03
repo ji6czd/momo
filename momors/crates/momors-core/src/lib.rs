@@ -31,8 +31,14 @@
 pub mod error;
 pub mod prediction;
 
+// 推論速度の内訳（語彙引き／読み／境界）を測る診断 API。feature `diagnostics` でのみ有効。
+#[cfg(feature = "diagnostics")]
+pub mod diag;
+
 // 内部モジュール（実装が進んだら追加していく）
 mod boundary;
+// predict の段階別タイマー（feature `diagnostics` 無効時は no-op）
+pub mod phase;
 mod bracket;
 mod char_type;
 mod counter;

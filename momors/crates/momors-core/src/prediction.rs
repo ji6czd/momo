@@ -17,6 +17,8 @@ use crate::Result;
 use crate::bracket::{self, Role, Treatment};
 use crate::char_type::{CharType, get_char_type};
 use crate::counter::{CounterAction, arabic_run, counter_needs_gate, resolve_multi, resolve_phono};
+use crate::boundary::VocabRef;
+use crate::phase::{self, Phase};
 use crate::feature::FeatureKey;
 use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
 use crate::model::MomoModel;
@@ -475,7 +477,11 @@ pub struct Predictor<M: WeightModel = MomoModel> {
     config: PredictorConfig,
     model: M,
     /// ソート済み単一文字辞書（漢字・算用数字）。binary_search でルックアップする。
-    single_char_dict: Vec<(char, Vec<String>)>,
+    ///
+    /// 各読みはロード時にモデルのクラス id へ解決済み（昇順・重複なし）。モデルのクラスに
+    /// 無い読みは落とす。推論時は候補 id のスコアを比べるだけで済み、1 文字ごとに
+    /// 全クラスのラベル文字列を走査しない（ESP32-P4 で 1 文字 ≈270 µs を占めていた）。
+    single_char_dict: Vec<(char, Vec<usize>)>,
     /// カスタム辞書（フレーズ単位の読み完全上書き）。モデル同梱は無く、
     /// `custom_dict_path` の明示指定が無ければ常に空。
     custom_dict: crate::custom_dict::CustomDictIndex,
@@ -493,6 +499,7 @@ impl<M: WeightModel> Predictor<M> {
         } else {
             model.take_single_char_dict()
         };
+        let single_char_dict = resolve_single_char_dict(single_char_dict, model.read_classes());
         let custom_dict = if let Some(ref path) = config.custom_dict_path {
             crate::custom_dict::load_custom_dict(path)?
         } else {
@@ -518,7 +525,8 @@ impl<M: WeightModel> Predictor<M> {
             single_char_dict_path: None,
             custom_dict_path: None,
         };
-        let single_char_dict = model.take_single_char_dict();
+        let single_char_dict =
+            resolve_single_char_dict(model.take_single_char_dict(), model.read_classes());
         Ok(Self {
             config,
             model,
@@ -528,6 +536,12 @@ impl<M: WeightModel> Predictor<M> {
     }
 
     /// 設定を参照する。
+    /// 内部の重みモデルへの参照（診断用）。
+    #[cfg(feature = "diagnostics")]
+    pub(crate) fn model(&self) -> &M {
+        &self.model
+    }
+
     pub fn config(&self) -> &PredictorConfig {
         &self.config
     }
@@ -554,11 +568,14 @@ impl<M: WeightModel> Predictor<M> {
     /// - LABEL_SKIP 救済 (NUMERIC)
     /// - 境界モデルによるスペース挿入
     pub fn predict(&self, text: &str) -> Result<PredictionResult> {
+        let _total = phase::Guard::new(Phase::Total);
         // --- 正規化 ---
         // 康煕部首・CJK互換漢字等の畳み込みに加え、欧文リガチャ等の1→N展開を
         // 行う。Python 版 predict() の normalize_input() 呼び出しと対応。
         // パイプラインは正規化後テキスト基準で動かし、最後に原文基準へ戻す。
+        let t = phase::start();
         let normalized = crate::normalize::normalize_input(text);
+        phase::add(Phase::Normalize, t);
         let mut result = self.predict_with_brackets(&normalized.text)?;
         if let Some(byte_map) = &normalized.byte_map {
             remap_result_to_source(&mut result, text, byte_map);
@@ -688,6 +705,7 @@ impl<M: WeightModel> Predictor<M> {
         }
 
         // --- 前処理 ---
+        let t = phase::start();
         let source_seq = to_source_seq(text);
         let n = source_seq.len();
         if n == 0 {
@@ -699,6 +717,8 @@ impl<M: WeightModel> Predictor<M> {
         // フォールバックに使う）は常に実文字ベースの source_seq から計算する。
         let (name_flags, name_readings) =
             crate::name_dict::compute_name_matches(&source_seq, self.model.name_dict());
+        phase::add(Phase::Source, t);
+        let t = phase::start();
 
         let all_feat_keys: Vec<Vec<FeatureKey>> = if feature_text == text {
             compute_source_features(&source_seq, &name_flags)
@@ -725,10 +745,10 @@ impl<M: WeightModel> Predictor<M> {
             );
             filtered
         };
-        let all_feat_ids: Vec<Vec<u32>> = all_feat_keys
-            .iter()
-            .map(|keys| lookup_feature_ids(keys, &self.model))
-            .collect();
+        phase::add(Phase::Featurize, t);
+        let t = phase::start();
+        let (all_feat_ids, all_feat_refs) = resolve_all(&all_feat_keys, &self.model);
+        phase::add(Phase::Resolve, t);
 
         let n_cls = self.model.n_classes() as usize;
         let mut read_scratch = self.model.new_scratch();
@@ -754,6 +774,7 @@ impl<M: WeightModel> Predictor<M> {
         let mut skip_until: usize = 0;
 
         // --- 各文字を処理 ---
+        let loop_guard = phase::Guard::new(Phase::Loop);
         for i in 0..n {
             // 日付助数詞パスが消費済みのインデックスは読み飛ばす。
             if i < skip_until {
@@ -790,7 +811,7 @@ impl<M: WeightModel> Predictor<M> {
                         result.decision_sources.push(DecisionSource::DictCustom);
                     }
                 }
-                let has_split = self.boundary_has_split(&all_feat_keys[last], &source_seq, last);
+                let has_split = self.boundary_has_split(&all_feat_refs[last], &source_seq, last);
                 if has_split {
                     result.kana_text.push(' ');
                     result
@@ -835,7 +856,7 @@ impl<M: WeightModel> Predictor<M> {
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
                 if !entry.ctype.skips_boundary_check() {
-                    let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                    let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
                     if has_split {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -861,7 +882,7 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -885,7 +906,7 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = entry.compound_len >= 2 && is_small_kana(entry.cp2);
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -928,7 +949,7 @@ impl<M: WeightModel> Predictor<M> {
 
                 if let Some(action) = resolve_multi(counter_cp, value, model_reading) {
                     let has_split =
-                        self.boundary_has_split(&all_feat_keys[run_end], &source_seq, run_end);
+                        self.boundary_has_split(&all_feat_refs[run_end], &source_seq, run_end);
                     match action {
                         CounterAction::Spell(kana) => {
                             // 綴り読みは分解できない（トオカ・ハツカ）。ラン先頭に束ねる。
@@ -1000,7 +1021,7 @@ impl<M: WeightModel> Predictor<M> {
                 && let Some(reading) = resolve_phono(source_seq[run_end].cp, value, run_end - i)
             {
                 let has_split =
-                    self.boundary_has_split(&all_feat_keys[run_end], &source_seq, run_end);
+                    self.boundary_has_split(&all_feat_refs[run_end], &source_seq, run_end);
 
                 for digit in &source_seq[i..run_end] {
                     self.emit_char_passthrough(
@@ -1086,7 +1107,7 @@ impl<M: WeightModel> Predictor<M> {
                         continue;
                     }
                     NumericFallback::Output(fallback) => {
-                        let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                        let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
                         self.emit_label(
                             entry,
                             fallback,
@@ -1151,7 +1172,7 @@ impl<M: WeightModel> Predictor<M> {
                     !next_is_kun_counter
                 };
                 if revert {
-                    let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                    let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
                     self.emit_char_passthrough(
                         entry,
                         conf,
@@ -1195,7 +1216,7 @@ impl<M: WeightModel> Predictor<M> {
                     parent_is_kanji = entry.ctype == CharType::Kanji;
                     parent_has_small_kana = false;
                     parent_kana_byte_end = result.kana_text.len();
-                    let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                    let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
                     if has_split {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -1232,7 +1253,7 @@ impl<M: WeightModel> Predictor<M> {
                 //    複合ユニット最終文字の行に付く）。ここで境界モデルを問い合わせず
                 //    単純スキップすると、学習された境界ラベルが推論から一切参照されず
                 //    「今日」「昨日」直後のマスあけが構造的に欠落する（要修正前の挙動）。
-                let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+                let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -1260,7 +1281,7 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
 
             // 境界判定
-            let has_split = self.boundary_has_split(&all_feat_keys[i], &source_seq, i);
+            let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
 
             // 々フォールバック: 低自信度の「々」は直前漢字の読みを繰り返す
             //
@@ -1332,6 +1353,8 @@ impl<M: WeightModel> Predictor<M> {
         }
 
         // --- 末尾の境界スペースを落とす（src_to_kana_index を組む前に） ---
+        drop(loop_guard);
+        let _finalize = phase::Guard::new(Phase::Finalize);
         trim_trailing_boundary_spaces(&mut result, text);
 
         // --- src_to_kana_index 構築 (kana_to_src_index から逆引き) ---
@@ -1357,6 +1380,7 @@ impl<M: WeightModel> Predictor<M> {
         scratch: &mut M::Scratch,
         scores: &mut [f32],
     ) -> (usize, f32) {
+        let _g = phase::Guard::new(Phase::Read);
         self.model.compute_read_scores(feat_ids, scratch, scores);
 
         // 単一文字辞書制約付き argmax（漢字・算用数字1文字が対象）。
@@ -1366,23 +1390,16 @@ impl<M: WeightModel> Predictor<M> {
             && !self.single_char_dict.is_empty()
         {
             if let Some(ch) = char::from_u32(entry.cp) {
-                if let Some(readings) = lookup_single_char_dict(&self.single_char_dict, ch) {
+                if let Some(candidates) = lookup_single_char_dict(&self.single_char_dict, ch) {
                     // 辞書の読みが1つもモデルのクラスに存在しない場合は None。
                     // その場合は制約なし argmax にフォールバックする。
-                    if let Some(result) =
-                        constrained_argmax(scores, self.model.read_classes(), readings)
-                    {
+                    if let Some(result) = constrained_argmax_cls(scores, candidates) {
                         return result;
                     }
                 }
             }
         }
         unconstrained_argmax(scores)
-    }
-
-    /// 境界モデルの生スコア (sigmoid 前) を計算する。
-    fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32 {
-        self.model.compute_boundary_score(feat_keys)
     }
 
     /// 位置 `i` の直後に境界スペース（マスあけ）を入れるか判定する。
@@ -1396,11 +1413,12 @@ impl<M: WeightModel> Predictor<M> {
     /// 振り回されてラン内部を誤分割しがちなため、ここは構造で保証する。
     fn boundary_has_split(
         &self,
-        feat_keys: &[FeatureKey],
+        feat_refs: &[VocabRef],
         source_seq: &[SourceEntry],
         i: usize,
     ) -> bool {
-        if sigmoid(self.compute_boundary_score(feat_keys)) < 0.5 {
+        let _g = phase::Guard::new(Phase::Boundary);
+        if sigmoid(self.model.compute_boundary_score_resolved(feat_refs)) < 0.5 {
             return false;
         }
         !is_alnum_run_internal(source_seq, i)
@@ -2053,6 +2071,7 @@ fn unconstrained_argmax(scores: &[f32]) -> (usize, f32) {
 /// 辞書の読み候補 `readings` のいずれかと一致するクラスの中で、
 /// 最もスコアが高いものを返す。一致するクラスが1つも無ければ `None`
 /// （呼び出し側で `unconstrained_argmax` にフォールバックする）。
+#[cfg(test)]
 fn constrained_argmax(
     scores: &[f32],
     class_labels: &[String],
@@ -2068,6 +2087,44 @@ fn constrained_argmax(
         }
     }
     best
+}
+
+/// 候補クラス id（昇順・重複なし）の中でスコア最大のものを返す。
+///
+/// 同点なら id の小さい方（= 文字列版 [`constrained_argmax`] がクラス順に走査して
+/// 最初に見つけたもの）を選ぶ。候補が空なら None。
+fn constrained_argmax_cls(scores: &[f32], candidates: &[usize]) -> Option<(usize, f32)> {
+    let mut best: Option<(usize, f32)> = None;
+    for &cls in candidates {
+        let s = scores[cls];
+        if best.is_none_or(|(_, best_s)| s > best_s) {
+            best = Some((cls, s));
+        }
+    }
+    best
+}
+
+/// 単一文字辞書の読み文字列をモデルのクラス id（昇順・重複なし）へ解決する。
+/// モデルのクラスに無い読みは落とす。同じラベルが複数クラスにある場合は小さい id を採る。
+fn resolve_single_char_dict(
+    dict: Vec<(char, Vec<String>)>,
+    class_labels: &[String],
+) -> Vec<(char, Vec<usize>)> {
+    let mut index: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (cls, lbl) in class_labels.iter().enumerate() {
+        index.entry(lbl.as_str()).or_insert(cls);
+    }
+    dict.into_iter()
+        .map(|(ch, readings)| {
+            let mut ids: Vec<usize> = readings
+                .iter()
+                .filter_map(|r| index.get(r.as_str()).copied())
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+            (ch, ids)
+        })
+        .collect()
 }
 
 /// 単一文字辞書 TSV を読み込み、char でソートされた Vec を返す。
@@ -2104,7 +2161,7 @@ fn load_single_char_dict(path: &Path) -> Result<Vec<(char, Vec<String>)>> {
 }
 
 /// ソート済み単一文字辞書から文字をバイナリサーチで引く。
-fn lookup_single_char_dict<'a>(dict: &'a [(char, Vec<String>)], ch: char) -> Option<&'a [String]> {
+fn lookup_single_char_dict<'a, T>(dict: &'a [(char, Vec<T>)], ch: char) -> Option<&'a [T]> {
     dict.binary_search_by_key(&ch, |(k, _)| *k)
         .ok()
         .map(|i| dict[i].1.as_slice())
@@ -2154,15 +2211,20 @@ fn is_alnum_run_internal(source_seq: &[SourceEntry], i: usize) -> bool {
         .is_some_and(|next| is_alnum(next.ctype) || is_western_runner(next.cp))
 }
 
-/// 特徴量キー列をモデルの語彙テーブルで引いて feature_id 列に変換する。
-fn lookup_feature_ids<M: WeightModel>(keys: &[FeatureKey], model: &M) -> Vec<u32> {
-    let mut ids = Vec::with_capacity(keys.len());
-    for k in keys {
-        if let Some(id) = model.vocab_find(k) {
-            ids.push(id);
-        }
+/// 各位置の特徴量キーを統合語彙で一度だけ引き、読みモデル用の feature_id 列と
+/// 境界モデル用の [`VocabRef`] 列を同時に作る（二分探索は位置×キーにつき 1 回）。
+fn resolve_all<M: WeightModel>(
+    all_feat_keys: &[Vec<FeatureKey>],
+    model: &M,
+) -> (Vec<Vec<u32>>, Vec<Vec<VocabRef>>) {
+    let mut all_ids = Vec::with_capacity(all_feat_keys.len());
+    let mut all_refs = Vec::with_capacity(all_feat_keys.len());
+    for keys in all_feat_keys {
+        let refs: Vec<VocabRef> = keys.iter().filter_map(|k| model.resolve(k)).collect();
+        all_ids.push(refs.iter().map(|r| r.feature_id).collect());
+        all_refs.push(refs);
     }
-    ids
+    (all_ids, all_refs)
 }
 
 /// ひらがなコードポイントをカタカナに変換する (+0x60)。

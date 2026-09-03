@@ -168,6 +168,14 @@ impl WeightModel for FloatMomoModel {
         self.boundary.compute_score(feat_keys, |k| self.resolve(k))
     }
 
+    fn resolve(&self, key: &FeatureKey) -> Option<crate::boundary::VocabRef> {
+        self.resolve(key)
+    }
+
+    fn compute_boundary_score_resolved(&self, refs: &[crate::boundary::VocabRef]) -> f32 {
+        self.boundary.compute_score_resolved(refs)
+    }
+
     fn read_feature_column(&self, feat_id: u32) -> Vec<(u32, f32)> {
         if feat_id >= self.n_features {
             return Vec::new();

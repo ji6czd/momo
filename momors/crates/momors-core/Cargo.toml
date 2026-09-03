@@ -7,6 +7,10 @@ license.workspace = true
 authors.workspace = true
 include = ["src/**", "Cargo.toml"]
 
+[features]
+# 推論速度の内訳を測る診断 API (src/diag.rs)。組み込みターゲットでの計測用。本番では無効。
+diagnostics = []
+
 [dependencies]
 thiserror.workspace = true
 byteorder.workspace = true

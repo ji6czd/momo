@@ -14,6 +14,7 @@
 use std::path::Path;
 
 use crate::Result;
+use crate::boundary::VocabRef;
 use crate::feature::FeatureKey;
 use crate::name_dict::NameIndex;
 
@@ -75,6 +76,13 @@ pub trait WeightModel: Sized {
     /// 別の語彙空間を持つため、そもそも共有 `feat_ids` に解決する意味がない
     /// （[`crate::boundary`] 参照）。
     fn compute_boundary_score(&self, feat_keys: &[FeatureKey]) -> f32;
+
+    /// 特徴量キーを統合語彙で引き、読みモデル用の `feature_id` と境界モデル用の
+    /// カテゴリカル情報を一度に返す（二分探索は 1 回）。
+    fn resolve(&self, key: &FeatureKey) -> Option<VocabRef>;
+
+    /// [`Self::compute_boundary_score`] の、[`Self::resolve`] 済みの列を受け取る版。
+    fn compute_boundary_score_resolved(&self, refs: &[VocabRef]) -> f32;
 
     /// 読みモデルの1特徴量（列）の非ゼロ重みを `(class_id, 実重み)` の列で返す。
     ///

@@ -1,0 +1,34 @@
+[package]
+name = "momors-esp32"
+description = "ESP32-P4 (ESP-IDF) firmware: serial-console REPL for the momors Japanese Braille engine."
+version = "1.0.0"
+edition = "2024"
+license = "BSD-3-Clause"
+authors = ["KIRIAKE Masanori <seiken@rd01.net>"]
+
+# ワークスペースからは除外している（momors/Cargo.toml の [workspace] exclude 参照）。
+# ESP-IDF 向けターゲット・nightly・build-std を要求するため、通常の
+# `cargo build` に巻き込まないのと、独自の profile を持つため。
+[workspace]
+
+[[bin]]
+name = "momors-esp32"
+harness = false
+
+[profile.release]
+opt-level = 3
+debug = true       # シンボルはフラッシュサイズに影響しない（ELF にのみ残る）
+
+[profile.dev]
+debug = true
+opt-level = "z"
+
+[dependencies]
+momors-core = { path = "../momors-core", features = ["diagnostics"] }
+momors-braille = { path = "../momors-braille" }
+# esp-idf-svc / esp-idf-hal は ESP-IDF v5.5 のバインディングと版が合わず（esp-idf-hal 0.46.2 が
+# spi_transaction_t を不透明型として受け取る）、必要なのは生 API だけなので esp-idf-sys を直接使う。
+esp-idf-sys = { version = "0.37.2", features = ["binstart"] }
+
+[build-dependencies]
+embuild = "0.33"

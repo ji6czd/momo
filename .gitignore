@@ -10,3 +10,9 @@ obj/
 !momors/crates/momors-cli/src/bin/
 !momors/crates/momors-cli/src/bin/**
 
+
+# momors-esp32 (ESP-IDF ビルド生成物)
+momors/crates/momors-esp32/target/
+momors/crates/momors-esp32/.embuild/
+momors/crates/momors-esp32/sdkconfig
+momors/crates/momors-esp32/sdkconfig.old

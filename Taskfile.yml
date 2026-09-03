@@ -1,5 +1,13 @@
 version: "3"
 
+vars:
+  # momors-esp32 の cargo target ディレクトリ（Taskfile 内の esp:* タスク参照）
+  ESP_TARGET_DIR:
+    sh: |
+      if [ -n "$ESP_TARGET_DIR" ]; then echo "$ESP_TARGET_DIR"
+      elif [ "{{OS}}" = "windows" ]; then echo "{{substr 0 2 .ROOT_DIR}}/mo-esp"
+      else echo "{{.ROOT_DIR}}/momors/crates/momors-esp32/target"; fi
+
 tasks:
   default:
     desc: Build all components (rust + python + wasm in parallel, then vscode)
@@ -59,6 +67,69 @@ tasks:
       - mkdir -p "{{.ROOT_DIR}}/vscode-momo/resources"
       - wasm-pack build momors/crates/momors-wasm --target nodejs --out-dir "{{.WASM_OUT}}"
       - cp "{{.MODEL_SRC}}" "{{.MODEL_DST}}"
+
+  # ---- ESP32-P4 (momors-esp32) ----
+  # 前提ツールと手順は BUILD.md の「ESP32-P4 ファームウェア」を参照。
+  # 変数（環境変数で上書き可）:
+  #   ESP_TARGET_DIR  cargo の target ディレクトリ。Windows は esp-idf-sys のパス長制限（88 文字）
+  #                   のためドライブ直下の短いパス（既定 <ドライブ>:/mo-esp）。他 OS はクレート内 target/。
+  #   PORT            シリアルポート（省略時は espflash が自動検出）
+  esp:build:
+    desc: Build ESP32-P4 firmware (momors-esp32, ESP-IDF + nightly; see BUILD.md)
+    dir: momors/crates/momors-esp32
+    env:
+      CARGO_TARGET_DIR: "{{.ESP_TARGET_DIR}}"
+    cmds:
+      - cargo build --release
+
+  esp:flash:
+    desc: Flash ESP32-P4 firmware (uses the ESP-IDF-built bootloader; espflash's bundled one does not boot this app)
+    dir: momors/crates/momors-esp32
+    vars:
+      TARGET_DIR: "{{.ESP_TARGET_DIR}}"
+      ELF: "{{.TARGET_DIR}}/riscv32imafc-esp-espidf/release/momors-esp32"
+    cmds:
+      # esp-idf-sys の出力ディレクトリ名はハッシュ付きなので、最新の bootloader.bin を探して渡す。
+      # task は内蔵シェル（mvdan/sh）で実行するため ls -t / head は使えない。
+      - |
+        BL=""
+        for f in {{.TARGET_DIR}}/riscv32imafc-esp-espidf/release/build/esp-idf-sys/*/out/build/bootloader/bootloader.bin; do
+          if [ -z "$BL" ] || [ "$f" -nt "$BL" ]; then BL="$f"; fi
+        done
+        if [ -z "$BL" ]; then echo "bootloader.bin が見つかりません。先に task esp:build を実行してください" >&2; exit 1; fi
+        echo "bootloader: $BL"
+        espflash flash {{if .PORT}}-p {{.PORT}}{{end}} --flash-size 16mb --partition-table partitions.csv --bootloader "$BL" "{{.ELF}}"
+
+  esp:flash-model:
+    desc: Write the window=4 model (.mbm) into the "model" partition (offset 0x400000)
+    vars:
+      MODEL: "{{.ROOT_DIR}}/dataset/basic_data_4.mbm"
+    cmds:
+      - espflash write-bin {{if .PORT}}-p {{.PORT}}{{end}} 0x400000 "{{.MODEL}}"
+
+  esp:image:
+    desc: Save a merged flash image (bootloader + partition table + app) for distribution
+    dir: momors/crates/momors-esp32
+    vars:
+      TARGET_DIR: "{{.ESP_TARGET_DIR}}"
+      ELF: "{{.TARGET_DIR}}/riscv32imafc-esp-espidf/release/momors-esp32"
+      OUT: '{{.OUT | default (printf "%s/dist/momors-esp32-esp32p4.bin" .ROOT_DIR)}}'
+    cmds:
+      - |
+        BL=""
+        for f in {{.TARGET_DIR}}/riscv32imafc-esp-espidf/release/build/esp-idf-sys/*/out/build/bootloader/bootloader.bin; do
+          if [ -z "$BL" ] || [ "$f" -nt "$BL" ]; then BL="$f"; fi
+        done
+        if [ -z "$BL" ]; then echo "bootloader.bin が見つかりません。先に task esp:build を実行してください" >&2; exit 1; fi
+        mkdir -p "$(dirname "{{.OUT}}")"
+        espflash save-image --chip esp32p4 --merge --skip-padding --flash-size 16mb --partition-table partitions.csv --bootloader "$BL" "{{.ELF}}" "{{.OUT}}"
+        echo "wrote {{.OUT}}"
+        echo "書き込み: espflash write-bin 0x0 {{.OUT}}   （モデルは task esp:flash-model か espflash write-bin 0x400000 <basic_data_4.mbm>）"
+
+  esp:monitor:
+    desc: Open the serial monitor for the ESP32-P4 board
+    cmds:
+      - espflash monitor {{if .PORT}}-p {{.PORT}}{{end}}
 
   vscode:
     desc: Compile VSCode extension (requires wasm task to have run first)

@@ -10,6 +10,9 @@ members = [
 ]
 # momors-pyo3 は maturin 経由でビルドするため通常の cargo build から除外する
 # momors-wasm は wasm-pack 経由でビルドするため通常の cargo build から除外する
+# momors-esp32 は ESP-IDF ターゲット (nightly + build-std) 専用のため、ワークスペース自体から
+# 除外して独自の Cargo.lock / profile を持たせる（docs/esp32p4-plan.md）
+exclude = ["crates/momors-esp32"]
 default-members = [
     "crates/momors-core",
     "crates/momors-braille",

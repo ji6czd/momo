@@ -84,11 +84,246 @@ pub(crate) enum FloatBoundary {
 /// `resolve` クロージャ経由で受け取る。
 #[derive(Debug)]
 pub(crate) struct TreeEnsemble {
-    trees: Vec<TreeNode>,
+    /// 全木のノードを連結した圧縮表現（下記のワード配置）。
+    words: Vec<u32>,
+    /// 各木の根の `words` 内インデックス。
+    roots: Vec<u32>,
+    /// split ノードの総数（メンバーシップのビット集合の大きさ）。
+    n_splits: usize,
+    /// 列ごとの反転索引: `(コード, split id)` をコード順に並べたもの。
+    columns: Vec<ColumnIndex>,
+}
+
+/// 1 列ぶんの反転索引。`codes[i]` を cats に含む split が `splits[i]`（コード昇順）。
+#[derive(Debug, Default)]
+struct ColumnIndex {
+    codes: Vec<u32>,
+    splits: Vec<u32>,
+}
+
+// ============================================================
+// 木の圧縮表現と反転索引
+// ============================================================
+//
+// ファイル形式（`Box<TreeNode>` 再帰列・split ごとの cats 配列）は変えず、ロード時に
+// 次の 2 つへ詰め直す。
+//
+// 1. ノード列 `words`（前順。左の子は親の直後、右の子の位置だけを持つ）:
+//      leaf : [ LEAF_FLAG                         ][ value (f32 bits) ]
+//      split: [ column | dl<<8 | split_id<<9      ][ right index      ]
+//    cats を持たないので 1 ノード 2 ワード。w4 モデル（split 2,200）で全木 36KB。
+//
+// 2. 列ごとの反転索引 `columns`: 「(列, コード) → そのコードを cats に含む split の id」。
+//
+// 推論時は 1 文字につき、列ごとに 1 回だけ反転索引を引いて「左へ進む split」のビット集合を
+// 作り、木を辿るときは `cats.binary_search(&code)` の代わりにビットを見る。
+// 元の判定（コードがその split の cats に含まれるか）と厳密に同じ結果になる。
+//
+// 動機は ESP32-P4（PSRAM 常駐・360MHz）: 1 文字あたり 100 本 × 約 10 段のノード訪問で、
+// それぞれ平均 29 個の cats を二分探索していた（境界 ≈ 280 µs/文字）。ノード 2 ワード化で
+// 木全体が L1/L2 に収まり、二分探索は列数（≤ 21）回だけになる。
+// 2026-08-16 に撤回した「共有 cats プール」方式とは違い、cats はそもそも辿らない。
+
+const LEAF_FLAG: u32 = 1 << 31;
+const COLUMN_BITS: u32 = 8;
+const DEFAULT_LEFT_BIT: u32 = 1 << COLUMN_BITS;
+const SPLIT_ID_SHIFT: u32 = COLUMN_BITS + 1;
+
+/// メンバーシップのビット集合をスタックに置ける split 数の上限（これを超えると Vec）。
+const STACK_BITSET_WORDS: usize = 256;
+
+/// [`TreeEnsemble::stats`] の結果（診断用）。
+#[cfg(feature = "diagnostics")]
+#[derive(Debug, Clone)]
+pub struct TreeStats {
+    pub n_trees: usize,
+    pub n_splits: usize,
+    pub n_leaves: usize,
+    pub cats_total: usize,
+    pub max_depth: usize,
+    pub splits_per_column: [usize; MAX_BOUNDARY_CAT_COLUMNS],
+}
+
+#[cfg(feature = "diagnostics")]
+impl Default for TreeStats {
+    fn default() -> Self {
+        Self {
+            n_trees: 0,
+            n_splits: 0,
+            n_leaves: 0,
+            cats_total: 0,
+            max_depth: 0,
+            splits_per_column: [0; MAX_BOUNDARY_CAT_COLUMNS],
+        }
+    }
+}
+
+impl TreeEnsemble {
+    /// パース済みの再帰木を圧縮表現＋反転索引へ詰め直す。
+    pub(crate) fn new(trees: Vec<TreeNode>) -> Self {
+        let mut words = Vec::new();
+        let mut roots = Vec::with_capacity(trees.len());
+        let mut columns: Vec<ColumnIndex> = (0..MAX_BOUNDARY_CAT_COLUMNS)
+            .map(|_| ColumnIndex::default())
+            .collect();
+        let mut n_splits = 0u32;
+        for t in &trees {
+            roots.push(words.len() as u32);
+            Self::emit(t, &mut words, &mut n_splits, &mut columns);
+        }
+        for col in &mut columns {
+            // コード順（同一コード内は split id 順）に整列する
+            let mut pairs: Vec<(u32, u32)> = col.codes.iter().copied().zip(col.splits.iter().copied()).collect();
+            pairs.sort_unstable();
+            col.codes = pairs.iter().map(|p| p.0).collect();
+            col.splits = pairs.iter().map(|p| p.1).collect();
+        }
+        Self {
+            words,
+            roots,
+            n_splits: n_splits as usize,
+            columns,
+        }
+    }
+
+    fn emit(node: &TreeNode, words: &mut Vec<u32>, n_splits: &mut u32, columns: &mut [ColumnIndex]) {
+        match node {
+            TreeNode::Leaf { value } => {
+                words.push(LEAF_FLAG);
+                words.push(value.to_bits());
+            }
+            TreeNode::Split {
+                column,
+                default_left,
+                cats,
+                left,
+                right,
+            } => {
+                debug_assert!(*column < (1 << COLUMN_BITS));
+                let split_id = *n_splits;
+                *n_splits += 1;
+                let col = &mut columns[*column as usize];
+                for &code in cats {
+                    col.codes.push(code);
+                    col.splits.push(split_id);
+                }
+                let header = (*column & ((1 << COLUMN_BITS) - 1))
+                    | if *default_left { DEFAULT_LEFT_BIT } else { 0 }
+                    | (split_id << SPLIT_ID_SHIFT);
+                words.push(header);
+                let right_slot = words.len();
+                words.push(0); // 右の子の位置は後で埋める
+                Self::emit(left, words, n_splits, columns);
+                words[right_slot] = words.len() as u32;
+                Self::emit(right, words, n_splits, columns);
+            }
+        }
+    }
+
+    /// 木の統計（診断用）。
+    #[cfg(feature = "diagnostics")]
+    pub(crate) fn stats(&self) -> TreeStats {
+        let mut st = TreeStats {
+            n_trees: self.roots.len(),
+            n_splits: self.n_splits,
+            ..Default::default()
+        };
+        for (c, col) in self.columns.iter().enumerate() {
+            st.cats_total += col.codes.len();
+            // 列ごとの split 数: この列に現れる split id の種類数
+            let mut ids: Vec<u32> = col.splits.clone();
+            ids.sort_unstable();
+            ids.dedup();
+            st.splits_per_column[c] = ids.len();
+        }
+        for &r in &self.roots {
+            self.walk_stats(r as usize, 0, &mut st);
+        }
+        st
+    }
+
+    #[cfg(feature = "diagnostics")]
+    fn walk_stats(&self, i: usize, depth: usize, st: &mut TreeStats) {
+        let header = self.words[i];
+        st.max_depth = st.max_depth.max(depth);
+        if header & LEAF_FLAG != 0 {
+            st.n_leaves += 1;
+            return;
+        }
+        self.walk_stats(i + 2, depth + 1, st);
+        self.walk_stats(self.words[i + 1] as usize, depth + 1, st);
+    }
+
+    /// 列ごとのコードから「左へ進む split」のビット集合を `bits` に作る。
+    fn build_membership(&self, col_codes: &[Option<u32>; MAX_BOUNDARY_CAT_COLUMNS], bits: &mut [u32]) {
+        bits.fill(0);
+        for (col, code) in self.columns.iter().zip(col_codes) {
+            let Some(code) = *code else { continue };
+            if col.codes.is_empty() {
+                continue;
+            }
+            // コード順なので、最初の一致位置から同じコードが続く範囲を舐める
+            let start = col.codes.partition_point(|&c| c < code);
+            for (&c, &split) in col.codes[start..].iter().zip(&col.splits[start..]) {
+                if c != code {
+                    break;
+                }
+                bits[(split >> 5) as usize] |= 1 << (split & 31);
+            }
+        }
+    }
+
+    /// 1 本の木を根から葉まで辿ってリーフ値を返す。
+    #[inline]
+    fn eval_tree(
+        &self,
+        root: usize,
+        col_present: &[bool; MAX_BOUNDARY_CAT_COLUMNS],
+        bits: &[u32],
+    ) -> f32 {
+        let w = &self.words;
+        let mut i = root;
+        loop {
+            let header = w[i];
+            if header & LEAF_FLAG != 0 {
+                return f32::from_bits(w[i + 1]);
+            }
+            let column = (header & ((1 << COLUMN_BITS) - 1)) as usize;
+            let split = (header >> SPLIT_ID_SHIFT) & ((1 << (31 - SPLIT_ID_SHIFT)) - 1);
+            let go_left = if col_present[column] {
+                bits[(split >> 5) as usize] & (1 << (split & 31)) != 0
+            } else {
+                header & DEFAULT_LEFT_BIT != 0
+            };
+            i = if go_left { i + 2 } else { w[i + 1] as usize };
+        }
+    }
+
+    /// 全木のリーフ値の合計を、列コード表から計算する。
+    fn sum_trees(&self, col_codes: &[Option<u32>; MAX_BOUNDARY_CAT_COLUMNS]) -> f32 {
+        let n_words = self.n_splits.div_ceil(32);
+        let mut stack_buf = [0u32; STACK_BITSET_WORDS];
+        let mut heap_buf: Vec<u32>;
+        let bits: &mut [u32] = if n_words <= STACK_BITSET_WORDS {
+            &mut stack_buf[..n_words]
+        } else {
+            heap_buf = vec![0u32; n_words];
+            &mut heap_buf[..]
+        };
+        self.build_membership(col_codes, bits);
+        let mut col_present = [false; MAX_BOUNDARY_CAT_COLUMNS];
+        for (p, c) in col_present.iter_mut().zip(col_codes) {
+            *p = c.is_some();
+        }
+        self.roots
+            .iter()
+            .map(|&r| self.eval_tree(r as usize, &col_present, bits))
+            .sum()
+    }
 }
 
 #[derive(Debug)]
-enum TreeNode {
+pub(crate) enum TreeNode {
     Leaf {
         value: f32,
     },
@@ -206,29 +441,7 @@ impl TreeEnsemble {
                 *slot = Some(code);
             }
         }
-        self.trees
-            .iter()
-            .map(|t| eval_tree_node(t, &col_codes))
-            .sum()
-    }
-}
-
-fn eval_tree_node(node: &TreeNode, col_codes: &[Option<u32>; MAX_BOUNDARY_CAT_COLUMNS]) -> f32 {
-    match node {
-        TreeNode::Leaf { value } => *value,
-        TreeNode::Split {
-            column,
-            default_left,
-            cats,
-            left,
-            right,
-        } => {
-            let go_left = match col_codes.get(*column as usize).copied().flatten() {
-                Some(code) => cats.binary_search(&code).is_ok(),
-                None => *default_left,
-            };
-            eval_tree_node(if go_left { left } else { right }, col_codes)
-        }
+        self.sum_trees(&col_codes)
     }
 }
 
@@ -319,7 +532,7 @@ fn parse_tree_ensemble<R: Read>(reader: &mut R, path: &Path) -> Result<TreeEnsem
     for _ in 0..n_trees {
         trees.push(parse_tree_node(reader, path, n_columns, 0)?);
     }
-    Ok(TreeEnsemble { trees })
+    Ok(TreeEnsemble::new(trees))
 }
 
 fn parse_tree_node<R: Read>(
@@ -420,7 +633,7 @@ mod tests {
     }
 
     fn tree(trees: Vec<TreeNode>) -> TreeEnsemble {
-        TreeEnsemble { trees }
+        TreeEnsemble::new(trees)
     }
 
     /// テスト用: `(FeatureKey, column, code)` の一覧から、本番の統合語彙が返すのと

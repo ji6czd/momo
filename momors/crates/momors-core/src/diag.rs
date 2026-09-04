@@ -105,6 +105,24 @@ impl Predictor<MomoModel> {
         }
     }
 
+    /// 境界 GBDT の統計と、統合語彙から見た列ごとのコード空間（最大コード + 1）。
+    /// 線形境界モデルなら None。
+    pub fn tree_stats(&self) -> Option<(crate::boundary::TreeStats, Vec<u32>)> {
+        let model = self.model();
+        let st = match &model.boundary {
+            crate::boundary::Boundary::Tree(t) => t.stats(),
+            crate::boundary::Boundary::Linear { .. } => return None,
+        };
+        let mut code_space = vec![0u32; crate::boundary::MAX_BOUNDARY_CAT_COLUMNS];
+        for e in &model.vocab {
+            if let Some((col, code)) = e.cat() {
+                let slot = &mut code_space[col as usize];
+                *slot = (*slot).max(code + 1);
+            }
+        }
+        Some((st, code_space))
+    }
+
     /// 読みモデル CSC の全体統計。
     pub fn csc_stats(&self) -> CscStats {
         let model = self.model();
@@ -226,5 +244,21 @@ mod tests {
         let p = Predictor::load(crate::PredictorConfig::new(&model)).expect("load");
         let r = p.predict_phases(text.trim(), 50);
         println!("phases (us/char, {} chars): {}", r.chars, r.summary());
+        if let Some((st, space)) = p.tree_stats() {
+            println!(
+                "tree: trees {} splits {} leaves {} cats_total {} (avg {:.1}/split) max_depth {}",
+                st.n_trees,
+                st.n_splits,
+                st.n_leaves,
+                st.cats_total,
+                st.cats_total as f64 / st.n_splits.max(1) as f64,
+                st.max_depth
+            );
+            for (col, (&n, &sp)) in st.splits_per_column.iter().zip(&space).enumerate() {
+                if n > 0 || sp > 0 {
+                    println!("  col {col:2}: splits {n:5}  code_space {sp}");
+                }
+            }
+        }
     }
 }

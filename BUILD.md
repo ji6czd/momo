@@ -86,7 +86,7 @@ espflash monitor                                      # 115200 bps、1 行入力
 
 ```bash
 task esp:build        # ビルド
-task esp:flash        # 書き込み（ESP-IDF が生成したブートローダを自動選択）
+task esp:flash        # 書き込み
 task esp:flash-model  # dataset/basic_data_4.mbm を 0x400000 に書き込む（初回のみ）
 task esp:monitor      # シリアルモニタ
 task esp:image        # 配布用の結合イメージを dist/ に保存
@@ -100,8 +100,6 @@ task esp:image        # 配布用の結合イメージを dist/ に保存
 - **チップ改版**: `sdkconfig.defaults` は v1.x のチップ（`CONFIG_ESP32P4_REV_MIN_100`）向けです。
   v3.x のボードでは `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` と `REV_MIN_100` の行を外してください
   （合わないとブートローダが起動しません）。
-- **ブートローダ**: espflash 同梱の汎用ブートローダではこのアプリは起動しません。`task esp:flash`
-  と `task esp:image` は ESP-IDF ビルドが生成した `bootloader.bin` を使います。
 - **シリアルポート**: 省略時は espflash が自動検出します。複数ある場合は `PORT=COM9 task esp:flash`
   のように指定してください。
 

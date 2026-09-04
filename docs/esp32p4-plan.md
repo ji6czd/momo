@@ -190,7 +190,7 @@ ESP32-P4 の `esp_partition_mmap` は OS のデマンドページングではな
 2. **esp-idf-hal 0.46.2 が ESP-IDF v5.5.5 と不整合**（`spi_transaction_t` が不透明型）。必要なのは生 API だけなので `esp-idf-svc` を外し `esp-idf-sys` 直接依存にした。
 3. **VFS 関数名**: esp-idf-sys 0.37 の bindings.h は v5 系で旧名ヘッダを取り込む → `esp_vfs_usb_serial_jtag_use_driver` / `esp_vfs_dev_usb_serial_jtag_set_*_line_endings`。
 4. **パーティション表**: `CONFIG_PARTITION_TABLE_CUSTOM` は CMake プロジェクトが out dir に置かれるため使えず、espflash の `--partition-table` に渡す。独自パーティションは `type=0x40, subtype=0x00`（data 型に独自サブタイプは不可）。
-5. **ブートローダ**: espflash 同梱の汎用ブートローダでは `overlaps bootloader stack` で起動不能。ESP-IDF ビルドが生成した `bootloader.bin` を `--bootloader` で渡す。
+5. **ブートローダ**: 当初 espflash 同梱の汎用ブートローダで `overlaps bootloader stack` が出て起動せず、ESP-IDF ビルドの `bootloader.bin` を `--bootloader` で渡していた。しかしこれは次項のチップ改版不整合（v3.01 向けの RAM 配置でビルドしていた）が原因で、改版設定を直した後は同梱ブートローダで起動する（2026-09-05 確認）。`--bootloader` 指定は撤去。
 6. **チップ改版**: ESP-IDF v5.5 の既定は P4 v3.01 以上向け。手元は **v1.3** なので `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` + `CONFIG_ESP32P4_REV_MIN_100=y` が必須（違うとブートローダのエントリで Illegal instruction）。
 7. **内部 SRAM 枯渇**: `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096`（既定）だとモデルの大量の小オブジェクト（String・GBDT の Box ノード・辞書）が内部 380KB を使い切り、直後の pthread mutex 生成で abort。**`=0`（常に PSRAM 優先）** にして解決。内部は `RESERVE_INTERNAL=131072` で ESP-IDF 用に確保。
 8. クラッシュループ中は USB-Serial-JTAG が再列挙を繰り返し `espflash` の接続が不安定になる。数回リトライすれば通る。再列挙で **COM 番号が変わることがある**（COM9 → COM10）。`task esp:*` はポート省略時に espflash の自動検出に任せる。

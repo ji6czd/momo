@@ -83,22 +83,12 @@ tasks:
       - cargo build --release
 
   esp:flash:
-    desc: Flash ESP32-P4 firmware (uses the ESP-IDF-built bootloader; espflash's bundled one does not boot this app)
+    desc: Flash ESP32-P4 firmware
     dir: momors/crates/momors-esp32
     vars:
-      TARGET_DIR: "{{.ESP_TARGET_DIR}}"
-      ELF: "{{.TARGET_DIR}}/riscv32imafc-esp-espidf/release/momors-esp32"
+      ELF: "{{.ESP_TARGET_DIR}}/riscv32imafc-esp-espidf/release/momors-esp32"
     cmds:
-      # esp-idf-sys の出力ディレクトリ名はハッシュ付きなので、最新の bootloader.bin を探して渡す。
-      # task は内蔵シェル（mvdan/sh）で実行するため ls -t / head は使えない。
-      - |
-        BL=""
-        for f in {{.TARGET_DIR}}/riscv32imafc-esp-espidf/release/build/esp-idf-sys/*/out/build/bootloader/bootloader.bin; do
-          if [ -z "$BL" ] || [ "$f" -nt "$BL" ]; then BL="$f"; fi
-        done
-        if [ -z "$BL" ]; then echo "bootloader.bin が見つかりません。先に task esp:build を実行してください" >&2; exit 1; fi
-        echo "bootloader: $BL"
-        espflash flash {{if .PORT}}-p {{.PORT}}{{end}} --flash-size 16mb --partition-table partitions.csv --bootloader "$BL" "{{.ELF}}"
+      - espflash flash {{if .PORT}}-p {{.PORT}}{{end}} --flash-size 16mb --partition-table partitions.csv "{{.ELF}}"
 
   esp:flash-model:
     desc: Write the window=4 model (.mbm) into the "model" partition (offset 0x400000)
@@ -111,20 +101,13 @@ tasks:
     desc: Save a merged flash image (bootloader + partition table + app) for distribution
     dir: momors/crates/momors-esp32
     vars:
-      TARGET_DIR: "{{.ESP_TARGET_DIR}}"
-      ELF: "{{.TARGET_DIR}}/riscv32imafc-esp-espidf/release/momors-esp32"
+      ELF: "{{.ESP_TARGET_DIR}}/riscv32imafc-esp-espidf/release/momors-esp32"
       OUT: '{{.OUT | default (printf "%s/dist/momors-esp32-esp32p4.bin" .ROOT_DIR)}}'
     cmds:
-      - |
-        BL=""
-        for f in {{.TARGET_DIR}}/riscv32imafc-esp-espidf/release/build/esp-idf-sys/*/out/build/bootloader/bootloader.bin; do
-          if [ -z "$BL" ] || [ "$f" -nt "$BL" ]; then BL="$f"; fi
-        done
-        if [ -z "$BL" ]; then echo "bootloader.bin が見つかりません。先に task esp:build を実行してください" >&2; exit 1; fi
-        mkdir -p "$(dirname "{{.OUT}}")"
-        espflash save-image --chip esp32p4 --merge --skip-padding --flash-size 16mb --partition-table partitions.csv --bootloader "$BL" "{{.ELF}}" "{{.OUT}}"
-        echo "wrote {{.OUT}}"
-        echo "書き込み: espflash write-bin 0x0 {{.OUT}}   （モデルは task esp:flash-model か espflash write-bin 0x400000 <basic_data_4.mbm>）"
+      - mkdir -p "{{.OUT | dir}}"
+      # --skip-padding が無いとフラッシュ全体（16MB）にパディングされ、0x0 に書くとモデル領域まで潰す
+      - espflash save-image --chip esp32p4 --merge --skip-padding --flash-size 16mb --partition-table partitions.csv "{{.ELF}}" "{{.OUT}}"
+      - 'echo "wrote {{.OUT}}  （書き込み: espflash write-bin 0x0 {{.OUT}} / モデル: task esp:flash-model）"'
 
   esp:monitor:
     desc: Open the serial monitor for the ESP32-P4 board

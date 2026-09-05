@@ -38,9 +38,11 @@ fn heap_summary() -> String {
 fn install_console() {
     #[cfg(esp_idf_esp_console_usb_serial_jtag)]
     unsafe {
+        // rx は `:feed` で流し込む段落 1 つ（原稿用紙 1 枚 = 400 字 ≒ UTF-8 で 1.2KB）が
+        // 1 行として収まる大きさにする。
         let mut cfg = sys::usb_serial_jtag_driver_config_t {
             tx_buffer_size: 1024,
-            rx_buffer_size: 1024,
+            rx_buffer_size: 4096,
         };
         sys::esp!(sys::usb_serial_jtag_driver_install(&mut cfg))
             .expect("usb_serial_jtag_driver_install");
@@ -285,12 +287,17 @@ enum Mode {
     All,
 }
 
+/// 原稿用紙 1 枚 = 400 字。`:tp` の換算に使う。
+const MANUSCRIPT_SHEET_CHARS: usize = 400;
+
 struct Engine {
     predictor: Option<Predictor>,
     translator: BrailleTranslator,
     mode: Mode,
     /// mmap した model パーティション（`:xip` のフラッシュ側バッファに使う）。
     model_bytes: Option<&'static [u8]>,
+    /// `:feed` で溜めた実文（`:tp` のスループット測定に使う）。
+    feed: Vec<String>,
 }
 
 impl Engine {
@@ -349,6 +356,75 @@ impl Engine {
             "bench: {chars} chars x {n} = {:.1} ms/run, {:.0} us/char",
             total_us as f64 / 1000.0 / n as f64,
             total_us as f64 / (n * chars) as f64
+        )
+        .ok();
+    }
+
+    /// `:feed` で溜めた実文を通しで変換し、スループット（字/秒）を出す。
+    ///
+    /// 実運用と同じく **1 行ずつ** 変換して合計する（1 行 = 1 段落程度）。原稿用紙 100 枚
+    /// （4 万字）に換算した所要時間も出す。点字まで含めた全段（predict → BrailleTranslator）を
+    /// 測るのは、実用上の単位が「点字になるまで」だから。
+    fn throughput(&self, out: &mut impl Write, passes: usize) {
+        let Some(p) = &self.predictor else {
+            writeln!(out, "model: none").ok();
+            return;
+        };
+        if self.feed.is_empty() {
+            writeln!(out, "tp: バッファが空です（:feed <text> で流し込む）").ok();
+            return;
+        }
+        let chars: usize = self.feed.iter().map(|l| l.chars().count()).sum();
+
+        // ウォームアップ 1 行（初回のページイン/キャッシュ充填を測定から外す）
+        std::hint::black_box(p.predict(&self.feed[0]).ok());
+
+        let (mut predict_ns, mut braille_ns) = (0u128, 0u128);
+        for _ in 0..passes {
+            for line in &self.feed {
+                let t = Instant::now();
+                let r = match p.predict(line) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        writeln!(out, "error: {e}").ok();
+                        return;
+                    }
+                };
+                let kana = r.kana_text().to_owned();
+                predict_ns += t.elapsed().as_nanos();
+
+                let t = Instant::now();
+                std::hint::black_box(self.translator.translate(&kana).ok());
+                braille_ns += t.elapsed().as_nanos();
+            }
+        }
+
+        let total_chars = (chars * passes) as f64;
+        let total_ns = (predict_ns + braille_ns) as f64;
+        let cps = total_chars / (total_ns / 1e9);
+        writeln!(
+            out,
+            "tp: {} lines x {} passes = {:.0} chars in {:.2} s",
+            self.feed.len(),
+            passes,
+            total_chars,
+            total_ns / 1e9
+        )
+        .ok();
+        writeln!(
+            out,
+            "    predict {:.0} us/char, braille {:.0} us/char, total {:.0} us/char",
+            predict_ns as f64 / 1000.0 / total_chars,
+            braille_ns as f64 / 1000.0 / total_chars,
+            total_ns / 1000.0 / total_chars
+        )
+        .ok();
+        writeln!(
+            out,
+            "    {:.0} chars/s  =>  原稿用紙100枚 ({} 字) {:.1} s",
+            cps,
+            MANUSCRIPT_SHEET_CHARS * 100,
+            (MANUSCRIPT_SHEET_CHARS * 100) as f64 / cps
         )
         .ok();
     }
@@ -461,6 +537,25 @@ impl Engine {
                     }
                 }
             }
+            [":feed", ..] => {
+                // 出力を最小にする（何百行も流し込むので、応答が長いと転送が律速になる）。
+                let text = cmd[":feed".len()..].trim();
+                if !text.is_empty() {
+                    self.feed.push(text.to_owned());
+                }
+            }
+            [":feed?"] | [":tp?"] => {
+                let chars: usize = self.feed.iter().map(|l| l.chars().count()).sum();
+                writeln!(out, "feed: {} lines, {} chars", self.feed.len(), chars).ok();
+            }
+            [":clear"] => {
+                self.feed.clear();
+                writeln!(out, "feed: cleared").ok();
+            }
+            [":tp", rest @ ..] => {
+                let passes: usize = rest.first().and_then(|s| s.parse().ok()).unwrap_or(1);
+                self.throughput(out, passes);
+            }
             [":xip", rest @ ..] => {
                 let n: usize = rest.first().and_then(|s| s.parse().ok()).unwrap_or(20_000);
                 match self.model_bytes {
@@ -493,6 +588,18 @@ impl Engine {
                     ":xip [N]                フラッシュ(XIP) vs PSRAM の読み出しコスト比"
                 )
                 .ok();
+                writeln!(
+                    out,
+                    ":feed <text>            実文を1行バッファに溜める（応答なし）"
+                )
+                .ok();
+                writeln!(out, ":feed?                  溜まった行数/文字数").ok();
+                writeln!(
+                    out,
+                    ":tp [N]                 バッファを N 周変換して 字/秒 と原稿用紙100枚の時間"
+                )
+                .ok();
+                writeln!(out, ":clear                  バッファを空にする").ok();
                 writeln!(out, "それ以外の行は日本語テキストとして変換します").ok();
             }
             _ => {
@@ -510,7 +617,16 @@ fn main() {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     writeln!(out, "momors-esp32 {}", env!("CARGO_PKG_VERSION")).unwrap();
-    writeln!(out, "heap at boot: {}", heap_summary()).unwrap();
+    // SAFETY: 引数なしの読み取り専用 API。起動から main 到達までの時間（ブートローダ +
+    // ESP-IDF 初期化。PSRAM の全面テストを切ったかどうかはここに出る）。
+    let boot_us = unsafe { sys::esp_timer_get_time() };
+    writeln!(
+        out,
+        "boot: {} ms to app start   heap: {}",
+        boot_us / 1000,
+        heap_summary()
+    )
+    .unwrap();
     out.flush().unwrap();
 
     // ---- 点字テーブル（埋め込み TOML を起動時に解析）----
@@ -580,6 +696,7 @@ fn main() {
         translator,
         mode: Mode::All,
         model_bytes,
+        feed: Vec::new(),
     };
 
     let stdin = std::io::stdin();

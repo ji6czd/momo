@@ -29,6 +29,14 @@ CONFIG_SPIRAM_USE_MALLOC=y
 # Box ノード・辞書）を大量に行い、既定の 4096 では内部 SRAM 380KB を使い切って
 # 直後の pthread mutex 生成で落ちた（2026-09-04 実測）。
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
+# CONFIG_SPIRAM_XIP_FROM_PSRAM（アプリの .text/.rodata を PSRAM から実行）は **試して却下**。
+# ライン充填はフラッシュ QIO 3.2µs > PSRAM 1µs なので速くなるはずだったが、実測は
+# 4万字 22.0 → 23.2 秒と悪化した（2026-09-05）。命令フェッチが、モデルを読む
+# データアクセスと同じ PSRAM バスを奪い合うため。フラッシュに置いたままなら
+# 命令フェッチ（SPI フラッシュ）とデータ（PSRAM）が別バスで並行できる。
+# CONFIG_SPIRAM_MEMTEST=n（起動時の PSRAM 全面テストを切る）も試したが、main 到達まで
+# 50ms で変化なし。既定のままにする。起動 1.2 秒の内訳は 50ms(初期化) + 132ms(点字テーブル)
+# + 1,023ms(モデル展開) で、削るならモデル展開しかない。
 # 内部 SRAM は ESP-IDF の内部専用確保（DMA・FreeRTOS オブジェクト）のために予約する。
 # L2 キャッシュ 512KB にすると内部 SRAM は約 160KB しか残らないので、予約は小さめ。
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768

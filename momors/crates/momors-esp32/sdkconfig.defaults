@@ -14,6 +14,10 @@ CONFIG_CACHE_L2_CACHE_LINE_128B=y
 # ---- フラッシュ / パーティション ----
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+# 既定は DIO（80MHz で 20MB/s）。アプリはフラッシュから XIP 実行し、モデルも 12MB を
+# フラッシュから読むので、帯域が倍になる QIO にする。
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHMODE="qio"
 # パーティション表は espflash 書き込み時に partitions.csv を渡す（.cargo/config.toml の runner 参照）。
 # ESP-IDF 側の CONFIG_PARTITION_TABLE_CUSTOM は CMake プロジェクトが out dir に置かれるため使わない。
 

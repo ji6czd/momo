@@ -121,7 +121,162 @@ fn map_model_partition() -> Result<&'static [u8], String> {
 }
 
 /// `:bench` / `:probe` の既定テキスト（3 文・46 文字）。
-const BENCH_TEXT: &str = "吾輩は猫である。今日は良い天気ですね。東京都渋谷区で3人の学生が本を読んだ。";
+const BENCH_TEXT: &str =
+    "吾輩は猫である。今日は良い天気ですね。東京都渋谷区で3人の学生が本を読んだ。";
+
+// ---- `:xip` ゼロコピー(借用ロード) の GO/NO-GO 判断用ベンチマーク ----
+//
+// 語彙表と CSC 配列を PSRAM に展開せず mmap 領域から直接読む案（`docs/zerocopy-model-plan.md`
+// の「借用ロード」、`docs/esp32p4-plan.md` §6.1 ②）は、常駐 14.5MB とロード 2 秒を消す代わりに
+// 読み出しをフラッシュ(XIP)に落とす。損得は「フラッシュ読みが PSRAM より何倍遅いか」だけで
+// 決まるので、loader を書き換える前にそこだけを切り出して測る。
+//
+// 同じ内容のバッファをフラッシュ(model パーティションの mmap 領域)と PSRAM に用意し、
+// 同じコード・同じ乱数列で 2 通りのアクセスパターンを回す。データの中身は関係ない
+// （測っているのはアドレスを触るコストであって比較の意味ではない）ので、モデルの
+// バイト列をそのまま固定幅レコードの配列とみなす。
+//
+// 判断の目安: 比が 〜2 倍なら語彙・CSC とも借用へ。2〜4 倍なら CSC だけ借用。
+// それ以上ならロード時間だけのために払うには高い。
+
+/// 語彙エントリ相当の固定幅レコード長（`FeatureKey` + feature_id）。
+const XIP_REC: usize = 16;
+/// CSC 1 列相当の連続読み長（nnz 約 32 × (u16 rowind + i8 data)）。
+const XIP_COL: usize = 96;
+/// 比較に使うバッファ長。L2 に収まらない大きさにして、両者ともミス主体で比べる。
+const XIP_BUF: usize = 4 * 1024 * 1024;
+
+fn xorshift(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
+}
+
+/// 二分探索と同じ探索木の形でバッファを触る。戻り値は (累積値, 総プローブ数)。
+///
+/// 実際にキー比較はせず、乱数で決めた目標位置へ区間を狭めていく。触るアドレスの
+/// 系列が本物の bsearch と同じであれば、メモリコストの比較としては十分。
+#[inline(never)]
+fn xip_probe_bsearch(buf: &[u8], n_rec: usize, iters: usize, seed: &mut u64) -> (u64, u64) {
+    let mut acc = 0u64;
+    let mut probes = 0u64;
+    for _ in 0..iters {
+        let target = (xorshift(seed) % n_rec as u64) as usize;
+        let (mut lo, mut hi) = (0usize, n_rec);
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            acc = acc.wrapping_add(buf[mid * XIP_REC] as u64);
+            probes += 1;
+            if mid < target {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+    }
+    (acc, probes)
+}
+
+/// ランダムな位置から 1 列分を連続読みする（CSC の列アクセス相当）。
+#[inline(never)]
+fn xip_probe_seq(buf: &[u8], iters: usize, seed: &mut u64) -> u64 {
+    let mut acc = 0u64;
+    let span = (buf.len() - XIP_COL) as u64;
+    for _ in 0..iters {
+        let off = (xorshift(seed) % span) as usize;
+        for b in &buf[off..off + XIP_COL] {
+            acc = acc.wrapping_add(*b as u64);
+        }
+    }
+    acc
+}
+
+/// フラッシュ(XIP) と PSRAM で同じアクセスを回し、1 プローブ / 1 列あたりの時間と比を出す。
+fn bench_xip(out: &mut impl Write, flash: &'static [u8], iters: usize) {
+    if flash.len() < XIP_BUF {
+        writeln!(out, "xip: model パーティションが小さすぎます").ok();
+        return;
+    }
+    let flash_buf = &flash[..XIP_BUF];
+
+    // SAFETY: PSRAM から XIP_BUF バイト確保し、フラッシュ側と同じ内容で埋める。
+    let ptr = unsafe { sys::heap_caps_malloc(XIP_BUF, sys::MALLOC_CAP_SPIRAM) } as *mut u8;
+    if ptr.is_null() {
+        writeln!(out, "xip: PSRAM {}MB の確保に失敗", XIP_BUF / (1024 * 1024)).ok();
+        return;
+    }
+    // SAFETY: ptr は XIP_BUF バイトの有効領域、flash_buf も同じ長さで重ならない。
+    let psram_buf: &[u8] = unsafe {
+        std::ptr::copy_nonoverlapping(flash_buf.as_ptr(), ptr, XIP_BUF);
+        std::slice::from_raw_parts(ptr, XIP_BUF)
+    };
+
+    let n_rec = XIP_BUF / XIP_REC;
+    writeln!(
+        out,
+        "xip: buf {}MB ({} recs x {}B), iters {}   flash {:p} / psram {:p}",
+        XIP_BUF / (1024 * 1024),
+        n_rec,
+        XIP_REC,
+        iters,
+        flash_buf.as_ptr(),
+        psram_buf.as_ptr()
+    )
+    .ok();
+
+    // 両者とも同じ種から始めることで、触る位置の系列を完全に一致させる。
+    const SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut results = [(0f64, 0f64); 2]; // [bsearch(ns/probe), seq(ns/col)] x [flash, psram]
+
+    for (i, buf) in [flash_buf, psram_buf].into_iter().enumerate() {
+        // ウォームアップ（初回のページイン/TLB を測定から外す）
+        let mut warm = SEED;
+        std::hint::black_box(xip_probe_bsearch(buf, n_rec, 64, &mut warm));
+
+        let mut seed = SEED;
+        let t = Instant::now();
+        let (acc, probes) = xip_probe_bsearch(buf, n_rec, iters, &mut seed);
+        let ns = t.elapsed().as_nanos();
+        std::hint::black_box(acc);
+        results[i].0 = ns as f64 / probes as f64;
+
+        let mut seed = SEED;
+        let t = Instant::now();
+        let acc = xip_probe_seq(buf, iters, &mut seed);
+        let ns = t.elapsed().as_nanos();
+        std::hint::black_box(acc);
+        results[i].1 = ns as f64 / iters as f64;
+    }
+
+    // SAFETY: 上で heap_caps_malloc した領域。以降 psram_buf は使わない。
+    unsafe { sys::heap_caps_free(ptr as *mut core::ffi::c_void) };
+
+    writeln!(out, "pattern	flash	psram	ratio").ok();
+    writeln!(
+        out,
+        "bsearch probe	{:.0} ns	{:.0} ns	{:.2}x",
+        results[0].0,
+        results[1].0,
+        results[0].0 / results[1].0
+    )
+    .ok();
+    writeln!(
+        out,
+        "csc column	{:.0} ns	{:.0} ns	{:.2}x",
+        results[0].1,
+        results[1].1,
+        results[0].1 / results[1].1
+    )
+    .ok();
+    writeln!(
+        out,
+        "judge: 〜2.0x なら語彙・CSC とも借用ロードへ / 2〜4x は CSC のみ / それ以上は見送り"
+    )
+    .ok();
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
@@ -134,6 +289,8 @@ struct Engine {
     predictor: Option<Predictor>,
     translator: BrailleTranslator,
     mode: Mode,
+    /// mmap した model パーティション（`:xip` のフラッシュ側バッファに使う）。
+    model_bytes: Option<&'static [u8]>,
 }
 
 impl Engine {
@@ -281,7 +438,11 @@ impl Engine {
                 writeln!(out, "mode: {m}").ok();
             }
             [":probe", rest @ ..] => {
-                let text = if rest.is_empty() { BENCH_TEXT } else { cmd[":probe".len()..].trim() };
+                let text = if rest.is_empty() {
+                    BENCH_TEXT
+                } else {
+                    cmd[":probe".len()..].trim()
+                };
                 self.probe(out, text);
             }
             [":bench", rest @ ..] => {
@@ -300,12 +461,38 @@ impl Engine {
                     }
                 }
             }
+            [":xip", rest @ ..] => {
+                let n: usize = rest.first().and_then(|s| s.parse().ok()).unwrap_or(20_000);
+                match self.model_bytes {
+                    Some(b) => bench_xip(out, b, n),
+                    None => {
+                        writeln!(out, "xip: model パーティションが未マップです").ok();
+                    }
+                }
+            }
             [":help"] => {
                 writeln!(out, ":stat                   ヒープ/モデル情報").ok();
                 writeln!(out, ":mode kana|braille|all  出力の切替").ok();
-                writeln!(out, ":bench [N]              固定文を N 回推論して 1 文字あたりの時間を出す").ok();
-                writeln!(out, ":probe [text]           1 文字ごとの 語彙引き/読み/境界 の内訳 (ns)").ok();
-                writeln!(out, ":phases [N]             predict の段階別内訳 (us/char)").ok();
+                writeln!(
+                    out,
+                    ":bench [N]              固定文を N 回推論して 1 文字あたりの時間を出す"
+                )
+                .ok();
+                writeln!(
+                    out,
+                    ":probe [text]           1 文字ごとの 語彙引き/読み/境界 の内訳 (ns)"
+                )
+                .ok();
+                writeln!(
+                    out,
+                    ":phases [N]             predict の段階別内訳 (us/char)"
+                )
+                .ok();
+                writeln!(
+                    out,
+                    ":xip [N]                フラッシュ(XIP) vs PSRAM の読み出しコスト比"
+                )
+                .ok();
                 writeln!(out, "それ以外の行は日本語テキストとして変換します").ok();
             }
             _ => {
@@ -341,8 +528,10 @@ fn main() {
     out.flush().unwrap();
 
     // ---- モデル ----
+    let mut model_bytes: Option<&'static [u8]> = None;
     let predictor = match map_model_partition() {
         Ok(bytes) => {
+            model_bytes = Some(bytes);
             writeln!(
                 out,
                 "model partition: mapped {:.1}MB at {:p}",
@@ -390,6 +579,7 @@ fn main() {
         predictor,
         translator,
         mode: Mode::All,
+        model_bytes,
     };
 
     let stdin = std::io::stdin();

@@ -88,7 +88,9 @@ tasks:
     vars:
       ELF: "{{.ESP_TARGET_DIR}}/riscv32imafc-esp-espidf/release/momors-esp32"
     cmds:
-      - espflash flash {{if .PORT}}-p {{.PORT}}{{end}} --flash-size 16mb --partition-table partitions.csv "{{.ELF}}"
+      # --flash-mode: イメージヘッダの値を ROM ブートローダが見る。sdkconfig 側の
+      # CONFIG_ESPTOOLPY_FLASHMODE_QIO と揃えないと DIO のまま（帯域が半分）になる。
+      - espflash flash {{if .PORT}}-p {{.PORT}}{{end}} --flash-size 16mb --flash-mode qio --flash-freq 80mhz --partition-table partitions.csv "{{.ELF}}"
 
   esp:flash-model:
     desc: Write the window=4 model (.mbm) into the "model" partition (offset 0x400000)
@@ -106,7 +108,7 @@ tasks:
     cmds:
       - mkdir -p "{{.OUT | dir}}"
       # --skip-padding が無いとフラッシュ全体（16MB）にパディングされ、0x0 に書くとモデル領域まで潰す
-      - espflash save-image --chip esp32p4 --merge --skip-padding --flash-size 16mb --partition-table partitions.csv "{{.ELF}}" "{{.OUT}}"
+      - espflash save-image --chip esp32p4 --merge --skip-padding --flash-size 16mb --flash-mode qio --flash-freq 80mhz --partition-table partitions.csv "{{.ELF}}" "{{.OUT}}"
       - 'echo "wrote {{.OUT}}  （書き込み: espflash write-bin 0x0 {{.OUT}} / モデル: task esp:flash-model）"'
 
   esp:monitor:

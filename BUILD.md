@@ -95,8 +95,9 @@ task esp:image        # 配布用の結合イメージを dist/ に保存
 注意点:
 
 - **Windows のパス長**: esp-idf-sys は出力ディレクトリが 88 文字を超えるとビルドを拒否します。
-  `task esp:build` は `CARGO_TARGET_DIR` をリポジトリのあるドライブ直下の `<ドライブ>:/mo-esp` に
-  設定します。変えたいときは環境変数 `ESP_TARGET_DIR` で指定してください。
+  momo のリポジトリパスでは target ディレクトリ（`momors/target`）でも超過するため、**Windows では
+  WSL2 のネイティブ Linux ファイルシステム上でビルドしてください**（`subst` や短縮パスは不可）。
+  target ディレクトリを変えたいときは環境変数 `ESP_TARGET_DIR` で指定できます。
 - **チップ改版**: `sdkconfig.defaults` は v1.x のチップ（`CONFIG_ESP32P4_REV_MIN_100`）向けです。
   v3.x のボードでは `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` と `REV_MIN_100` の行を外してください
   （合わないとブートローダが起動しません）。

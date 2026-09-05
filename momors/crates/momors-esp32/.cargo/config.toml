@@ -1,14 +1,14 @@
 [build]
 target = "riscv32imafc-esp-espidf"
+# 他クレートと同じ momors/target に出力する（このクレートは独自 [workspace] なので明示が必要）。
 # 注意（Windows）: esp-idf-sys は出力ディレクトリのパスが 88 文字を超えるとビルドを拒否する。
-# リポジトリ配下の target/ では長すぎるため、`task esp:build` は CARGO_TARGET_DIR を
-# ドライブ直下の短いパス（既定 <ドライブ>:/mo-esp）に設定してビルドする。
-# cargo を直接使うときは同様に CARGO_TARGET_DIR を短いパスにすること。
+# momo のリポジトリパスではこの target/ でも超過するため、Windows では WSL2 の
+# ネイティブ Linux ファイルシステム上でビルドすること（`subst` や短縮パスは不可）。
+target-dir = "../../target"
 
 [target.'cfg(target_os = "espidf")']
 linker = "ldproxy"
-# 書き込みは `task esp:flash` を使う（対応ブートローダの指定が必要なため）。cargo run は補助。
-runner = "espflash flash --monitor -p COM9 --flash-size 16mb --partition-table partitions.csv"
+runner = "espflash flash --monitor --flash-size 16mb --partition-table partitions.csv"
 rustflags = ["--cfg", "espidf_time64"]
 
 [unstable]
@@ -19,5 +19,6 @@ MCU = "esp32p4"
 ESP_IDF_VERSION = "v5.5.5"
 # ESP-IDF と各種ツールを ~/.espressif に置く（workspace 配下だと Windows のパス長制限に当たりやすい）
 ESP_IDF_TOOLS_INSTALL_DIR = "global"
-# CARGO_TARGET_DIR をリポジトリ外へ移したときに embuild が必要とする
+# target ディレクトリがクレート外（momors/target）にあるため、embuild が
+# プロジェクトルートを特定できるよう明示する（値はこの config.toml のあるディレクトリ）。
 CARGO_WORKSPACE_DIR = { value = "", relative = true }

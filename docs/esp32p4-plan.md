@@ -186,7 +186,7 @@ ESP32-P4 の `esp_partition_mmap` は OS のデマンドページングではな
 
 躓いた点（再現時の手引き）:
 
-1. **パス長**: esp-idf-sys は出力ディレクトリが 88 文字を超えると拒否する。`task esp:build` が Windows では `CARGO_TARGET_DIR` をドライブ直下の `<ドライブ>:/mo-esp` に設定する（環境変数 `ESP_TARGET_DIR` で変更可）。`.cargo/config.toml` の `CARGO_WORKSPACE_DIR` はそのために必要。
+1. **パス長**: esp-idf-sys は出力ディレクトリが 88 文字を超えると拒否する（`canonicalize` した `\\?\` 付きの長さで判定）。momo のリポジトリパスでは target を `momors/target`（他クレートと共通）に置いても超過するので、**Windows では WSL2 のネイティブ Linux ファイルシステム上でビルドする**。当初は `CARGO_TARGET_DIR` をドライブ直下の `<ドライブ>:/mo-esp` に逃がしていたが、ビルドシステムの都合でドライブ直下にフォルダを作るのはやめた（2026-09-06）。target は環境変数 `ESP_TARGET_DIR` で変更可。`.cargo/config.toml` の `CARGO_WORKSPACE_DIR` は target がクレート外にあるため引き続き必要。
 2. **esp-idf-hal 0.46.2 が ESP-IDF v5.5.5 と不整合**（`spi_transaction_t` が不透明型）。必要なのは生 API だけなので `esp-idf-svc` を外し `esp-idf-sys` 直接依存にした。
 3. **VFS 関数名**: esp-idf-sys 0.37 の bindings.h は v5 系で旧名ヘッダを取り込む → `esp_vfs_usb_serial_jtag_use_driver` / `esp_vfs_dev_usb_serial_jtag_set_*_line_endings`。
 4. **パーティション表**: `CONFIG_PARTITION_TABLE_CUSTOM` は CMake プロジェクトが out dir に置かれるため使えず、espflash の `--partition-table` に渡す。独自パーティションは `type=0x40, subtype=0x00`（data 型に独自サブタイプは不可）。

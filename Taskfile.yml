@@ -1,12 +1,17 @@
 version: "3"
 
 vars:
-  # momors-esp32 の cargo target ディレクトリ（Taskfile 内の esp:* タスク参照）
+  # momors-esp32 の cargo target ディレクトリ（Taskfile 内の esp:* タスク参照）。
+  # 他クレートと同じ momors/target に置く（環境変数 ESP_TARGET_DIR で上書き可）。
+  # 注意: Windows は esp-idf-sys が出力ディレクトリのパス長 88 文字制限で弾く。
+  #       Windows でビルドする場合は WSL2 のネイティブ Linux ファイルシステム上で行うこと。
+  # git bash から `ESP_TARGET_DIR=/d/tmp/p4` のような POSIX パスを渡されると
+  # ESP-IDF の cmake 実行で `/` と `\` が混在して失敗するため、cygpath があれば
+  # `D:/...` 形式（ドライブレター + スラッシュ）に正規化する。
   ESP_TARGET_DIR:
     sh: |
-      if [ -n "$ESP_TARGET_DIR" ]; then echo "$ESP_TARGET_DIR"
-      elif [ "{{OS}}" = "windows" ]; then echo "{{substr 0 2 .ROOT_DIR}}/mo-esp"
-      else echo "{{.ROOT_DIR}}/momors/crates/momors-esp32/target"; fi
+      dir="${ESP_TARGET_DIR:-{{.ROOT_DIR}}/momors/target}"
+      if command -v cygpath >/dev/null 2>&1; then cygpath -m "$dir"; else echo "$dir"; fi
 
 tasks:
   default:
@@ -71,8 +76,8 @@ tasks:
   # ---- ESP32-P4 (momors-esp32) ----
   # 前提ツールと手順は BUILD.md の「ESP32-P4 ファームウェア」を参照。
   # 変数（環境変数で上書き可）:
-  #   ESP_TARGET_DIR  cargo の target ディレクトリ。Windows は esp-idf-sys のパス長制限（88 文字）
-  #                   のためドライブ直下の短いパス（既定 <ドライブ>:/mo-esp）。他 OS はクレート内 target/。
+  #   ESP_TARGET_DIR  cargo の target ディレクトリ（既定 momors/target）。Windows は esp-idf-sys の
+  #                   パス長制限（88 文字）に当たるため WSL2 上でビルドすること。
   #   PORT            シリアルポート（省略時は espflash が自動検出）
   esp:build:
     desc: Build ESP32-P4 firmware (momors-esp32, ESP-IDF + nightly; see BUILD.md)

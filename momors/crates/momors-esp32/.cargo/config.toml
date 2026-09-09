@@ -22,3 +22,7 @@ ESP_IDF_TOOLS_INSTALL_DIR = "global"
 # target ディレクトリがクレート外（momors/target）にあるため、embuild が
 # プロジェクトルートを特定できるよう明示する（値はこの config.toml のあるディレクトリ）。
 CARGO_WORKSPACE_DIR = { value = "", relative = true }
+# esp-idf-sys は Windows で OUT_DIR が 88 文字を超えると既定でエラーにする。
+# もし深いパスでビルドエラーが出たら 8 文字以下のパス例: D:\ps へ移動する）。
+# この問題を警告に降格することで、長いパスでもビルドできるようにする。
+ESP_IDF_PATH_ISSUES = "warn"

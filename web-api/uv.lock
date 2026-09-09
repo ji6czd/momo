@@ -137,23 +137,11 @@ wheels = [
 
 [[package]]
 name = "click"
-version = "8.4.2"
+version = "8.5.0"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/76/d4/81420972a676e8ffea40450d8c8c92943e7218a78fe9b64359836cc9876b/click-8.4.2.tar.gz", hash = "sha256:9a6cea6e60b17ebe0a44c5cc636d94f09bd66142c1cd7d8b4cd731c4917a15f6", size = 338000, upload-time = "2026-06-24T17:45:15.148Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/0e/7fa0ef50764b67090eca4114772a2abf8b6148198475e54c660b97caeee6/click-8.5.0.tar.gz", hash = "sha256:ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34", size = 382235, upload-time = "2026-08-26T13:33:14.56Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/e2/79c688af8b210d232694e31e59da9f6ec747bae31c3f5946e4e9b98860d5/click-8.4.2-py3-none-any.whl", hash = "sha256:e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76", size = 119243, upload-time = "2026-06-24T17:45:13.73Z" },
-]
-
-[[package]]
-name = "colorama"
-version = "0.4.6"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+    { url = "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl", hash = "sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360", size = 125251, upload-time = "2026-08-26T13:33:12.928Z" },
 ]
 
 [[package]]
@@ -175,11 +163,11 @@ wheels = [
 
 [[package]]
 name = "gunicorn"
-version = "26.1.0"
+version = "26.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/38/b8/ec4ba3f6cace4091c34e27478b576bb80f2f06fab80fd42c0ecc785b308f/gunicorn-26.1.0.tar.gz", hash = "sha256:1413d777bf99d31ebeb08acd354b01f1ecc44db0aa7b811ae7b86c669232e4f7", size = 755923, upload-time = "2026-08-18T11:49:39.438Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/8a/e4ef6ee11701b6cd64702848415ffb69eeff85cb388a3c6c7fe86f22f3f8/gunicorn-26.2.0.tar.gz", hash = "sha256:62b864895d9ebff0b2f9867ba04fe811c93121596540830c9c916d0769668447", size = 787921, upload-time = "2026-08-24T15:05:59.3Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/dc/7a55fc605543fd5cb11c003fbbb21a1911d5e88a582cce6c5e063bf5c176/gunicorn-26.1.0-py3-none-any.whl", hash = "sha256:9f45bcddec5e9dc7a25a3bdccb0c6832f11fd5d4739b1ee36c8d2fec25f1dc86", size = 216237, upload-time = "2026-08-18T11:49:38.001Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/85/7522a52e5e2f42faf1a129113ab63e548c42e103e9af395b7bfe65e403e2/gunicorn-26.2.0-py3-none-any.whl", hash = "sha256:bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b88e3", size = 228389, upload-time = "2026-08-24T15:05:57.67Z" },
 ]
 
 [[package]]
@@ -266,12 +254,12 @@ wheels = [
 
 [[package]]
 name = "momors-py"
-version = "0.9.2"
+version = "0.10.1"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/e1/6df7934c339ba000390d6f9487e0ce2eda51fa0662f8b58494be460ffe54/momors_py-0.9.2-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:83e7405ba5f0eccde080df29d4226c7787dc8e9706b554375e365ffe4b861d19", size = 30121630, upload-time = "2026-08-19T06:33:46.163Z" },
-    { url = "https://files.pythonhosted.org/packages/7a/e8/9c07941b345c958fc8e293dcc755ec5d27a96a5ea1a7648872fd91657cea/momors_py-0.9.2-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:507dc2c142f4f600568f7aa981858408319cf91cea74a0c0c22ff2ab8911626a", size = 30196381, upload-time = "2026-08-19T06:33:50.849Z" },
-    { url = "https://files.pythonhosted.org/packages/18/06/4171e739540e7e58b42b23c66dba14fc07af4fd6864e6484c107892fb189/momors_py-0.9.2-cp313-abi3-win_amd64.whl", hash = "sha256:36b6c613db68909472e9fafd78e2814687668125d4d97cd841be80c6aa5c313c", size = 30026895, upload-time = "2026-08-19T06:33:55.86Z" },
+    { url = "https://files.pythonhosted.org/packages/98/e5/6459950126cf9c43a5c0b1f9f80166c26572aceb6380a6523c33a9d5a217/momors_py-0.10.1-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:9a9587ff9a4a593c8ce08e6ac4efd5032e95a146ec513bb4e820566f6b34758d", size = 30154285, upload-time = "2026-08-26T22:03:52.746Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/06/8100cd8a576e89a6077638094d203c08a79ed22cbd4ee277fa8080517d7b/momors_py-0.10.1-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d4c7df261b17a75f98f22b0388921284f73a1ad991b78006900d056201212c8a", size = 30233737, upload-time = "2026-08-26T22:03:56.424Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/12/31bdae92d751009f4724f047c71607451e64d7f6381cf06b058545fbe194/momors_py-0.10.1-cp313-abi3-win_amd64.whl", hash = "sha256:f4d85eaa35ca2a687c09ad6f5e95c29b3196d431d77e382b56a885a75ef689bd", size = 30056173, upload-time = "2026-08-26T22:04:00.372Z" },
 ]
 
 [[package]]

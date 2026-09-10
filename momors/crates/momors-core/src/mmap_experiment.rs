@@ -88,7 +88,9 @@ fn build_queries(vocab: &[VocabEntry], n: usize) -> Vec<FeatureKey> {
         .map(|i| {
             if i % 10 == 0 {
                 let mut k = vocab[i % vocab.len()].key;
-                k.cp[0] = k.cp[0].wrapping_add(0x1000_0000); // 実在しないキーにする
+                // 実在しないキーにする。第16面の私用領域を使う（実モデルの最大は U+20B9F）。
+                // 語彙のキーは 21bit に収まる前提なので、範囲外の値は作らない。
+                k.cp[0] = 0x10_F000 + (i as u32 % 0x1000);
                 k
             } else {
                 vocab[hash_index(i, vocab.len())].key
@@ -113,7 +115,9 @@ fn report(label: &str, mut times: Vec<Duration>, n_ops: usize) -> f64 {
 #[ignore]
 fn mmap_bench_vocab_lookup() {
     let model = MomoModel::load(std::path::Path::new(&model_path())).expect("モデル読み込み失敗");
-    let vocab = &model.vocab;
+    // `Vocab` はタイプ別セクションなので、この使い捨てベンチが期待する
+    // 「1 本の VocabEntry 配列」へ一度材料化する。
+    let vocab: Vec<VocabEntry> = model.vocab.iter().collect();
     println!("vocab entries: {}", vocab.len());
 
     let raw: Vec<VocabEntryRaw> = vocab
@@ -129,7 +133,7 @@ fn mmap_bench_vocab_lookup() {
     let mmap_entries: &[VocabEntryRaw] = as_slice(&mmap);
 
     let n_queries = 200_000;
-    let queries = build_queries(vocab, n_queries);
+    let queries = build_queries(&vocab, n_queries);
 
     // ウォームアップ: 初回ページフォールトを済ませ、定常状態を測る。
     for q in &queries {

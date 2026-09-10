@@ -43,6 +43,17 @@ pub trait WeightModel: Sized {
     fn n_classes(&self) -> u32;
     fn n_features(&self) -> u32;
 
+    /// 語彙エントリ数（診断用）。
+    #[cfg(feature = "diagnostics")]
+    fn vocab_len(&self) -> usize;
+
+    /// 語彙テーブルがヒープに占めるバイト数（診断用）。
+    ///
+    /// 語彙のデータ構造を変えたときの before/after を同じ物差しで比べるために使う。
+    /// 推論のホットパスでは呼ばない。
+    #[cfg(feature = "diagnostics")]
+    fn vocab_heap_bytes(&self) -> usize;
+
     /// クラスIDから読みラベル文字列を引く。
     fn read_class(&self, class_id: u32) -> Option<&str>;
 

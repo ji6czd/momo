@@ -2,5 +2,6 @@
 nvs,        data, nvs,     0x9000,   0x6000,
 phy_init,   data, phy,     0xf000,   0x1000,
 factory,    app,  factory, 0x10000,  0x3F0000,
-# .mbm モデル（window=4, 約 11.8MB）。espflash write-bin で 0x400000 に書き込む。
+# .mbm モデル（window=4, v0x09 で約 6.2MB）。espflash write-bin で 0x400000 に書き込む。
+# 領域は 12.0MiB。v0x08 時代は 11.33MiB で余白 5.9% しかなかったが、v0x09 で 1.93 倍まで余裕ができた。
 model,      0x40, 0x00,    0x400000, 0xC00000,

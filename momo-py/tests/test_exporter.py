@@ -119,7 +119,7 @@ class TestExportNameDict:
 
         data = out.read_bytes()
         assert data[:4] == b"MOMO"
-        assert data[4] == 0x08  # version
+        assert data[4] == 0x09  # version
 
         # 人名辞書テーブル（表層形 + ユニット別読み）+ 末尾に単一文字辞書テーブル
         expected = bytearray(struct.pack("<I", 2))
@@ -146,7 +146,7 @@ class TestExportNameDict:
         export(str(zip_path), str(out))
 
         data = out.read_bytes()
-        assert data[4] == 0x08
+        assert data[4] == 0x09
         # 辞書なしモデルは n_names = 0、続けて単一文字辞書テーブル
         assert data.endswith(struct.pack("<I", 0) + _expected_single_char_section())
 
@@ -155,22 +155,22 @@ class TestExportNameDict:
 # export_float（.mbmf: 量子化前 float32 サイドカー）
 # ------------------------------------------------------------------ #
 def _skip_vocab(buf: bytes, offset: int, n_features: int, has_cat: bool = False) -> int:
-    """統合語彙テーブル（version 0x08）を読み飛ばして直後のオフセットを返す。
+    """統合語彙テーブル（version 0x09）を読み飛ばして直後のオフセットを返す。
 
-    各エントリ先頭に feature_id(u32) が明示される。`has_cat`（GBDT境界）のとき、
-    各エントリ末尾に column(u32)+code(u32) が付く。
+    n_sections(u32) + セクションヘッダ 16B × n_sections + 詰めたキー 8B × n_features。
+    `has_cat` は 0x08 までの互換のために引数に残してあるが、0x09 では
+    レイアウトが同じなので使わない（列はセクションヘッダが持つ）。
     """
-    for _ in range(n_features):
-        offset += 4  # feature_id
-        ft = buf[offset]
-        offset += 1
-        offset += chartype_count(ft)
-        offset += char32_count(ft) * 4
-        if is_uint8_payload(ft):
-            offset += 1
-        if has_cat:
-            offset += 8  # cat_column (u32) + cat_code (u32)
-    return offset
+    del has_cat
+    (n_sections,) = struct.unpack_from("<I", buf, offset)
+    offset += 4
+    total = 0
+    for i in range(n_sections):
+        (count,) = struct.unpack_from("<I", buf, offset + 16 * i + 4)
+        total += count
+    offset += 16 * n_sections
+    assert total == n_features, f"セクションの件数合計 {total} != n_features {n_features}"
+    return offset + 8 * n_features
 
 
 def _skip_labels(buf: bytes, offset: int, n_classes: int) -> int:
@@ -189,8 +189,13 @@ def _read_csc_weights(buf: bytes, offset: int, n_features: int, value_fmt: str):
     """
     (n_nonzero,) = struct.unpack_from("<I", buf, offset)
     offset += 4
-    colptr = struct.unpack_from(f"<{n_features + 1}I", buf, offset)
-    offset += 4 * (n_features + 1)
+    # version 0x09: 列長 (u16) を読んで前置和し、従来の colptr を作る。
+    col_len = struct.unpack_from(f"<{n_features}H", buf, offset)
+    offset += 2 * n_features
+    colptr = [0]
+    for n in col_len:
+        colptr.append(colptr[-1] + n)
+    colptr = tuple(colptr)
     rowind = struct.unpack_from(f"<{n_nonzero}H", buf, offset)
     offset += 2 * n_nonzero
     data = struct.unpack_from(f"<{n_nonzero}{value_fmt}", buf, offset)
@@ -206,7 +211,7 @@ class TestExportFloat:
 
         data = out.read_bytes()
         assert data[:4] == b"MBMF"
-        assert data[4] == 0x08  # version（.mbm と共有。区別は magic だけで行う）
+        assert data[4] == 0x09  # version（.mbm と共有。区別は magic だけで行う）
 
     def test_read_weights_are_plain_float32(self, tmp_path):
         zip_path = _make_model_zip(tmp_path, None)
@@ -283,6 +288,7 @@ from momo_py.exporter import (  # noqa: E402
     NO_CAT_COLUMN,
     _build_cat_by_feature_id,
     _build_vocab_bytes,
+    _plan_vocab_layout,
 )
 
 
@@ -303,40 +309,60 @@ class TestUnifiedVocab:
         with pytest.raises(ValueError, match="読み語彙に存在しません"):
             _build_cat_by_feature_id(vocab, cat_names, cat_vocabs)
 
-    def test_vocab_bytes_embeds_feature_id(self):
-        # feature_id は各行先頭に明示フィールドとして書かれる（行位置とは無関係）。
-        # 線形（cat_by_id=None）では column/code は書かない。
+    def test_vocab_bytes_is_sections_of_packed_keys(self):
+        # version 0x09: セクションヘッダ（16B × n_sections）＋ 詰めたキー（8B × 件数）。
+        # feature_id / cat_code はエントリに書かない（添字からの足し算で決まる）。
         vocab = {"bias": 0, "char_s=漢": 1}
-        data = _build_vocab_bytes(vocab, cat_by_id=None)
-        # bias: feature_id(4)+ft(1) = 5。char_s=漢: feature_id(4)+ft(1)+cp(4) = 9
-        assert len(data) == 5 + 9
-        bias_fid, bias_ft = struct.unpack_from("<IB", data, 0)
-        assert (bias_fid, bias_ft) == (0, FT.BIAS)
-        kanji_fid, kanji_ft = struct.unpack_from("<IB", data, 5)
-        assert (kanji_fid, kanji_ft) == (1, FT.CHAR_SELF)
+        layout = _plan_vocab_layout(vocab, None)
+        data = _build_vocab_bytes(layout)
+        assert len(data) == 4 + 16 * 2 + 8 * 2
 
-    def test_vocab_bytes_reorders_rows_by_key_not_feature_id(self):
-        # 行順はキー順（Rust FeatureKey の Ord 順）であって feature_id 順ではない。
-        # char_s=漢(ft=0x90) に feature_id=0、bias(ft=0x00) に feature_id=1 を
-        # 割り当てても、書き出しは bias が先頭行になる（ft の値で決まる）。
-        # feature_id は明示フィールドとして元の値を保つ。
+        (n_sections,) = struct.unpack_from("<I", data, 0)
+        assert n_sections == 2
+
+        # セクションは feature_type 昇順。bias(0x00) が先、char_s(0x90) が後。
+        ft0, _, _, _, count0, col0, base0 = struct.unpack_from("<BBBBIII", data, 4)
+        assert (ft0, count0, col0) == (FT.BIAS, 1, NO_CAT_COLUMN)
+        ft1, _, _, _, count1, col1, base1 = struct.unpack_from("<BBBBIII", data, 4 + 16)
+        assert (ft1, count1, col1) == (FT.CHAR_SELF, 1, NO_CAT_COLUMN)
+        assert (base0, base1) == (0, 0)
+
+        keys_at = 4 + 16 * 2
+        (bias_key,) = struct.unpack_from("<Q", data, keys_at)
+        (kanji_key,) = struct.unpack_from("<Q", data, keys_at + 8)
+        assert bias_key == 0  # ペイロードなし
+        assert kanji_key == 0x6F22  # char32×1 はコードポイントそのもの
+
+    def test_feature_ids_are_renumbered_in_key_order(self):
+        # 行順はキー順（Rust FeatureKey の Ord 順）。version 0x09 では feature_id も
+        # その順に採番し直すので、元の feature_id は `old_fid_order` に残る
+        # （CSC の列と線形境界の重みをこの順に並べ替えるため）。
         vocab = {"char_s=漢": 0, "bias": 1}
-        data = _build_vocab_bytes(vocab, cat_by_id=None)
-        fid0, ft0 = struct.unpack_from("<IB", data, 0)
-        assert (fid0, ft0) == (1, FT.BIAS)
-        fid1, ft1 = struct.unpack_from("<IB", data, 5)
-        assert (fid1, ft1) == (0, FT.CHAR_SELF)
+        layout = _plan_vocab_layout(vocab, None)
+        # 新 feature_id 0 は bias（元 1）、新 1 は char_s=漢（元 0）
+        assert layout.old_fid_order == [1, 0]
+        assert [sec["feature_type"] for sec in layout.sections] == [FT.BIAS, FT.CHAR_SELF]
 
-    def test_vocab_bytes_embeds_cat(self):
-        # GBDT（cat_by_id あり）では各エントリ末尾に (column, code)。cat の無い bias は番兵。
-        vocab = {"bias": 0, "char_s=漢": 1}
-        cat_by_id = {1: (0, 5)}
-        data = _build_vocab_bytes(vocab, cat_by_id=cat_by_id)
-        # bias: feature_id(4)+ft(1)+column(4)+code(4) = 13。
-        # char_s=漢: feature_id(4)+ft(1)+cp(4)+column(4)+code(4) = 17
-        assert len(data) == 13 + 17
-        # bias(feature_id 0): 番兵、続いて char_s=漢(feature_id 1): (0, 5)
-        bias_col, bias_code = struct.unpack_from("<II", data, 4 + 1)
-        assert (bias_col, bias_code) == (NO_CAT_COLUMN, 0)
-        kanji_col, kanji_code = struct.unpack_from("<II", data, 13 + 4 + 1 + 4)
-        assert (kanji_col, kanji_code) == (0, 5)
+    def test_cat_codes_are_renumbered_in_key_order(self):
+        # GBDT: 列はセクションが持ち、コードはキー順の通し番号に振り直す。
+        # 元のコード（漢=5）はそのままでは使わず、`cat_remap` で木を書き換える。
+        vocab = {"bias": 0, "char_s=字": 1, "char_s=漢": 2}
+        cat_by_id = {1: (0, 5), 2: (0, 3)}
+        layout = _plan_vocab_layout(vocab, cat_by_id)
+
+        char_sec = [s for s in layout.sections if s["feature_type"] == FT.CHAR_SELF][0]
+        assert char_sec["cat_column"] == 0
+        assert char_sec["cat_code_base"] == 0
+        # 字(U+5B57) が先、漢(U+6F22) が後 → 字=0、漢=1
+        assert layout.cat_remap == {(0, 5): 0, (0, 3): 1}
+
+        bias_sec = [s for s in layout.sections if s["feature_type"] == FT.BIAS][0]
+        assert bias_sec["cat_column"] == NO_CAT_COLUMN
+
+    def test_mixed_cat_column_per_type_raises(self):
+        # 「列は feature_type ごとに 1 個」が崩れたら、セクションが列を 1 個だけ持つ
+        # 設計が成立しないので明示的に失敗させる。
+        vocab = {"char_s=字": 0, "char_s=漢": 1}
+        cat_by_id = {0: (0, 0), 1: (1, 0)}
+        with pytest.raises(ValueError, match="複数のカテゴリカル列"):
+            _plan_vocab_layout(vocab, cat_by_id)

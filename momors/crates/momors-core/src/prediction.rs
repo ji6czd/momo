@@ -14,17 +14,17 @@ use crate::Error;
 use std::path::{Path, PathBuf};
 
 use crate::Result;
+use crate::boundary::VocabRef;
 use crate::bracket::{self, Role, Treatment};
 use crate::char_type::{CharType, get_char_type};
 use crate::counter::{CounterAction, arabic_run, counter_needs_gate, resolve_multi, resolve_phono};
-use crate::boundary::VocabRef;
-use crate::phase::{self, Phase};
 use crate::feature::FeatureKey;
 use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
 use crate::model::MomoModel;
 use crate::numeric::{
     NumericFallback, convert_japanese_numeric, is_digit_label, is_kun_counter_signal,
 };
+use crate::phase::{self, Phase};
 use crate::weight_model::WeightModel;
 
 // ============================================================

@@ -71,8 +71,12 @@ impl PhaseReport {
         // ループ内で読み・境界以外に掛かった分（ラベル出力・インデックス構築・argmax 以外）
         let loop_other = self.us_per_char[5] - self.us_per_char[6] - self.us_per_char[7];
         // loop は read/boundary を含むので、内訳の合計は loop を 1 回だけ数える
-        let accounted: f64 = self.us_per_char[1] + self.us_per_char[2] + self.us_per_char[3]
-            + self.us_per_char[4] + self.us_per_char[5] + self.us_per_char[8];
+        let accounted: f64 = self.us_per_char[1]
+            + self.us_per_char[2]
+            + self.us_per_char[3]
+            + self.us_per_char[4]
+            + self.us_per_char[5]
+            + self.us_per_char[8];
         parts.push(format!("| loop_other {loop_other:.1}"));
         parts.push(format!(
             "| unaccounted {:.1}",
@@ -114,7 +118,7 @@ impl Predictor<MomoModel> {
             crate::boundary::Boundary::Linear { .. } => return None,
         };
         let mut code_space = vec![0u32; crate::boundary::MAX_BOUNDARY_CAT_COLUMNS];
-        for e in &model.vocab {
+        for e in model.vocab.iter() {
             if let Some((col, code)) = e.cat() {
                 let slot = &mut code_space[col as usize];
                 *slot = (*slot).max(code + 1);
@@ -239,8 +243,9 @@ mod tests {
     #[ignore]
     fn profile_predict_phases() {
         let model = std::env::var("MOMO_BENCH_MODEL").expect("MOMO_BENCH_MODEL");
-        let text = std::fs::read_to_string(std::env::var("MOMO_BENCH_TEXT").expect("MOMO_BENCH_TEXT"))
-            .expect("read text");
+        let text =
+            std::fs::read_to_string(std::env::var("MOMO_BENCH_TEXT").expect("MOMO_BENCH_TEXT"))
+                .expect("read text");
         let p = Predictor::load(crate::PredictorConfig::new(&model)).expect("load");
         let r = p.predict_phases(text.trim(), 50);
         println!("phases (us/char, {} chars): {}", r.chars, r.summary());

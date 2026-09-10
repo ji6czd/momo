@@ -9,23 +9,24 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x08
+//!   version      : u8      0x09
 //!   flags        : u8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
 //!   _reserved    : u8[2]   0x00 × 2
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
 //!
-//! [統合語彙テーブル]        n_features エントリ（キー順 = Rust `FeatureKey` の `Ord` 順。
-//!                          version 0x08 で feature_id を明示フィールドに戻した）
-//!   feature_id   : u32 LE    元の学習時特徴量ID。CSC 重み行列の列インデックスと対応
-//!                            （CSC 側は今も feature_id 昇順のまま。行位置とは無関係）
-//!   feature_type : u8
-//!   chartype[N]  : u8 × N    N = chartype_count(feature_type)
-//!   char32[M]    : u32 × M   M = char32_count(feature_type)
-//!   uint8_val    : u8        is_uint8_payload(feature_type) のときのみ
-//!   （flags bit0 のときのみ、各エントリ末尾に:）
-//!   cat_column   : u32 LE    GBDT カテゴリカル列（0xFFFFFFFF = 列なし）
-//!   cat_code     : u32 LE    列内コード
+//! [統合語彙テーブル]        version 0x09 で特徴量タイプ別セクションに変更
+//!   n_sections   : u32 LE  セクション数（= 出現する feature_type の種類数）
+//!   以下 n_sections 個（feature_type 昇順）:
+//!     feature_type  : u8
+//!     _pad          : u8[3]
+//!     count         : u32 LE  このセクションのエントリ数
+//!     cat_column    : u32 LE  GBDT カテゴリカル列（0xFFFFFFFF = 列なし）
+//!     cat_code_base : u32 LE  セクション先頭エントリのカテゴリカルコード
+//!   続いて各セクションのキー配列をセクションの順に連結:
+//!     key           : u64 LE × count   詰めたキー（昇順・重複なし）
+//!
+//!   キーの詰め方は [`crate::vocab::pack_key`]（exporter の `_pack_vocab_key` と一致）。
 //!
 //! [読みラベルテーブル]      n_classes エントリ
 //!   len          : u8
@@ -34,7 +35,7 @@
 //! [読みモデル重み (CSC・int8 量子化・クラスごとscale)]
 //!   quant_scale  : f32 × n_classes  クラス(行)ごとの量子化スケール
 //!   n_nonzero    : u32 LE
-//!   colptr       : u32 × (n_features + 1)
+//!   col_len      : u16 × n_features 列ごとの非ゼロ数。読み手が前置和して colptr にする
 //!   rowind       : u16 × n_nonzero  行インデックス = クラスID
 //!   data         : i8  × n_nonzero
 //!
@@ -73,7 +74,7 @@
 //!       utf8     : u8[len] 読み (カタカナ、UTF-8)
 //! ```
 //!
-//! version 0x07 以前は読めない。フォーマット互換性を装って誤動作するより
+//! version 0x08 以前は読めない。フォーマット互換性を装って誤動作するより
 //! 明示的にエラーにする方針（人名特徴量・読みの有無・語彙レイアウトが精度に
 //! 直結するため）。旧バージョンのファイルは再エクスポートが必要。
 //!
@@ -90,14 +91,36 @@
 //! `docs/zerocopy-model-plan.md` の検討（PC上での速度・メモリ計測）を受けて、
 //! 将来 mmap 経由でロードする場合にも同じ解釈コードで読める形へ変更した。
 //! 0x07 まではファイルが feature_id 順（行位置 = feature_id）で、Rust の
-//! `binary_search` で引くには読み込み後に `Vec<VocabEntry>` を Rust `Ord` で
-//! 再ソートする必要があった（全 materialize が前提になる）。0x08 で exporter が
-//! キー順で書くようにし、この再ソートを廃止した。feature_id は行位置と
-//! 一致しなくなるため明示フィールドに戻した（+4B/エントリ。CSC 重み行列の列は
-//! 今も feature_id 順のまま変更していない）。
+//! `binary_search` で引くには読み込み後に語彙を Rust `Ord` で再ソートする必要が
+//! あった（全 materialize が前提になる）。0x08 で exporter がキー順で書くように
+//! し、この再ソートを廃止した。
+//!
+//! ## 語彙のタイプ別セクション化（version 0x09）で変えた理由
+//!
+//! 語彙はファイルの 61〜67%、常駐メモリの最大項だった（w4 で 9.8MiB、w7 で 33MiB）。
+//! ESP32-P4 のモデルパーティションは 12.0MiB で、w4 の 11.33MiB に対し余白が 5.9%
+//! しかなく、学習データが少しでも増えれば載らなくなる状態だった。
+//!
+//! 0x09 では特徴量タイプごとにセクションを分け、キーを u64 1 個に詰めたうえで、
+//! エントリが持っていた 3 つのフィールドを**すべて採番し直して暗黙にした**:
+//!
+//! - `feature_id` = セクションの先頭 ID + セクション内の添字
+//!   （exporter がキー順に採番し直し、CSC の列と線形境界の重みを同じ順に並べ替える）
+//! - `cat_code` = `cat_code_base` + セクション内の添字
+//!   （exporter が列ごとにキー順で採番し直し、GBDT の `cats` を書き換える）
+//! - `cat_column` = セクションが 1 個だけ持つ
+//!   （`momo_py.categorical` が特徴量名ごとに 1 列を作り、特徴量名は `FeatureType` と
+//!     1 対 1 に対応するため。詳細は [`crate::vocab`]）
+//!
+//! 結果、1 エントリは詰めたキー 8B だけになり、ファイルは 45〜50% 小さくなった
+//! （w4 11.33 → 6.23MiB）。語彙の常駐メモリは 1/4（w4 9.76 → 2.44MiB）。
+//! ローダー側もエントリ単位の可変長パースが消え、キー配列の一括読みで済む。
+//!
+//! CSC の `colptr`（u32 の累積和）も、1 列の非ゼロ数が高々 `n_classes`（≤ 65536）で
+//! あることを使って `col_len`（u16）に変えた（w4 で 640KB・w7 で 2.16MB 減）。
 //!
 //! ロード戦略（`Vec` に全読み込みするか mmap で借用するか）自体は変えていない。
-//! フォーマットを両対応可能な形にしただけで、今回はロード戦略の切り替えは対象外。
+//! フォーマットを両対応可能な形にしただけで、ロード戦略の切り替えは対象外。
 //!
 //! （境界GBDT木のフラット配列化も同時に試したが、PC上の合成木ベンチマークでは
 //! 高速化が見えたものの実モデルで検証したところ逆に40〜60%遅化したため見送った。
@@ -123,10 +146,9 @@ use std::path::{Path, PathBuf};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::boundary::MAX_BOUNDARY_CAT_COLUMNS;
-use crate::char_type::CharType;
-use crate::feature::{FeatureKey, FeatureType};
-use crate::model::{MomoModel, NO_CAT_COLUMN, VocabEntry};
+use crate::feature::FeatureType;
+use crate::model::{MomoModel, NO_CAT_COLUMN};
+use crate::vocab::{Vocab, VocabBuilder};
 use crate::{Error, Result};
 
 // ============================================================
@@ -138,7 +160,7 @@ const MAGIC: [u8; 4] = *b"MOMO";
 /// フォーマットのバージョン。`.mbmf` (`float_loader.rs`) と同じ番号を共有する
 /// ―― 両者はセクション構成を共通に保つ設計なので、採番を分けると
 /// 「どちらの 0x02 か」を常に意識する羽目になる。
-pub(crate) const VERSION: u8 = 8;
+pub(crate) const VERSION: u8 = 9;
 
 /// ヘッダの flags バイト（`_reserved[0]`）のビット定義。
 ///
@@ -158,6 +180,11 @@ pub(crate) const MAX_REASONABLE_COUNT: u32 = 50_000_000;
 /// 読みラベル（かな表記）は現実的に数千種類（現行モデルで 1587）であり、
 /// この上限に達することはない。
 pub(crate) const MAX_CLASSES: u32 = u16::MAX as u32 + 1;
+
+/// 統合語彙のセクション数の妥当性上限（version 0x09）。セクションは
+/// `FeatureType` の種類ごとに 1 つで、現行は w7 の 40 種が最大。
+/// `Vocab` の `slot_of_type` が `u8` の添字を持つため 254 を超えられない。
+pub(crate) const MAX_VOCAB_SECTIONS: usize = 254;
 
 // ============================================================
 // 公開エントリポイント
@@ -233,19 +260,10 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     model.n_features = n_features;
 
     // ---- 統合語彙テーブル ----
+    // キー順・重複なし・タイプごとに列が 1 個であることの検証は
+    // `VocabBuilder`（vocab.rs）が行う。契約が破れているファイルを黙って通すと
+    // binary_search が存在するキーを見失い静かに誤動作するため、必ずエラーにする。
     model.vocab = read_vocab(reader, n_features, has_cat, path)?;
-    // 検証: vocab がキー順（Rust Ord）にソート済みであること。version 0x08 で
-    // exporter がキー順で書く契約になった（read_vocab の doc 参照）。ここで
-    // 再ソートはしない（それでは全 materialize が必須になり、将来 mmap で
-    // スライスを借用する構成にできない）。契約が破れている（壊れたファイル・
-    // exporter のバグ）場合、黙って進めると binary_search が存在するキーを
-    // 見失い静かに誤動作するため、後続セクションを読む前に明示的エラーにする。
-    if !model.vocab.windows(2).all(|w| w[0].key <= w[1].key) {
-        return Err(Error::CorruptModel {
-            reason: "統合語彙テーブルがキー順（FeatureKey の Ord）にソートされていません"
-                .to_string(),
-        });
-    }
 
     // ---- 読みラベルテーブル ----
     model.read_classes = read_labels(reader, n_classes, path)?;
@@ -285,91 +303,100 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 // セクション別読み込み
 // ============================================================
 
-/// 統合語彙テーブルを読む（version 0x08）。
+/// 統合語彙テーブルを読む（version 0x09）。
 ///
 /// `.mbm` (`loader.rs`) と `.mbmf` (`float_loader.rs`) でバイト列は完全に同一のため、
 /// `pub(crate)` にして両方から呼べるようにしている。
 ///
-/// - ファイルはキー順（Rust `FeatureKey` の `Ord` 順）で格納されている
-///   （exporter が保証。`load_from_reader` が読了後に検証する）。
-/// - `feature_id`（元の学習時特徴量ID。CSC 重み行列の列インデックスと対応）は
-///   行位置と一致しないため明示フィールドとして読む（version 0x07 までは
-///   行位置=feature_id の暗黙前提だった）。
-/// - `has_cat` が真のとき、各エントリの `FeatureKey` の後に GBDT カテゴリカル
-///   `column: u32` + `code: u32` が続く（GBDT 境界モデルのとき。ヘッダの flags で決まる）。
-///   `column == NO_CAT_COLUMN` はカテゴリカル列なし（Bias 等）。
+/// レイアウト:
+///
+/// ```text
+/// n_sections : u32
+/// 以下 n_sections 個（feature_type 昇順）:
+///   feature_type  : u8
+///   _pad          : u8[3]
+///   count         : u32
+///   cat_column    : u32   NO_CAT_COLUMN = 列なし
+///   cat_code_base : u32
+/// 続いて各セクションのキー配列（u64 × count）をセクションの順に連結
+/// ```
+///
+/// 0x08 まではエントリごとに可変長の `FeatureKey` と `feature_id`・
+/// `(cat_column, cat_code)` を書いていた。0x09 では exporter がキー順に採番し直し、
+/// 3 つとも暗黙になった:
+///
+/// - `feature_id` = セクションの先頭 ID + セクション内の添字
+/// - `cat_code` = `cat_code_base` + セクション内の添字
+/// - `cat_column` = セクションが 1 個だけ持つ
+///
+/// おかげでエントリごとのパースが消え、キー配列は一括読みで済む。
 pub(crate) fn read_vocab<R: Read>(
     reader: &mut R,
     n_features: u32,
     has_cat: bool,
     path: &Path,
-) -> Result<Vec<VocabEntry>> {
-    let mut vocab = Vec::with_capacity(n_features as usize);
-    for _ in 0..n_features {
-        let feature_id = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-        if feature_id >= n_features {
+) -> Result<Vocab> {
+    let n_sections = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+    if n_sections as usize > MAX_VOCAB_SECTIONS {
+        return Err(Error::CorruptModel {
+            reason: format!(
+                "統合語彙のセクション数 {n_sections} が上限 {MAX_VOCAB_SECTIONS} を超えています"
+            ),
+        });
+    }
+
+    let mut headers = Vec::with_capacity(n_sections as usize);
+    let mut total = 0u32;
+    for _ in 0..n_sections {
+        let ft_byte = reader.read_u8().map_err(io_err(path))?;
+        let feature_type =
+            FeatureType::from_u8(ft_byte).ok_or(Error::InvalidFeatureType { value: ft_byte })?;
+        let mut pad = [0u8; 3];
+        reader.read_exact(&mut pad).map_err(io_err(path))?;
+        let count = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+        let cat_column = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+        let cat_code_base = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+
+        // 列の有無はヘッダの flags と一致していること。食い違うと境界モデルが
+        // 静かにカテゴリカルを見失う。
+        if !has_cat && cat_column != NO_CAT_COLUMN {
             return Err(Error::CorruptModel {
                 reason: format!(
-                    "統合語彙のfeature_id={feature_id}がn_features={n_features}以上です"
+                    "flags に VOCAB_HAS_CAT が無いのに特徴量タイプ 0x{ft_byte:02X} が                     カテゴリカル列 {cat_column} を持っています"
                 ),
             });
         }
-        let key = read_feature_key(reader, path)?;
-        let (cat_column, cat_code) = if has_cat {
-            let column = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-            let code = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-            // 番兵でなければ、木のスコア計算の固定長配列に収まる列番号であること。
-            if column != NO_CAT_COLUMN && column as usize >= MAX_BOUNDARY_CAT_COLUMNS {
+
+        total = match total.checked_add(count) {
+            Some(v) if v <= n_features => v,
+            _ => {
                 return Err(Error::CorruptModel {
                     reason: format!(
-                        "統合語彙のカテゴリカル列番号 {column} が上限 {MAX_BOUNDARY_CAT_COLUMNS} 以上です"
+                        "統合語彙セクションの件数合計が n_features={n_features} を超えました"
                     ),
                 });
             }
-            (column, code)
-        } else {
-            (NO_CAT_COLUMN, 0)
         };
-        vocab.push(VocabEntry {
-            key,
-            feature_id,
-            cat_column,
-            cat_code,
+        headers.push((feature_type, count, cat_column, cat_code_base));
+    }
+
+    if total != n_features {
+        return Err(Error::CorruptModel {
+            reason: format!(
+                "統合語彙セクションの件数合計 {total} と n_features={n_features} が一致しません"
+            ),
         });
     }
-    Ok(vocab)
-}
 
-/// 語彙エントリ1個分の `FeatureKey` ペイロードのみを読む（feature_id や
-/// カテゴリカル `(column, code)` などの付随フィールドは呼び出し側が読む）。
-/// 統合語彙テーブル (`read_vocab`) が使う。
-pub(crate) fn read_feature_key<R: Read>(reader: &mut R, path: &Path) -> Result<FeatureKey> {
-    let ft_byte = reader.read_u8().map_err(io_err(path))?;
-    let feature_type =
-        FeatureType::from_u8(ft_byte).ok_or(Error::InvalidFeatureType { value: ft_byte })?;
-
-    let mut key = FeatureKey {
-        feature_type,
-        ..FeatureKey::default()
-    };
-
-    let nct = feature_type.chartype_count();
-    for i in 0..nct {
-        let ct_byte = reader.read_u8().map_err(io_err(path))?;
-        let ct = CharType::from_u8(ct_byte).ok_or(Error::InvalidCharType { value: ct_byte })?;
-        key.ct[i] = ct;
+    let mut builder = VocabBuilder::new();
+    for (feature_type, count, cat_column, cat_code_base) in headers {
+        builder.begin_section(feature_type, count, cat_column, cat_code_base)?;
+        for _ in 0..count {
+            let key = reader.read_u64::<LittleEndian>().map_err(io_err(path))?;
+            builder.push_key(key)?;
+        }
     }
-
-    let ncp = feature_type.char32_count();
-    for i in 0..ncp {
-        key.cp[i] = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
-    }
-
-    if feature_type.is_uint8_payload() {
-        key.u8val = reader.read_u8().map_err(io_err(path))?;
-    }
-
-    Ok(key)
+    builder.finish(n_features)
 }
 
 /// 読みラベルテーブルを読む。
@@ -419,33 +446,33 @@ pub(crate) fn read_csc_structure<R: Read>(
     }
     let n_nonzero = n_nonzero as usize;
 
+    // version 0x09: ファイルは列ごとの非ゼロ数 (u16) を持つ。前置和して colptr を作る。
+    // 1 列の非ゼロ数は高々 n_classes (<= 65536) なので u16 で足り、0x08 までの
+    // u32 累積和より w4 で 640KB・w7 で 2.16MB 小さい。
     let colptr_len = n_features as usize + 1;
-    let mut colptr = vec![0u32; colptr_len];
-    for slot in &mut colptr {
-        *slot = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+    let mut colptr = Vec::with_capacity(colptr_len);
+    colptr.push(0u32);
+    let mut acc = 0u32;
+    for col in 0..n_features as usize {
+        let len = reader.read_u16::<LittleEndian>().map_err(io_err(path))? as u32;
+        // 前置和が n_nonzero を超えないこと（列の範囲で csc_data / csc_rowind を
+        // 添字アクセスするため、ここが崩れると範囲外参照になる）。
+        acc = match acc.checked_add(len) {
+            Some(v) if v as usize <= n_nonzero => v,
+            _ => {
+                return Err(Error::CorruptModel {
+                    reason: format!(
+                        "CSC col_len[{col}]={len} で累計が n_nonzero={n_nonzero} を超えました"
+                    ),
+                });
+            }
+        };
+        colptr.push(acc);
     }
-
-    // 整合性チェック: colptr は単調非減少で、各要素は n_nonzero 以下であること
-    // （列の範囲 colptr[f]..colptr[f+1] で csc_data / csc_rowind を添字アクセスするため）。
-    let mut prev = 0u32;
-    for (col, &p) in colptr.iter().enumerate() {
-        if p < prev || p as usize > n_nonzero {
-            return Err(Error::CorruptModel {
-                reason: format!(
-                    "CSC colptr[{col}]={p} が不正です（直前の値={prev}, n_nonzero={n_nonzero}）"
-                ),
-            });
-        }
-        prev = p;
-    }
-    // 整合性チェック: colptr の最後の値は n_nonzero と一致するはず
-    if *colptr.last().unwrap() as usize != n_nonzero {
+    // 整合性チェック: 列長の合計は n_nonzero と一致するはず
+    if acc as usize != n_nonzero {
         return Err(Error::CorruptModel {
-            reason: format!(
-                "CSC colptr[last]={} と n_nonzero={} が一致しません",
-                colptr.last().unwrap(),
-                n_nonzero
-            ),
+            reason: format!("CSC col_len の合計 {acc} と n_nonzero={n_nonzero} が一致しません"),
         });
     }
 
@@ -628,6 +655,8 @@ fn _io_err_owned(path: PathBuf) -> impl Fn(std::io::Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::char_type::CharType;
+    use crate::feature::FeatureKey;
     use std::path::PathBuf;
 
     /// fixture_gbdt.mbm（GBDT境界モデル、algo_tag=0x01）のパスを返す。
@@ -683,20 +712,24 @@ mod tests {
     fn load_fixture_vocab() {
         let model = load(fixture_path()).unwrap();
 
+        // version 0x09 では feature_id はキー順（FeatureKey の Ord 順）の通し番号:
+        //   0 Bias(0x00) / 1 type_s=KANJI(0x50) / 2 char_s=字(U+5B57) /
+        //   3 char_s=漢(U+6F22) / 4 kanji_run=2(0xC0)
+
         // bias
         let k = FeatureKey::no_payload(FeatureType::Bias);
         assert_eq!(model.vocab_find(&k), Some(0));
 
-        // char_s=漢
-        let k = FeatureKey::char_1(FeatureType::CharSelf, 0x6F22);
+        // type_s=KANJI
+        let k = FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji);
         assert_eq!(model.vocab_find(&k), Some(1));
 
-        // char_s=字
+        // char_s=字（コードポイントが小さいので 漢 より前）
         let k = FeatureKey::char_1(FeatureType::CharSelf, 0x5B57);
         assert_eq!(model.vocab_find(&k), Some(2));
 
-        // type_s=KANJI
-        let k = FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji);
+        // char_s=漢
+        let k = FeatureKey::char_1(FeatureType::CharSelf, 0x6F22);
         assert_eq!(model.vocab_find(&k), Some(3));
 
         // kanji_run=2
@@ -723,16 +756,19 @@ mod tests {
         //   カ: (0,50), (1,80), (3,30)
         //   キ: (0,40), (2,70), (3,20)
         //   ク: (0,10), (4,90)
-        // 期待される CSC:
-        //   col 0: rows [0,1,2], vals [50,40,10]
-        //   col 1: rows [0],     vals [80]
-        //   col 2: rows [1],     vals [70]
-        //   col 3: rows [0,1],   vals [30,20]
-        //   col 4: rows [2],     vals [90]
-        //   colptr = [0, 3, 4, 5, 7, 8]
-        assert_eq!(model.csc_colptr, vec![0, 3, 4, 5, 7, 8]);
-        assert_eq!(model.csc_rowind, vec![0, 1, 2, 0, 1, 0, 1, 2]);
-        assert_eq!(model.csc_data, vec![50, 40, 10, 80, 70, 30, 20, 90]);
+        // version 0x09 では列は新しい feature_id 順（キー順）に並ぶ。
+        // 定義上の列 → 新 feature_id: bias 0→0 / char_s=漢 1→3 / char_s=字 2→2 /
+        //                             type_s 3→1 / kanji_run 4→4
+        // 期待される CSC（新 feature_id 順）:
+        //   col 0 (bias)      : rows [0,1,2], vals [50,40,10]
+        //   col 1 (type_s)    : rows [0,1],   vals [30,20]
+        //   col 2 (char_s=字) : rows [1],     vals [70]
+        //   col 3 (char_s=漢) : rows [0],     vals [80]
+        //   col 4 (kanji_run) : rows [2],     vals [90]
+        //   colptr = [0, 3, 5, 6, 7, 8]
+        assert_eq!(model.csc_colptr, vec![0, 3, 5, 6, 7, 8]);
+        assert_eq!(model.csc_rowind, vec![0, 1, 2, 0, 1, 1, 0, 2]);
+        assert_eq!(model.csc_data, vec![50, 40, 10, 30, 20, 70, 80, 90]);
     }
 
     #[test]
@@ -755,7 +791,9 @@ mod tests {
                 intercept,
             } => {
                 assert!((scale - 0.005).abs() < 1e-6);
-                assert_eq!(data, &vec![10i8, -5, 20, 15, -3]);
+                // BOUNDARY_DATA = [10, -5, 20, 15, -3]（定義上の列順）を
+                // 新 feature_id 順 [bias, type_s, 字, 漢, kanji_run] に並べ替えた形。
+                assert_eq!(data, &vec![10i8, 15, 20, -5, -3]);
                 assert!((intercept[0] - 0.2).abs() < 1e-6);
                 assert!((intercept[1] - (-0.2)).abs() < 1e-6);
             }
@@ -788,7 +826,7 @@ mod tests {
     fn n_classes_over_u16_returns_error() {
         // csc_rowind がクラスIDを u16 で持つため、n_classes は MAX_CLASSES (65536)
         // を超えてはならない。ここでは 65537 (0x00010001) を与えて弾かれることを確認する。
-        let bad_data = b"MOMO\x08\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MOMO\x09\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
@@ -987,10 +1025,9 @@ mod tests {
         // rowind[0] = 5 は n_classes=2 の範囲外（scores[5] で panic する）
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&1u32.to_le_bytes()); // n_nonzero
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[0]
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[1]
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[2]
-        bytes.extend_from_slice(&1u32.to_le_bytes()); // colptr[3]
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // col_len[0]
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // col_len[1]
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // col_len[2]
         bytes.extend_from_slice(&5u16.to_le_bytes()); // rowind[0] = 5 (範囲外)
         let mut cursor = std::io::Cursor::new(bytes);
         let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
@@ -998,14 +1035,28 @@ mod tests {
     }
 
     #[test]
-    fn csc_colptr_non_monotonic_returns_error() {
-        // n_features=3 なので colptr は 4 要素。[0, 3, 1, 3] は単調非減少ではない
+    fn csc_col_len_sum_over_nnz_returns_error() {
+        // version 0x09 は列長 (u16) を読んで前置和する。合計が n_nonzero を超える
+        // ファイルを通すと、列の範囲で csc_data/csc_rowind を添字アクセスしたときに
+        // 範囲外になる。
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&3u32.to_le_bytes()); // n_nonzero
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[0]
-        bytes.extend_from_slice(&3u32.to_le_bytes()); // colptr[1]
-        bytes.extend_from_slice(&1u32.to_le_bytes()); // colptr[2] = 1 < 直前の 3
-        bytes.extend_from_slice(&3u32.to_le_bytes()); // colptr[3]
+        bytes.extend_from_slice(&3u16.to_le_bytes()); // col_len[0]
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // col_len[1] で累計 4 > 3
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // col_len[2]
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
+    }
+
+    #[test]
+    fn csc_col_len_sum_under_nnz_returns_error() {
+        // 合計が n_nonzero に届かない場合も、読み残しが後続セクションを壊すので弾く。
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // n_nonzero
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // col_len[0]
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // col_len[1]
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // col_len[2]（合計 2 != 3）
         let mut cursor = std::io::Cursor::new(bytes);
         let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));

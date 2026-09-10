@@ -6,24 +6,48 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 
 [ファイルヘッダ]          16 bytes
   magic        : uint8[4]   "MOMO"
-  version      : uint8      0x08
+  version      : uint8      0x09
   flags        : uint8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
   _reserved    : uint8[2]   0x00 x2
   n_classes    : uint32     読みラベル数
   n_features   : uint32     特徴量次元数（語彙サイズ）
 
-[統合語彙テーブル]        n_features エントリ（キー順 = Rust FeatureKey の Ord 順。
-                          version 0x08 で feature_id を明示フィールドに戻した）
-  feature_id   : uint32     元の学習時特徴量ID。CSC 重み行列の列インデックスと対応
-                            （CSC 側は今も feature_id 昇順のまま。行位置とは無関係）
-  feature_type : uint8      FeatureType 値
-  chartype[N]  : uint8 × N  N = chartype_count(feature_type)
-  char32[M]    : uint32 × M M = char32_count(feature_type)
-  uint8_val    : uint8      is_uint8_payload(feature_type) のときのみ
-  （flags bit0 のときのみ、各エントリ末尾に:）
-  cat_column   : uint32     GBDT カテゴリカル列（0xFFFFFFFF = 列なし。LightGBM の
-                            split_feature と一致する 0-based 列）
-  cat_code     : uint32     列内での序数コード（momo_py.categorical の vocab コード）
+[統合語彙テーブル]        version 0x09 で特徴量タイプ別セクションに変更
+  n_sections   : uint32     セクション数（= 出現する feature_type の種類数）
+  以下 n_sections 個（feature_type 昇順）:
+    feature_type  : uint8
+    _pad          : uint8[3] 0x00 x3
+    count         : uint32   このセクションのエントリ数
+    cat_column    : uint32   GBDT カテゴリカル列（0xFFFFFFFF = 列なし）
+    cat_code_base : uint32   セクション先頭エントリのカテゴリカルコード
+  続いて、各セクションのキー配列をセクションの順に連結:
+    key           : uint64 × count   詰めたキー（昇順・重複なし）
+
+  キーの詰め方（`_pack_vocab_key`。Rust 側 vocab.rs::pack_key と一致）:
+    char32×M   : cp[0] を上位に 21bit ずつ（M <= 3 なので 63bit）
+    chartype×N : ct[0] を上位に 8bit ずつ（N <= 3）
+    uint8×1    : u8_val
+    なし        : 0
+
+  0x08 まではエントリごとに feature_id と (cat_column, cat_code) を書いており、
+  可変長で 1 エントリ 13〜25 バイトあった。0x09 では 3 つとも採番し直して暗黙にする:
+
+    feature_id = セクションの feature_id_base + セクション内の添字
+                 （feature_id_base は先行セクションの count の累計。つまり
+                   全体をキー順に並べたときの行位置がそのまま feature_id）
+    cat_code   = セクションの cat_code_base + セクション内の添字
+    cat_column = セクションが 1 個だけ持つ
+
+  cat_column が feature_type ごとに 1 個に決まるのは、momo_py.categorical の
+  fit_categorical() が「特徴量名ごとに 1 列」を作り、特徴量名が FeatureType と
+  1 対 1 に対応するため。唯一 char_s 列だけは CharSelf(0x90) と
+  CharSelfCompound2(0xA6) の 2 タイプが共有するが、コードは列内で通し番号なので
+  各タイプのぶんは連続した区間になり、cat_code_base で表せる。
+
+  この採番し直しに伴い、書き出し側で 3 つの並べ替えを行う:
+    1. CSC 重み行列の列をキー順に並べ替える
+    2. 線形境界の重みベクトルも同じ順に並べ替える
+    3. GBDT の cats を新しいカテゴリコードへ書き換える
 
 [読みラベルテーブル]      n_classes エントリ
   len          : uint8      UTF-8バイト長
@@ -32,7 +56,9 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 [読みモデル重み（CSC・int8量子化・クラスごとscale）]
   quant_scale  : float32 × n_classes   クラス(行)ごとの量子化スケール係数
   n_nonzero    : uint32     非ゼロ要素数
-  colptr       : uint32 × (n_features + 1)
+  col_len      : uint16 × n_features   列ごとの非ゼロ数。読み手が前置和して colptr にする
+                            （0x08 までは uint32 × (n_features+1) の累積和だった。
+                              1 列の非ゼロ数は高々 n_classes <= 65536 なので uint16 で足りる）
   rowind       : uint16 × n_nonzero    行インデックス = クラスID
   data         : int8  × n_nonzero
 
@@ -188,7 +214,11 @@ from .utils import parse_single_char_dict_tsv
 # `.mbm` と `.mbmf` はセクション構成を共通に保つ設計なので、バージョン番号も
 # 共有する（採番を分けると「どちらの 0x02 か」を常に意識する羽目になる）。
 # 区別は magic だけで行う。
-VERSION = 0x08
+VERSION = 0x09
+
+# 統合語彙のキーを詰める際、コードポイント 1 個に割り当てるビット幅。
+# Unicode の上限 U+10FFFF が収まる。Rust 側 vocab.rs の CP_BITS と一致。
+CP_BITS = 21
 
 # 境界モデルセクションの algo_tag（version 0x06 で追加）
 BOUNDARY_ALGO_LINEAR = 0x00
@@ -549,22 +579,57 @@ def quantize_csr_per_row_to_int8(
     return scales, quantized
 
 
-def _build_csc_weight_bytes(csr, data, n_classes: int, n_features: int) -> bytearray:
+class VocabLayout:
+    """統合語彙テーブル version 0x09 のレイアウト計画。
+
+    v0x08 まではエントリごとに `feature_id` と `(cat_column, cat_code)` を書いていた
+    （1 エントリ 13〜25 バイト）。0x09 では**採番し直して 3 つとも暗黙にする**ので、
+    エントリは詰めた uint64 キー 8 バイトだけになる。
+
+      feature_id = セクションの feature_id_base + セクション内の添字
+                   （= 全体をキー順に並べたときの行位置）
+      cat_code   = セクションの cat_code_base + セクション内の添字
+      cat_column = セクションが 1 個だけ持つ
+
+    そのぶん、書き出し側で 3 つの並べ替えが要る:
+
+      1. CSC 重み行列の列を `old_fid_order` の順に並べ替える
+      2. 線形境界の重みベクトルも同じ順に並べ替える
+      3. GBDT の `cats` を `cat_remap` で新コードへ書き換える
+    """
+
+    __slots__ = ("sections", "old_fid_order", "cat_remap")
+
+    def __init__(self, sections: list, old_fid_order: list, cat_remap: dict):
+        self.sections = sections
+        self.old_fid_order = old_fid_order
+        self.cat_remap = cat_remap
+
+
+def _build_csc_weight_bytes(
+    csr, data, n_classes: int, n_features: int, col_order
+) -> bytearray:
     """
     読みモデル重みを CSC 形式のバイト列にする（`.mbm` / `.mbmf` 共通）。
 
     `csr` の疎構造 (indptr/indices) と、それに整列した値配列 `data` を受け取り、
-    列 (特徴量) 方向に転置して colptr/rowind/data を書き出す。`data` の dtype が
-    そのまま書き出す値の型になる（`.mbm` は int8、`.mbmf` は float32）。
+    列 (特徴量) 方向に転置して書き出す。`data` の dtype が そのまま書き出す値の型に
+    なる（`.mbm` は int8、`.mbmf` は float32）。
 
     量子化 scale はクラス (行) ごとなので、量子化は行が連続する CSR で済ませて
     から、転置だけをここで行う。
 
-    レイアウト:
+    `col_order[new_fid] = old_fid` で列を並べ替える（version 0x09 で feature_id を
+    キー順に採番し直したため）。
+
+    レイアウト（version 0x09）:
       n_nonzero : uint32
-      colptr    : uint32 × (n_features + 1)
-      rowind    : uint16 × n_nonzero   （行インデックス = クラスID）
+      col_len   : uint16 × n_features   列ごとの非ゼロ数。読み手が前置和して colptr にする
+      rowind    : uint16 × n_nonzero    （行インデックス = クラスID）
       data      : dtype(data) × n_nonzero
+
+    0x08 までは colptr を uint32 × (n_features+1) の累積和で書いていた。1 列の非ゼロ数は
+    高々 n_classes（<= 65536）なので uint16 の列長で足り、w4 で 640KB・w7 で 2.16MB 減る。
     """
     if n_classes > MAX_CLASSES:
         raise ValueError(
@@ -575,10 +640,18 @@ def _build_csc_weight_bytes(csr, data, n_classes: int, n_features: int) -> bytea
     csc = sparse.csr_matrix(
         (data, csr.indices, csr.indptr), shape=(n_classes, n_features)
     ).tocsc()
+    csc = csc[:, np.asarray(col_order, dtype=np.int64)]
+    csc.sort_indices()
+
+    col_len = np.diff(csc.indptr)
+    if col_len.max(initial=0) > 0xFFFF:
+        raise ValueError(
+            f"CSC の 1 列あたり非ゼロ数の最大 {int(col_len.max())} が uint16 を超えています"
+        )
 
     out = bytearray()
     out += struct.pack("<I", csc.nnz)
-    out += csc.indptr.astype("<u4").tobytes()  # colptr
+    out += col_len.astype("<u2").tobytes()
     out += csc.indices.astype("<u2").tobytes()  # rowind = クラスID
     out += csc.data.tobytes()
     return out
@@ -635,8 +708,13 @@ def _load_bundle(zip_path: str) -> Tuple[Any, list, str]:
     return bundle, name_entries, single_char_text
 
 
-def _build_tree_node_bytes(node: dict) -> bytes:
-    """LightGBMの木構造（dump_model()の1ノード）を再帰的にバイト列へ変換する。"""
+def _build_tree_node_bytes(node: dict, cat_remap: dict) -> bytes:
+    """LightGBMの木構造（dump_model()の1ノード）を再帰的にバイト列へ変換する。
+
+    `cat_remap[(column, old_code)] = new_code` でカテゴリコードを version 0x09 の
+    採番（キー順）へ書き換える。学習時に現れたが統合語彙に居場所がないコードは
+    ありえない（`_build_cat_by_feature_id` が突合済み）ので、未知コードは失敗させる。
+    """
     if "leaf_value" in node:
         return struct.pack("<Bf", 0, float(node["leaf_value"]))
 
@@ -645,31 +723,39 @@ def _build_tree_node_bytes(node: dict) -> bytes:
             "カテゴリカル分岐(decision_type='==')以外の分岐には対応していません: "
             f"decision_type={node.get('decision_type')!r}, split_feature={node.get('split_feature')}"
         )
-    cats = sorted(int(c) for c in str(node["threshold"]).split("||"))
+    column = int(node["split_feature"])
+    old_cats = [int(c) for c in str(node["threshold"]).split("||")]
+    missing = [c for c in old_cats if (column, c) not in cat_remap]
+    if missing:
+        raise ValueError(
+            f"境界モデルの木が持つカテゴリコード {missing} が列 {column} の"
+            "統合語彙に存在しません（cat ⊆ 読み語彙 の前提が崩れています）"
+        )
+    cats = sorted(cat_remap[(column, c)] for c in old_cats)
 
     out = bytearray()
     out.append(1)  # node_tag: split
-    out += struct.pack("<I", int(node["split_feature"]))
+    out += struct.pack("<I", column)
     out.append(1 if node.get("default_left") else 0)
     out += struct.pack("<I", len(cats))
     for c in cats:
         out += struct.pack("<I", c)
-    out += _build_tree_node_bytes(node["left_child"])
-    out += _build_tree_node_bytes(node["right_child"])
+    out += _build_tree_node_bytes(node["left_child"], cat_remap)
+    out += _build_tree_node_bytes(node["right_child"], cat_remap)
     return bytes(out)
 
 
-def _build_boundary_tree_bytes(booster) -> bytes:
+def _build_boundary_tree_bytes(booster, cat_remap: dict) -> bytes:
     """LightGBM Boosterの全木を再帰的にバイト列へ変換する。"""
     tree_info = booster.dump_model()["tree_info"]
     out = bytearray()
     out += struct.pack("<I", len(tree_info))
     for tree in tree_info:
-        out += _build_tree_node_bytes(tree["tree_structure"])
+        out += _build_tree_node_bytes(tree["tree_structure"], cat_remap)
     return bytes(out)
 
 
-def _build_boundary_bytes(bundle: Any, quantize: bool) -> bytes:
+def _build_boundary_bytes(bundle: Any, quantize: bool, layout: VocabLayout) -> bytes:
     """境界モデルセクション（algo_tagプレフィックス付き）を構築する。
 
     quantize=True: .mbm 用（線形モデルはint8量子化）。
@@ -686,6 +772,8 @@ def _build_boundary_bytes(bundle: Any, quantize: bool) -> bytes:
         b_coef = model_b.coef_.astype(np.float32)
         if b_coef.ndim == 2:
             b_coef = b_coef[0]
+        # 線形境界の重みは feature_id で引くので、CSC の列と同じ順に並べ替える。
+        b_coef = b_coef[np.asarray(layout.old_fid_order, dtype=np.int64)]
         b_intercept = model_b.intercept_.astype(np.float32)  # shape: (2,) or (1,)
         if b_intercept.shape[0] == 1:
             # 2値分類で intercept が1要素のことがある
@@ -708,7 +796,7 @@ def _build_boundary_bytes(bundle: Any, quantize: bool) -> bytes:
         out = bytearray()
         out.append(BOUNDARY_ALGO_TREE)
         out += struct.pack("<I", len(bundle.boundary_cat_names))  # n_columns
-        out += _build_boundary_tree_bytes(bundle.model_boundary.booster_)
+        out += _build_boundary_tree_bytes(bundle.model_boundary.booster_, layout.cat_remap)
         return bytes(out)
 
     raise ValueError(f"未知の boundary_algo です: {algo!r}")
@@ -775,6 +863,50 @@ def _unified_cat(bundle: Any, vocab: dict, boundary_algo: str) -> Tuple[dict | N
     return None, 0x00
 
 
+def _pack_vocab_key(ft: int, ct_vals: list, cp_vals: list, u8_val: int | None) -> int:
+    """統合語彙のキーのペイロードを uint64 に詰める（version 0x09）。
+
+    Rust 側 `vocab.rs::pack_key` と同じ規則。FeatureType のビットフィールド上、
+    ペイロード種別（CharType×N / char32×M / uint8×1 / なし）は排他なので、
+    どのタイプでも uint64 1 個で表せる。
+
+      char32×M   : cp[0] を上位に CP_BITS ずつ（M <= 3 なので 63bit）
+      chartype×N : ct[0] を上位に 8bit ずつ（N <= 3）
+      uint8×1    : u8_val
+      なし        : 0
+
+    上位から詰めるので、同一タイプ内では詰めた値の昇順が
+    `_vocab_row_sort_key` の順序と一致する。
+    """
+    m = char32_count(ft)
+    if m:
+        v = 0
+        for i in range(m):
+            cp = int(cp_vals[i])
+            if not 0 <= cp < (1 << CP_BITS):
+                raise ValueError(
+                    f"コードポイント U+{cp:X} が {CP_BITS}bit に収まりません"
+                    f"（特徴量タイプ 0x{ft:02X}）"
+                )
+            v = (v << CP_BITS) | cp
+        return v
+
+    n = chartype_count(ft)
+    if n:
+        v = 0
+        for i in range(n):
+            ct = int(ct_vals[i])
+            if not 0 <= ct < 256:
+                raise ValueError(f"CharType 値 {ct} が uint8 に収まりません")
+            v = (v << 8) | ct
+        return v
+
+    if is_uint8_payload(ft):
+        return int(u8_val or 0)
+
+    return 0
+
+
 def _vocab_row_sort_key(ft: int, u8_val: int | None, ct_vals: list, cp_vals: list) -> tuple:
     """統合語彙テーブルの行を並べる正準ソートキー。
 
@@ -790,49 +922,137 @@ def _vocab_row_sort_key(ft: int, u8_val: int | None, ct_vals: list, cp_vals: lis
     return (ft, u8_val if u8_val is not None else 0, tuple(ct_vals), tuple(cp_vals))
 
 
-def _build_vocab_bytes(vocab: dict, cat_by_id: dict | None = None) -> bytes:
-    """DictVectorizer の vocabulary_ ({key_str: feature_id}) を統合語彙テーブル
-    （version 0x08）のバイト列に変換する。
+def _plan_vocab_layout(vocab: dict, cat_by_id: dict | None) -> VocabLayout:
+    """`{key_str: feature_id}` から version 0x09 のレイアウトを組み立てる。
 
-    各行は Rust 側 `FeatureKey` の `Ord` と同じキー順（`_vocab_row_sort_key`）で
-    書く（Rust ローダーが binary_search で引くため。version 0x07 までの
-    feature_id 順とは異なる）。`feature_id`（元の sklearn 特徴量ID。CSC 重み
-    行列の列インデックスと対応）は行位置と一致しなくなるため、明示フィールドと
-    して各行の先頭に書く。
-
-    `cat_by_id`（GBDT 境界のとき、`{feature_id: (column, code)}`）を渡すと各エントリ
-    末尾に `(column, code)` を書く。カテゴリカル列を持たない feature_id は番兵で埋める。
-    None（線形境界）のときは書かない。ヘッダ flags bit0 と対応させること。
+    `cat_by_id`（GBDT のとき `{feature_id: (column, code)}`）を渡すと、
+    カテゴリカルコードもキー順に採番し直す。
     """
-    parsed = []
-    for key, fid in vocab.items():
+    rows = []
+    for key_str, fid in vocab.items():
         try:
-            ft, ct_vals, cp_vals, u8_val = parse_feature_key(key)
+            ft, ct_vals, cp_vals, u8_val = parse_feature_key(key_str)
         except (ValueError, KeyError) as e:
-            # KeyError は type_* 系のペイロードが CharType 名でない場合など。
-            # 学習データの列ズレ等が原因なので、キーを添えて原因調査できるようにする。
             raise ValueError(
-                f"特徴量キーの解析に失敗しました: {key!r} ({e!r})。"
+                f"特徴量キーの解析に失敗しました: {key_str!r} ({e!r})。"
                 "学習TSVの列ズレや不正な文字種が混入していないか確認してください。"
             ) from None
-        parsed.append((fid, ft, ct_vals, cp_vals, u8_val))
+        rows.append(
+            (
+                _vocab_row_sort_key(ft, u8_val, ct_vals, cp_vals),
+                ft,
+                _pack_vocab_key(ft, ct_vals, cp_vals, u8_val),
+                int(fid),
+            )
+        )
 
-    parsed.sort(key=lambda row: _vocab_row_sort_key(row[1], row[4], row[2], row[3]))
+    rows.sort(key=lambda r: r[0])
 
-    vocab_bytes = bytearray()
-    for fid, ft, ct_vals, cp_vals, u8_val in parsed:
-        vocab_bytes += struct.pack("<I", fid)  # uint32 LE
-        vocab_bytes.append(ft)
-        for ct in ct_vals:
-            vocab_bytes.append(ct)
-        for cp in cp_vals:
-            vocab_bytes += struct.pack("<I", cp)  # uint32 LE
-        if u8_val is not None:
-            vocab_bytes.append(u8_val)
+    # 列ごとのコードは「全体をキー順に走査した順」で採番する。1 つの列を複数の
+    # タイプが共有する場合（char_s = CharSelf 0x90 と CharSelfCompound2 0xA6）でも、
+    # 各タイプのぶんは連続した区間になるので `cat_code_base + 添字` で表せる。
+    next_code: dict = {}
+    cat_remap: dict = {}
+
+    sections: list = []
+    old_fid_order: list = []
+    # 行ごとに割り当てた新コード（None = カテゴリカルなし）。つじつま確認に使う。
+    new_code_of_row: list = []
+    cur = None
+    for _sort_key, ft, packed, old_fid in rows:
+        old_fid_order.append(old_fid)
+
+        column, old_code = (NO_CAT_COLUMN, 0)
         if cat_by_id is not None:
-            column, code = cat_by_id.get(fid, (NO_CAT_COLUMN, 0))
-            vocab_bytes += struct.pack("<II", column, code)
-    return bytes(vocab_bytes)
+            column, old_code = cat_by_id.get(old_fid, (NO_CAT_COLUMN, 0))
+
+        new_code = 0
+        if column != NO_CAT_COLUMN:
+            new_code = next_code.get(column, 0)
+            next_code[column] = new_code + 1
+            cat_remap[(column, old_code)] = new_code
+            new_code_of_row.append(new_code)
+        else:
+            new_code_of_row.append(None)
+
+        if cur is None or cur["feature_type"] != ft:
+            cur = {
+                "feature_type": ft,
+                "cat_column": column,
+                "cat_code_base": new_code,
+                "feature_id_base": len(old_fid_order) - 1,
+                "keys": [],
+            }
+            sections.append(cur)
+        elif cur["cat_column"] != column:
+            # 「列は feature_type ごとに 1 個」が崩れると、セクションが列を 1 個だけ
+            # 持つ設計が成立しない。黙って一方を捨てず、明示的に失敗させる。
+            raise ValueError(
+                f"特徴量タイプ 0x{ft:02X} に複数のカテゴリカル列 "
+                f"({cur['cat_column']} と {column}) が対応しています。"
+                "momo_py.categorical は特徴量名ごとに 1 列を作る前提です。"
+            )
+
+        if cur["keys"] and packed <= cur["keys"][-1]:
+            raise ValueError(
+                f"特徴量タイプ 0x{ft:02X} のキーが昇順になっていないか重複しています "
+                f"(0x{packed:016X})"
+            )
+        cur["keys"].append(packed)
+
+    # 採番のつじつまを確認する。読み手（Rust の vocab.rs）は
+    # `feature_id = feature_id_base + 添字`・`cat_code = cat_code_base + 添字` を
+    # 前提に引くので、ここが崩れると推論結果が静かにずれる。
+    for sec in sections:
+        base_fid = sec["feature_id_base"]
+        n = len(sec["keys"])
+        if sec["cat_column"] == NO_CAT_COLUMN:
+            continue
+        actual = new_code_of_row[base_fid : base_fid + n]
+        expected = list(range(sec["cat_code_base"], sec["cat_code_base"] + n))
+        if actual != expected:
+            raise ValueError(
+                f"特徴量タイプ 0x{sec['feature_type']:02X} のカテゴリカルコードが"
+                f"連続した区間になりませんでした（採番ロジックの不整合）: {actual[:8]}..."
+            )
+
+    if len(old_fid_order) != len(vocab):
+        raise ValueError(
+            f"統合語彙の行数 {len(old_fid_order)} が語彙サイズ {len(vocab)} と一致しません"
+        )
+
+    return VocabLayout(sections, old_fid_order, cat_remap)
+
+
+def _build_vocab_bytes(layout: VocabLayout) -> bytes:
+    """統合語彙テーブル（version 0x09）のバイト列を作る。
+
+    レイアウト:
+      n_sections : uint32
+      以下 n_sections 個（feature_type 昇順）:
+        feature_type  : uint8
+        _pad          : uint8[3]
+        count         : uint32
+        cat_column    : uint32   0xFFFFFFFF = 列なし
+        cat_code_base : uint32
+      続いて、各セクションのキー配列（uint64 × count）をセクションの順に連結
+    """
+    out = bytearray()
+    out += struct.pack("<I", len(layout.sections))
+    for sec in layout.sections:
+        out += struct.pack(
+            "<BBBBIII",
+            sec["feature_type"],
+            0,
+            0,
+            0,
+            len(sec["keys"]),
+            sec["cat_column"],
+            sec["cat_code_base"],
+        )
+    for sec in layout.sections:
+        out += np.asarray(sec["keys"], dtype="<u8").tobytes()
+    return bytes(out)
 
 
 def _build_label_bytes(read_classes) -> bytes:
@@ -939,7 +1159,8 @@ def export(zip_path: str, out_path: str) -> None:
     cat_by_id, flags = _unified_cat(bundle, vocab, boundary_algo)
 
     print("🔨 統合語彙テーブル変換中...")
-    vocab_bytes = _build_vocab_bytes(vocab, cat_by_id)
+    layout = _plan_vocab_layout(vocab, cat_by_id)
+    vocab_bytes = _build_vocab_bytes(layout)
 
     print("🔨 読みラベルテーブル変換中...")
     label_bytes = _build_label_bytes(read_classes)
@@ -951,7 +1172,7 @@ def export(zip_path: str, out_path: str) -> None:
 
     read_weight_bytes = bytearray()
     read_weight_bytes += struct.pack(f"<{n_classes}f", *scales_r.tolist())
-    read_weight_bytes += _build_csc_weight_bytes(csr, data_int8, n_classes, n_features)
+    read_weight_bytes += _build_csc_weight_bytes(csr, data_int8, n_classes, n_features, layout.old_fid_order)
 
     # --- 読みモデル intercept ---
     intercept_r_f32 = intercept_r.astype(np.float32)
@@ -959,7 +1180,7 @@ def export(zip_path: str, out_path: str) -> None:
 
     # --- 境界モデル（線形はint8量子化、GBDTは量子化なし）---
     print(f"🔨 境界モデル変換中... (algo={boundary_algo})")
-    boundary_bytes = _build_boundary_bytes(bundle, quantize=True)
+    boundary_bytes = _build_boundary_bytes(bundle, quantize=True, layout=layout)
 
     print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
     name_dict_bytes = _build_name_dict_bytes(name_entries)
@@ -1035,7 +1256,8 @@ def export_float(zip_path: str, out_path: str) -> None:
     cat_by_id, flags = _unified_cat(bundle, vocab, boundary_algo)
 
     print("🔨 統合語彙テーブル変換中...")
-    vocab_bytes = _build_vocab_bytes(vocab, cat_by_id)
+    layout = _plan_vocab_layout(vocab, cat_by_id)
+    vocab_bytes = _build_vocab_bytes(layout)
 
     print("🔨 読みラベルテーブル変換中...")
     label_bytes = _build_label_bytes(read_classes)
@@ -1045,7 +1267,9 @@ def export_float(zip_path: str, out_path: str) -> None:
     csr = coef_sparse.tocsr()
     data_f32 = csr.data.astype("<f4", copy=False)
 
-    read_weight_bytes = _build_csc_weight_bytes(csr, data_f32, n_classes, n_features)
+    read_weight_bytes = _build_csc_weight_bytes(
+        csr, data_f32, n_classes, n_features, layout.old_fid_order
+    )
 
     # --- 読みモデル intercept ---
     intercept_r_f32 = intercept_r.astype(np.float32)
@@ -1053,7 +1277,7 @@ def export_float(zip_path: str, out_path: str) -> None:
 
     # --- 境界モデル（線形はfloat32・量子化なし、GBDTは元々量子化なし）---
     print(f"🔨 境界モデル変換中... (algo={boundary_algo})")
-    boundary_bytes = _build_boundary_bytes(bundle, quantize=False)
+    boundary_bytes = _build_boundary_bytes(bundle, quantize=False, layout=layout)
 
     print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
     name_dict_bytes = _build_name_dict_bytes(name_entries)

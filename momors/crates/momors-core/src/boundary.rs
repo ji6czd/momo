@@ -173,7 +173,12 @@ impl TreeEnsemble {
         }
         for col in &mut columns {
             // コード順（同一コード内は split id 順）に整列する
-            let mut pairs: Vec<(u32, u32)> = col.codes.iter().copied().zip(col.splits.iter().copied()).collect();
+            let mut pairs: Vec<(u32, u32)> = col
+                .codes
+                .iter()
+                .copied()
+                .zip(col.splits.iter().copied())
+                .collect();
             pairs.sort_unstable();
             col.codes = pairs.iter().map(|p| p.0).collect();
             col.splits = pairs.iter().map(|p| p.1).collect();
@@ -186,7 +191,12 @@ impl TreeEnsemble {
         }
     }
 
-    fn emit(node: &TreeNode, words: &mut Vec<u32>, n_splits: &mut u32, columns: &mut [ColumnIndex]) {
+    fn emit(
+        node: &TreeNode,
+        words: &mut Vec<u32>,
+        n_splits: &mut u32,
+        columns: &mut [ColumnIndex],
+    ) {
         match node {
             TreeNode::Leaf { value } => {
                 words.push(LEAF_FLAG);
@@ -255,7 +265,11 @@ impl TreeEnsemble {
     }
 
     /// 列ごとのコードから「左へ進む split」のビット集合を `bits` に作る。
-    fn build_membership(&self, col_codes: &[Option<u32>; MAX_BOUNDARY_CAT_COLUMNS], bits: &mut [u32]) {
+    fn build_membership(
+        &self,
+        col_codes: &[Option<u32>; MAX_BOUNDARY_CAT_COLUMNS],
+        bits: &mut [u32],
+    ) {
         bits.fill(0);
         for (col, code) in self.columns.iter().zip(col_codes) {
             let Some(code) = *code else { continue };

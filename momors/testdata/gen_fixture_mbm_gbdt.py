@@ -7,23 +7,26 @@ GBDT境界モデル（algo_tag=0x01、木のアンサンブル）を持つ `.mbm
 人名辞書・単一漢字辞書）を再利用し、境界モデルセクションだけを木のアンサンブルに
 差し替える。
 
-version 0x07（統合語彙）:
-  カテゴリカル `(column, code)` は独立した cat_vocab ではなく、統合語彙テーブル
-  （§1）の各エントリ末尾に格納する（ヘッダ flags bit0=1）。境界モデルセクションは
-  n_columns + 木だけを持つ。**カテゴリカルキーは読み語彙の部分集合**という本番の
-  不変条件に合わせ、読み語彙にあるキー（char_s=漢 / char_s=字）だけを使う。
+version 0x09（タイプ別セクション）:
+  カテゴリカル列は統合語彙のセクションヘッダが持ち、コードは
+  `cat_code_base + セクション内の添字` で決まる（ヘッダ flags bit0=1）。
+  境界モデルセクションは n_columns + 木だけを持つ。**カテゴリカルキーは
+  読み語彙の部分集合**という本番の不変条件に合わせ、読み語彙にあるキー
+  （char_s=漢 / char_s=字）だけを使う。
 
-境界モデルのカテゴリカル列（統合語彙に埋め込む）:
-  列0: char_s   char_s=漢(feature_id 1)->コード0, char_s=字(feature_id 2)->コード1
+境界モデルのカテゴリカル列:
+  列0: char_s。コードはキー順（コードポイント順）に振られるので
+       字(U+5B57)->0、漢(U+6F22)->1 になる。ここは並び順で決まるため、
+       木が参照するコードもハードコードせず `base.cat_code_of()` から引く。
 
 木（2本）:
-  木0: 列0を分岐。コード{0}(=漢)なら左(leaf=0.5)、それ以外/欠損なら右(leaf=-0.5)
+  木0: 列0を分岐。漢のコードなら左(leaf=0.5)、それ以外/欠損なら右(leaf=-0.5)
        （default_left=False）
   木1: 定数の葉（leaf=0.25、分岐なし）
 
 期待されるスコア（全木のleaf値の合計）:
   char_s=漢 のみ    : 0.5 + 0.25 = 0.75
-  char_s=字 のみ    : -0.5 + 0.25 = -0.25 （コード1は{0}に含まれない）
+  char_s=字 のみ    : -0.5 + 0.25 = -0.25 （字のコードは分岐集合に含まれない）
   char_s キーなし（欠損）: -0.5 + 0.25 = -0.25 （default_left=False）
 """
 
@@ -40,11 +43,14 @@ VERSION = base.VERSION
 
 BOUNDARY_ALGO_TREE = 0x01
 
-# 統合語彙に埋め込むカテゴリカル写像: feature_id -> (column, code)
-#   char_s=漢 (feature_id 1) -> 列0 コード0
-#   char_s=字 (feature_id 2) -> 列0 コード1
-CAT_MAP = {1: (0, 0), 2: (0, 1)}
+# カテゴリカル列の割り当て: feature_type -> column。
+# version 0x09 ではコードはセクション内の並び順で決まるので、ここでは列だけ決める。
+CAT_COLUMNS = {base.FT_CHAR_SELF: 0}
 N_CAT_COLUMNS = 1
+
+# 木が「漢」を指すためのコード。並び順で決まるので base から引く
+# （base.VOCAB の feature_id 1 が char_s=漢）。
+KANJI_CODE = base.cat_code_of(CAT_COLUMNS)[1][1]
 
 
 def build_leaf(value: float) -> bytes:
@@ -65,7 +71,7 @@ def build_split(column: int, default_left: bool, cats: list, left: bytes, right:
 
 
 def build_trees() -> bytes:
-    tree0 = build_split(0, False, [0], build_leaf(0.5), build_leaf(-0.5))
+    tree0 = build_split(0, False, [KANJI_CODE], build_leaf(0.5), build_leaf(-0.5))
     tree1 = build_leaf(0.25)
     buf = bytearray()
     buf += struct.pack('<I', 2)  # n_trees
@@ -95,7 +101,7 @@ def build_header(magic: bytes) -> bytes:
 def main() -> None:
     boundary = build_boundary_tree()
     # 統合語彙（flags=1 → column/code 付き）。読みモデルの重み等は base を再利用。
-    vocab = base.build_vocab(cat_map=CAT_MAP)
+    vocab = base.build_vocab(cat_columns=CAT_COLUMNS)
 
     mbm_parts = {
         'header': build_header(MAGIC_MBM),

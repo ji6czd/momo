@@ -286,7 +286,7 @@
 
   <dl class="strip">
     <div><dt>Magic</dt><dd>MOMO</dd></div>
-    <div><dt>Version</dt><dd>0x07</dd></div>
+    <div><dt>Version</dt><dd>0x09</dd></div>
     <div><dt>Byte order</dt><dd>little-endian</dd></div>
     <div><dt>Reader</dt><dd>streaming</dd></div>
   </dl>
@@ -314,7 +314,7 @@
       <p class="purpose">Identifies the format and carries the two dimensions that size everything below.</p>
       <div class="fields">
         <span class="fname">magic</span><span class="ftype">u8[4]</span><span class="fnote"><span class="hl">"MOMO"</span> — distinguishes it from the <span class="hl">.mbmf</span> float sidecar</span>
-        <span class="fname">version</span><span class="ftype">u8</span><span class="fnote"><span class="hl">0x07</span>. Older versions are rejected, never silently misread</span>
+        <span class="fname">version</span><span class="ftype">u8</span><span class="fnote"><span class="hl">0x09</span>. Older versions are rejected, never silently misread</span>
         <span class="fname">flags</span><span class="ftype">u8</span><span class="fnote">bit0 = the vocab carries GBDT categorical <span class="hl">(column, code)</span></span>
         <span class="fname">_reserved</span><span class="ftype">u8[2]</span><span class="fnote"><em>padding to a 16-byte header</em></span>
         <span class="fname">n_classes</span><span class="ftype">u32</span><span class="fnote">number of kana reading labels (≈ 1,587)</span>
@@ -327,18 +327,19 @@
       <div class="sec-head">
         <span class="idx">§1</span>
         <span class="sec-title">統合語彙テーブル <span class="en">Unified vocabulary</span></span>
-        <span class="tag">× n_features</span>
+        <span class="tag">sections + u64 keys</span>
       </div>
-      <p class="purpose">Maps each feature key to everything the models need for it: the reading/linear <span class="k">feature_id</span> and, for GBDT, the categorical <span class="k">(column, code)</span>. One binary search serves all three consumers. <em>feature_id is implicit — the row order is the id</em>, so it isn't stored.</p>
+      <p class="purpose">Maps each feature key to everything the models need for it: the reading/linear <span class="k">feature_id</span> and, for GBDT, the categorical <span class="k">(column, code)</span>. One binary search serves all three consumers. Since <span class="hl">0x09</span> the table is split into one section per <span class="k">feature_type</span>, and an entry is nothing but its key packed into a <span class="k">u64</span> — <em>feature_id, cat_code and cat_column are all implicit</em>, derived from the section and the index within it. That cut the file by 45–50% and the resident vocabulary to a quarter.</p>
       <div class="fields">
-        <span class="subhead">one entry per feature, in feature_id order (variable length)</span>
-        <span class="fname">feature_type</span><span class="ftype">u8</span><span class="fnote">selects how many payload fields follow</span>
-        <span class="fname">chartype[N]</span><span class="ftype">u8×N</span><span class="fnote"><em>N depends on feature_type</em></span>
-        <span class="fname">char32[M]</span><span class="ftype">u32×M</span><span class="fnote"><em>code points, M depends on feature_type</em></span>
-        <span class="fname">uint8_val</span><span class="ftype">u8</span><span class="fnote"><em>only for payload feature types</em></span>
-        <span class="subhead">only when flags bit0 (GBDT boundary)</span>
-        <span class="fname">cat_column</span><span class="ftype">u32</span><span class="fnote">GBDT categorical column, or <span class="hl">0xFFFFFFFF</span> = none</span>
-        <span class="fname">cat_code</span><span class="ftype">u32</span><span class="fnote">the code within that column</span>
+        <span class="fname">n_sections</span><span class="ftype">u32</span><span class="fnote">one per distinct feature_type present</span>
+        <span class="subhead">section header × n_sections, in ascending feature_type (16 bytes each)</span>
+        <span class="fname">feature_type</span><span class="ftype">u8</span><span class="fnote">also selects how the key is packed</span>
+        <span class="fname">_pad</span><span class="ftype">u8[3]</span><span class="fnote"><em>padding to a 16-byte header</em></span>
+        <span class="fname">count</span><span class="ftype">u32</span><span class="fnote">entries in this section</span>
+        <span class="fname">cat_column</span><span class="ftype">u32</span><span class="fnote">GBDT categorical column, or <span class="hl">0xFFFFFFFF</span> = none. One per section: the exporter builds one column per feature name, and a feature name is one feature_type</span>
+        <span class="fname">cat_code_base</span><span class="ftype">u32</span><span class="fnote">the first entry's code; <span class="k">cat_code = base + index</span></span>
+        <span class="subhead">then the key arrays, concatenated in section order</span>
+        <span class="fname">key</span><span class="ftype">u64×count</span><span class="fnote">ascending, no duplicates. char32×M packs cp[0] into the high bits, 21 bits each; chartype×N packs ct[0] high, 8 bits each; uint8 payloads are the value; no payload is 0. <span class="k">feature_id = section base + index</span></span>
       </div>
     </section>
 
@@ -367,7 +368,7 @@
       <div class="fields">
         <span class="fname">quant_scale</span><span class="ftype">f32×n_classes</span><span class="fnote">per-class dequant scale — real weight = <span class="hl">data × scale</span></span>
         <span class="fname">n_nonzero</span><span class="ftype">u32</span><span class="fnote">number of stored (non-zero) weights</span>
-        <span class="fname">colptr</span><span class="ftype">u32×(n_features+1)</span><span class="fnote">start offset of each feature's column</span>
+        <span class="fname">col_len</span><span class="ftype">u16×n_features</span><span class="fnote">non-zeros in each feature's column; the reader prefix-sums these into colptr. A column holds at most n_classes entries, so u16 is enough — that alone saved 640&nbsp;KB at window=4</span>
         <span class="fname">rowind</span><span class="ftype">u16×n_nonzero</span><span class="fnote">= class id. <span class="hl">u16</span>, not u32 — halves this array, the file's second-largest</span>
         <span class="fname">data</span><span class="ftype">i8×n_nonzero</span><span class="fnote">the quantized weight itself, 1 byte each</span>
       </div>
@@ -444,7 +445,7 @@
 
   <div class="payoff">
     <h2>Where the bytes actually go</h2>
-    <p>Measured on a real model (window=5, <span class="k">22.5&nbsp;MB</span> at v0x07), two sections carry almost everything:</p>
+    <p>Measured on a real model (window=5, <span class="k">12.5&nbsp;MB</span> at v0x09), two sections carry almost everything:</p>
     <div class="bars">
       <div class="bar"><span class="bl">統合語彙 §1</span><span class="bt" style="--pct:58.6%; --c:var(--role-read)"></span><span class="bv">59%</span></div>
       <div class="bar"><span class="bl">読み重み §3 <em>CSC</em></span><span class="bt" style="--pct:36.3%; --c:var(--role-read)"></span><span class="bv">36%</span></div>
@@ -452,6 +453,8 @@
       <div class="bar"><span class="bl">ラベル · intercept</span><span class="bt" style="--pct:0.1%; --c:var(--ink-faint)"></span><span class="bv">&lt;1%</span></div>
     </div>
     <p><strong>v0x07 unified the vocabulary.</strong> Through v0x06 the GBDT boundary shipped its own <span class="k">cat_vocab</span> — a categorical re-encoding of essentially the same <span class="k">~n_features</span> keys already in §1 — so the file stored the vocabulary <em>twice</em> (the two copies were ~60% of the file). v0x07 folds the categorical <span class="k">(column, code)</span> into each §1 entry and drops the explicit feature_id (now the row index), leaving one vocabulary. The boundary section keeps only its ~1&nbsp;MB of trees. Measured effect: file and load-time peak both fell ~1/3 (window=5: 32.9→22.5&nbsp;MB), with zero change to any predicted result.</p>
+
+    <p><strong>v0x09 shrank the vocabulary to its keys.</strong> §1 was still 61–67% of the file and the largest resident structure (33&nbsp;MB at window=7). The ESP32-P4 model partition is 12.0&nbsp;MiB and the window=4 model had grown to 11.33&nbsp;MiB — 5.9% of headroom left. v0x09 splits §1 into one section per feature_type and renumbers everything so that a stored entry is just its packed <span class="k">u64</span> key: feature_id becomes the row position in key order (the exporter permutes the CSC columns and the linear boundary weights to match), cat_code becomes an offset from the section base (the exporter rewrites the GBDT <span class="k">cats</span> accordingly), and cat_column moves into the section header. Files fell 45–50% (window=4: 11.33→6.23&nbsp;MiB), resident vocabulary to a quarter (9.76→2.44&nbsp;MiB), and the per-entry parse loop in the loader collapsed into one bulk read. Predicted output is byte-identical across a 351,728-character corpus.</p>
     <p>Inside the <span class="accent">reading weights</span> (§3), the sparse layout costs, per non-zero, a value <em>plus</em> the index of where it sits. Storing that index as <span class="k">u16</span> not <span class="k">u32</span>, and going column-major (<span class="k">CSC</span>) so no transpose happens at load, trims both the file and the load-time peak.</p>
     <p>The <span class="k">.mbmf</span> sidecar shares this layout byte-for-byte, except §3 and the linear §5 keep raw <span class="k">f32</span> weights (no quant_scale). Same version number; only the magic — <span class="k">MBMF</span> vs <span class="k">MOMO</span> — tells them apart.</p>
   </div>

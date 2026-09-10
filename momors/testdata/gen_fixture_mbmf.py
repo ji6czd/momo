@@ -38,23 +38,24 @@ def build_header(flags: int = 0x00) -> bytes:
 
 
 def build_read_weights_float() -> bytes:
-    """CSC フォーマット（量子化なし）: n_nonzero + colptr + rowind + data(f32)
+    """CSC フォーマット（量子化なし・version 0x09）:
+    n_nonzero + col_len(uint16 × n_features) + rowind + data(f32)
 
     値は `gen_fixture_mbm.py` の CSR_ROWS（int8）を対応する
     QUANT_SCALES_READ（クラスごと）で dequantize した実値そのもの。
-    転置は `.mbm` と同じ `base.to_csc()` を使うので、両フィクスチャの
-    colptr / rowind は必ず一致する。
+    転置と列の並べ替えは `.mbm` と同じ `base.to_csc()` を使うので、両フィクスチャの
+    col_len / rowind は必ず一致する。
     """
     dequantized = [
         [(col, int8_val * base.QUANT_SCALES_READ[row_idx]) for col, int8_val in row]
         for row_idx, row in enumerate(base.CSR_ROWS)
     ]
-    colptr, rowind, data = base.to_csc(dequantized)
+    col_len, rowind, data = base.to_csc(dequantized)
 
     n_nonzero = len(data)
     buf = bytearray()
     buf += struct.pack('<I', n_nonzero)
-    buf += struct.pack(f'<{len(colptr)}I', *colptr)
+    buf += struct.pack(f'<{base.N_FEATURES}H', *col_len)
     buf += struct.pack(f'<{n_nonzero}H', *rowind)
     buf += struct.pack(f'<{n_nonzero}f', *data)
     return bytes(buf)
@@ -62,7 +63,10 @@ def build_read_weights_float() -> bytes:
 
 def build_boundary_float() -> bytes:
     """境界モデル（algo_tag=線形、量子化なし）: data(f32 × n_features) + intercept(f32 × 2)"""
-    data = [v * base.QUANT_SCALE_BOUNDARY for v in base.BOUNDARY_DATA]
+    # 線形境界の重みは feature_id で引くので、CSC の列と同じ順に並べ替える。
+    data = [
+        base.BOUNDARY_DATA[c] * base.QUANT_SCALE_BOUNDARY for c in base.csc_column_order()
+    ]
     buf = bytearray()
     buf.append(base.BOUNDARY_ALGO_LINEAR)
     buf += struct.pack(f'<{base.N_FEATURES}f', *data)

@@ -10,6 +10,7 @@ use crate::Result;
 use crate::boundary::Boundary;
 use crate::feature::FeatureKey;
 use crate::name_dict::NameIndex;
+use crate::vocab::Vocab;
 use crate::weight_model::WeightModel;
 use std::sync::Mutex;
 
@@ -23,20 +24,22 @@ use std::sync::Mutex;
 /// そもそも境界モデルが線形のモデル）で `cat_column` に入る。
 pub(crate) const NO_CAT_COLUMN: u32 = u32::MAX;
 
-/// 統合語彙テーブルのエントリ（version 0x07）。
+/// 統合語彙テーブルの 1 エントリを平たく表したビュー。
 ///
 /// 読みモデルの one-hot `feature_id` と、GBDT 境界モデルのカテゴリカル
-/// `(cat_column, cat_code)` を1つのキーにまとめて持つ。0x06 までは読み語彙
+/// `(cat_column, cat_code)` を 1 つのキーにまとめて持つ。0x06 までは読み語彙
 /// (`FeatureKey → feature_id`) と GBDT の `cat_vocab` (`FeatureKey → (col, code)`)
 /// が別テーブルで、同じキー集合のペイロードを二重に格納していた。
 ///
-/// - `feature_id` はファイル内の並び順（0..n_features）で暗黙に決まる。CSC 重み
-///   行列の列インデックスと一致させるため、ファイルは feature_id 昇順で格納する。
-/// - `cat_column == NO_CAT_COLUMN` はカテゴリカル列を持たないことを表す。
+/// 推論時の実体は [`crate::vocab::Vocab`]（特徴量タイプ別セクション + 詰めた u64 キー）で、
+/// この型はそこを走査するときの見え方でしかない。ロード時と診断でだけ使う。
 ///
-/// `Vec<VocabEntry>` を `key` でソートしてバイナリサーチで使う。C++ 版の
-/// `operator<` とソート順が異なる可能性があるため、loader が読み込み後に Rust の
-/// `Ord` で必ず再ソートすること。
+/// `cat_column == NO_CAT_COLUMN` はカテゴリカル列を持たないことを表す。
+// 走査ビューなので、どのフィールドが読まれるかは cfg の組み合わせで変わる
+// （`diag.rs` は cat だけ、`mmap_experiment.rs` は key/feature_id を使う）。
+// フィールドごとに cfg を付けると読みにくくなるだけなので、まとめて許可する。
+#[cfg(any(test, feature = "diagnostics"))]
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct VocabEntry {
     pub(crate) key: FeatureKey,
@@ -45,6 +48,7 @@ pub struct VocabEntry {
     pub(crate) cat_code: u32,
 }
 
+#[cfg(feature = "diagnostics")]
 impl VocabEntry {
     /// GBDT カテゴリカル `(column, code)`。列を持たないキーでは `None`。
     #[inline]
@@ -81,9 +85,9 @@ impl VocabEntry {
 #[derive(Debug)]
 pub struct MomoModel {
     // --- 語彙テーブル ---
-    /// 特徴量キー → feature_id のルックアップテーブル。
-    /// `binary_search` で検索するため、Rust の `Ord` でソート済みであること。
-    pub(crate) vocab: Vec<VocabEntry>,
+    /// 特徴量キー → `feature_id` / GBDT カテゴリカル `(column, code)` の検索表。
+    /// 特徴量タイプごとのセクションに分かれる。詳細は [`crate::vocab`]。
+    pub(crate) vocab: Vocab,
 
     // --- 読みラベルテーブル ---
     /// クラスID → 読みラベル (UTF-8)
@@ -241,32 +245,18 @@ impl MomoModel {
     }
 
     /// 語彙テーブルから `key` に対応する `feature_id` を引く。
-    ///
-    /// 事前条件: `vocab` は Rust の `Ord` でソート済みであること。
     /// 見つからない場合は `None`。
     #[inline]
     pub(crate) fn vocab_find(&self, key: &FeatureKey) -> Option<u32> {
-        self.vocab
-            .binary_search_by(|entry| entry.key.cmp(key))
-            .ok()
-            .map(|idx| self.vocab[idx].feature_id)
+        self.vocab.feature_id(key)
     }
 
-    /// 統合語彙テーブルを1回のバイナリサーチで引き、境界モデルが必要とする
+    /// 統合語彙テーブルを1回の探索で引き、境界モデルが必要とする
     /// [`crate::boundary::VocabRef`]（`feature_id` と カテゴリカル `(column, code)`）を返す。
     /// 線形境界は `feature_id`、GBDT は `cat` を使う。
     #[inline]
     pub(crate) fn resolve(&self, key: &FeatureKey) -> Option<crate::boundary::VocabRef> {
-        self.vocab
-            .binary_search_by(|entry| entry.key.cmp(key))
-            .ok()
-            .map(|idx| {
-                let e = &self.vocab[idx];
-                crate::boundary::VocabRef {
-                    feature_id: e.feature_id,
-                    cat: e.cat(),
-                }
-            })
+        self.vocab.resolve(key)
     }
 
     /// 特徴量次元数。
@@ -298,7 +288,7 @@ impl Default for MomoModel {
     /// 埋めることを前提に空 `Vec` で初期化する。
     fn default() -> Self {
         Self {
-            vocab: Vec::new(),
+            vocab: Vocab::default(),
             read_classes: Vec::new(),
             read_scale: Vec::new(),
             csc_colptr: Vec::new(),
@@ -342,6 +332,16 @@ impl WeightModel for MomoModel {
 
     fn n_features(&self) -> u32 {
         self.n_features()
+    }
+
+    #[cfg(feature = "diagnostics")]
+    fn vocab_len(&self) -> usize {
+        self.vocab.len()
+    }
+
+    #[cfg(feature = "diagnostics")]
+    fn vocab_heap_bytes(&self) -> usize {
+        self.vocab.heap_bytes()
     }
 
     fn read_class(&self, class_id: u32) -> Option<&str> {
@@ -483,7 +483,7 @@ mod tests {
             }
             crate::boundary::Boundary::Tree(_) => panic!("既定値は線形であるべき"),
         }
-        assert!(m.vocab.is_empty());
+        assert_eq!(m.vocab.len(), 0);
         assert!(m.read_classes.is_empty());
     }
 
@@ -498,25 +498,28 @@ mod tests {
     fn vocab_find_basic() {
         let mut m = MomoModel::default();
 
-        // Rust の Ord でソート済みになるように構築する。
-        // (実装としては loader 側で sort() を呼ぶことになる)
-        let ve = |key, feature_id| VocabEntry {
-            key,
-            feature_id,
-            cat_column: NO_CAT_COLUMN,
-            cat_code: 0,
-        };
-        m.vocab = vec![
-            ve(FeatureKey::no_payload(FeatureType::Bias), 0),
-            ve(
-                FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji),
-                1,
+        // version 0x09: feature_id はセクション順・キー順の通し番号になる。
+        let mut b = crate::vocab::VocabBuilder::new();
+        for (ft, keys) in [
+            (FeatureType::Bias, vec![FeatureKey::no_payload(FeatureType::Bias)]),
+            (
+                FeatureType::TypeSelf,
+                vec![FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji)],
             ),
-            ve(FeatureKey::char_1(FeatureType::CharSelf, 0x4E00), 2),
-            ve(FeatureKey::char_1(FeatureType::CharSelf, 0x4E01), 3),
-        ];
-        // 念のため明示的にソート
-        m.vocab.sort_by(|a, b| a.key.cmp(&b.key));
+            (
+                FeatureType::CharSelf,
+                vec![
+                    FeatureKey::char_1(FeatureType::CharSelf, 0x4E00),
+                    FeatureKey::char_1(FeatureType::CharSelf, 0x4E01),
+                ],
+            ),
+        ] {
+            b.begin_section(ft, keys.len() as u32, NO_CAT_COLUMN, 0).unwrap();
+            for k in &keys {
+                b.push_key(crate::vocab::pack_key(k)).unwrap();
+            }
+        }
+        m.vocab = b.finish(4).unwrap();
 
         // 存在するキー
         let k0 = FeatureKey::no_payload(FeatureType::Bias);

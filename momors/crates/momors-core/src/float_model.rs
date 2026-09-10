@@ -12,8 +12,8 @@
 use crate::Result;
 use crate::boundary::FloatBoundary;
 use crate::feature::FeatureKey;
-use crate::model::VocabEntry;
 use crate::name_dict::NameIndex;
+use crate::vocab::Vocab;
 use crate::weight_model::WeightModel;
 
 /// `.mbmf` から読み込まれたモデルデータ。
@@ -26,7 +26,7 @@ use crate::weight_model::WeightModel;
 /// （フィールドはすべて `pub(crate)` のままなので、外部から直接構築・参照はできない）。
 #[derive(Debug)]
 pub struct FloatMomoModel {
-    pub(crate) vocab: Vec<VocabEntry>,
+    pub(crate) vocab: Vocab,
     pub(crate) read_classes: Vec<String>,
 
     // --- 読みモデル重み (CSC・float32・量子化なし) ---
@@ -57,37 +57,23 @@ impl FloatMomoModel {
     }
 
     /// 語彙テーブルから `key` に対応する `feature_id` を引く。
-    ///
-    /// 事前条件: `vocab` は Rust の `Ord` でソート済みであること。
     #[inline]
     fn vocab_find(&self, key: &FeatureKey) -> Option<u32> {
-        self.vocab
-            .binary_search_by(|entry| entry.key.cmp(key))
-            .ok()
-            .map(|idx| self.vocab[idx].feature_id)
+        self.vocab.feature_id(key)
     }
 
     /// 統合語彙テーブルを引いて [`crate::boundary::VocabRef`] を返す。
     /// [`crate::model::MomoModel::resolve`] の float 版。
     #[inline]
     fn resolve(&self, key: &FeatureKey) -> Option<crate::boundary::VocabRef> {
-        self.vocab
-            .binary_search_by(|entry| entry.key.cmp(key))
-            .ok()
-            .map(|idx| {
-                let e = &self.vocab[idx];
-                crate::boundary::VocabRef {
-                    feature_id: e.feature_id,
-                    cat: e.cat(),
-                }
-            })
+        self.vocab.resolve(key)
     }
 }
 
 impl Default for FloatMomoModel {
     fn default() -> Self {
         Self {
-            vocab: Vec::new(),
+            vocab: Vocab::default(),
             read_classes: Vec::new(),
             csc_colptr: Vec::new(),
             csc_rowind: Vec::new(),
@@ -127,6 +113,16 @@ impl WeightModel for FloatMomoModel {
 
     fn n_features(&self) -> u32 {
         self.n_features
+    }
+
+    #[cfg(feature = "diagnostics")]
+    fn vocab_len(&self) -> usize {
+        self.vocab.len()
+    }
+
+    #[cfg(feature = "diagnostics")]
+    fn vocab_heap_bytes(&self) -> usize {
+        self.vocab.heap_bytes()
     }
 
     fn read_class(&self, class_id: u32) -> Option<&str> {

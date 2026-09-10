@@ -38,7 +38,6 @@ pub mod diag;
 // 内部モジュール（実装が進んだら追加していく）
 mod boundary;
 // predict の段階別タイマー（feature `diagnostics` 無効時は no-op）
-pub mod phase;
 mod bracket;
 mod char_type;
 mod counter;
@@ -52,6 +51,8 @@ mod model;
 mod name_dict;
 mod normalize;
 mod numeric;
+pub mod phase;
+mod vocab;
 mod weight_model;
 
 // mmap 化した場合の推論速度への影響を測る使い捨てベンチマーク。
@@ -63,6 +64,11 @@ mod mmap_experiment;
 // 本番コードには含まれない。
 #[cfg(test)]
 mod char_latency_probe;
+
+// コーパス全体を流して predict の段階別内訳を出す使い捨て診断。
+// 語彙データ構造を変えたときの before/after を同じ物差しで比べる。本番コードには含まれない。
+#[cfg(all(test, feature = "diagnostics"))]
+mod phase_probe;
 
 // ============================================================
 // 公開 API の再エクスポート

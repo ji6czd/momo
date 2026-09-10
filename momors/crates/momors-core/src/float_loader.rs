@@ -15,18 +15,18 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MBMF"
-//!   version      : u8      0x08    ← .mbm と同じ番号を共有する
+//!   version      : u8      0x09    ← .mbm と同じ番号を共有する
 //!   flags        : u8      ← .mbm と同じ（bit0 = 統合語彙がカテゴリカルを持つ）
 //!   _reserved    : u8[2]   0x00 × 2
 //!   n_classes    : u32 LE
 //!   n_features   : u32 LE
 //!
-//! [統合語彙テーブル]        .mbm と同一（キー順 + feature_id 明示 + 任意のカテゴリカル）
+//! [統合語彙テーブル]        .mbm と同一（タイプ別セクション + 詰めた u64 キー）
 //! [読みラベルテーブル]      .mbm と同一
 //!
 //! [読みモデル重み (CSC・float32・量子化なし)]
 //!   n_nonzero    : u32 LE       ← 疎構造は .mbm と同一（read_csc_structure で共有）
-//!   colptr       : u32 × (n_features + 1)
+//!   col_len      : u16 × n_features  列ごとの非ゼロ数（読み手が前置和して colptr に）
 //!   rowind       : u16 × n_nonzero
 //!   data         : f32 × n_nonzero   ← quant_scale なし、実値そのもの
 //!
@@ -149,9 +149,6 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
     model.name_dict = crate::name_dict::build_name_index(&names);
     model.single_char_dict = read_single_char_dict(reader, path)?;
 
-    // ---- 後処理: vocab を Rust の Ord で再ソート (.mbm の loader と同じ理由) ----
-    model.vocab.sort_by(|a, b| a.key.cmp(&b.key));
-
     Ok(model)
 }
 
@@ -215,11 +212,12 @@ mod tests {
     fn load_fixture_vocab() {
         let model = load(fixture_path()).unwrap();
 
+        // version 0x09 では feature_id はキー順の通し番号（loader.rs の同名テスト参照）。
         let k = FeatureKey::no_payload(FeatureType::Bias);
         assert_eq!(model.vocab_find(&k), Some(0));
 
         let k = FeatureKey::char_1(FeatureType::CharSelf, 0x6F22);
-        assert_eq!(model.vocab_find(&k), Some(1));
+        assert_eq!(model.vocab_find(&k), Some(3));
 
         let k = FeatureKey::char_1(FeatureType::CharSelf, 0x9999);
         assert_eq!(model.vocab_find(&k), None);
@@ -231,10 +229,11 @@ mod tests {
 
         // fixture.mbm の QUANT_SCALES_READ=[0.01, 0.02, 0.005] と CSR_ROWS から
         // 導出した実値 (int8 * scale) と厳密に一致するはず。
-        // CSC 列順: col0: rows[0,1,2] vals[50*0.01, 40*0.02, 10*0.005]
-        assert_eq!(model.csc_colptr, vec![0, 3, 4, 5, 7, 8]);
-        assert_eq!(model.csc_rowind, vec![0, 1, 2, 0, 1, 0, 1, 2]);
-        let expected: Vec<f32> = vec![0.5, 0.8, 0.05, 0.8, 1.4, 0.3, 0.4, 0.45];
+        // 列は新しい feature_id 順（キー順）: bias / type_s / char_s=字 / char_s=漢 / kanji_run
+        // col0: rows[0,1,2] vals[50*0.01, 40*0.02, 10*0.005]
+        assert_eq!(model.csc_colptr, vec![0, 3, 5, 6, 7, 8]);
+        assert_eq!(model.csc_rowind, vec![0, 1, 2, 0, 1, 1, 0, 2]);
+        let expected: Vec<f32> = vec![0.5, 0.8, 0.05, 0.3, 0.4, 1.4, 0.8, 0.45];
         for (a, b) in model.csc_data.iter().zip(expected.iter()) {
             assert!((a - b).abs() < 1e-6, "a={a} b={b}");
         }
@@ -251,7 +250,7 @@ mod tests {
     #[test]
     fn n_classes_over_u16_returns_error() {
         // .mbm 側と同じ理由 (csc_rowind が u16) で 65537 は弾かれる。
-        let bad_data = b"MBMF\x08\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MBMF\x09\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));

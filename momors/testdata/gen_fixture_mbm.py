@@ -33,10 +33,13 @@ FT_KANJI_RUN_LEN = 0xC0
 # CharType の値
 CT_KANJI = 0x42
 
+# 統合語彙のキーを詰めるときのコードポイント幅（exporter.py / vocab.rs と同期）
+CP_BITS = 21
+
 # ファイル識別情報（exporter.py の MAGIC_MBM / VERSION と同期）
 MAGIC = b'MOMO'
 # バージョンは `.mbmf`・GBDT フィクスチャと共有する（それぞれ base.VERSION を使う）
-VERSION = 0x08
+VERSION = 0x09
 
 # ヘッダ flags（version 0x07）。bit0 = 統合語彙が GBDT カテゴリカルを持つ。
 # このフィクスチャは線形境界なので flags=0（vocab に column/code を書かない）。
@@ -61,8 +64,9 @@ N_FEATURES = 5
 READ_CLASSES = ["カ", "キ", "ク"]
 
 # 語彙テーブル: 各エントリ = (feature_type, [ct_vals], [cp_vals], u8_val, feature_id)
-# feature_id 昇順（=CSC重み行列の列インデックス）で定義する。ファイルへ書き出す
-# ときの行順（キー順）は build_vocab() が並べ替える（この定義順とは無関係）。
+# ここでの feature_id は「CSR_ROWS / BOUNDARY_DATA の列番号」を指す定義用の番号。
+# version 0x09 のファイルでは feature_id をキー順に採番し直すので、書き出し時に
+# `csc_column_order()` で列を並べ替える（本番の exporter と同じ扱い）。
 VOCAB = [
     (FT_BIAS,          [],         [],                None, 0),
     (FT_CHAR_SELF,     [],         [0x6F22],          None, 1),  # 漢
@@ -148,37 +152,98 @@ def _vocab_sort_key(entry: tuple) -> tuple:
     return (ft, u8_val if u8_val is not None else 0, tuple(ct_vals), tuple(cp_vals))
 
 
-def build_vocab(cat_map: dict | None = None) -> bytes:
-    """統合語彙テーブル（version 0x08）を組む。
+def pack_key(ft: int, ct_vals: list, cp_vals: list, u8_val: int | None) -> int:
+    """キーのペイロードを uint64 に詰める（momo_py.exporter の `_pack_vocab_key`、
+    Rust の `vocab.rs::pack_key` と同じ規則）。"""
+    m = char32_count(ft)
+    if m:
+        v = 0
+        for i in range(m):
+            assert 0 <= cp_vals[i] < (1 << CP_BITS)
+            v = (v << CP_BITS) | cp_vals[i]
+        return v
+    n = chartype_count(ft)
+    if n:
+        v = 0
+        for i in range(n):
+            v = (v << 8) | ct_vals[i]
+        return v
+    if is_uint8_payload(ft):
+        return u8_val or 0
+    return 0
 
-    各行はキー順（`_vocab_sort_key`、Rust `FeatureKey` の `Ord` と同じ順）で書く。
-    `VOCAB` は feature_id 昇順で定義してあるが、ファイルへの書き出し順（行順）は
-    ここで並べ替える。feature_id は行位置と一致しなくなるため明示フィールドとして書く。
 
-    `cat_map` を渡すと（GBDT フィクスチャ用、flags bit0=1）、各エントリ末尾に
-    `(column, code)` を書き出す。`cat_map[feature_id]` が無いキーは番兵で埋める。
-    None のとき（線形フィクスチャ、flags=0）は書き出さない。
+def sorted_vocab() -> list:
+    """VOCAB をキー順（= version 0x09 の格納順 = 新しい feature_id 順）に並べる。"""
+    return sorted(VOCAB, key=_vocab_sort_key)
+
+
+def csc_column_order() -> list:
+    """`order[new_fid] = 定義上の列番号`。CSC と線形境界の並べ替えに使う。"""
+    return [fid for _ft, _ct, _cp, _u8, fid in sorted_vocab()]
+
+
+def cat_code_of(cat_columns: dict | None) -> dict:
+    """`{定義上の feature_id: (column, code)}` を version 0x09 の採番で作る。
+
+    コードは列ごとに、キー順に走査した順の通し番号。フィクスチャは 1 列しか
+    使わないが、本番と同じ規則にしておく。
     """
-    sorted_vocab = sorted(VOCAB, key=_vocab_sort_key)
+    if cat_columns is None:
+        return {}
+    next_code: dict = {}
+    out: dict = {}
+    for ft, _ct, _cp, _u8, fid in sorted_vocab():
+        column = cat_columns.get(ft)
+        if column is None:
+            continue
+        code = next_code.get(column, 0)
+        next_code[column] = code + 1
+        out[fid] = (column, code)
+    return out
 
-    buf = bytearray()
-    for ft, ct_vals, cp_vals, u8_val, fid in sorted_vocab:
+
+def build_vocab(cat_columns: dict | None = None) -> bytes:
+    """統合語彙テーブル（version 0x09）を組む。
+
+    特徴量タイプごとのセクションヘッダを並べ、続けて各セクションの
+    詰めたキー配列（uint64 × count）を書く。`feature_id` と `cat_code` は
+    セクション内の添字からの足し算で決まるので書かない。
+
+    `cat_columns`（`{feature_type: column}`、GBDT フィクスチャ用で flags bit0=1）を
+    渡すと各セクションヘッダにその列を書く。None のとき（線形フィクスチャ、flags=0）は
+    すべて番兵にする。
+    """
+    rows = sorted_vocab()
+
+    sections: list = []
+    codes = cat_code_of(cat_columns)
+    for ft, ct_vals, cp_vals, u8_val, fid in rows:
         # 整合性チェック
         assert len(ct_vals) == chartype_count(ft), f"FT {ft:#x} ct count"
         assert len(cp_vals) == char32_count(ft), f"FT {ft:#x} cp count"
         assert (u8_val is not None) == is_uint8_payload(ft), f"FT {ft:#x} u8"
 
-        buf += struct.pack('<I', fid)
-        buf.append(ft)
-        for ct in ct_vals:
-            buf.append(ct)
-        for cp in cp_vals:
-            buf += struct.pack('<I', cp)
-        if u8_val is not None:
-            buf.append(u8_val)
-        if cat_map is not None:
-            column, code = cat_map.get(fid, (NO_CAT_COLUMN, 0))
-            buf += struct.pack('<II', column, code)
+        column, code = codes.get(fid, (NO_CAT_COLUMN, 0))
+        if sections and sections[-1]['ft'] == ft:
+            assert sections[-1]['cat_column'] == column, f"FT {ft:#x} の列が一定でない"
+            sections[-1]['keys'].append(pack_key(ft, ct_vals, cp_vals, u8_val))
+        else:
+            sections.append({
+                'ft': ft,
+                'cat_column': column,
+                'cat_code_base': code,
+                'keys': [pack_key(ft, ct_vals, cp_vals, u8_val)],
+            })
+
+    buf = bytearray()
+    buf += struct.pack('<I', len(sections))
+    for sec in sections:
+        buf += struct.pack('<BBBBIII', sec['ft'], 0, 0, 0,
+                           len(sec['keys']), sec['cat_column'], sec['cat_code_base'])
+    for sec in sections:
+        for k in sec['keys']:
+            buf += struct.pack('<Q', k)
     return bytes(buf)
 
 
@@ -199,28 +264,35 @@ def to_csc(rows: list) -> tuple:
     ファイルフォーマット (version 0x05 以降) は CSC なのでここで転置する。
     列ごとに行インデックス昇順で並べる（scipy の `tocsc()` と同じ並び）。
     """
-    colptr = [0]
+    col_len = []
     rowind = []
     data = []
-    for col in range(N_FEATURES):
+    for col in csc_column_order():
+        n = 0
         for row_idx, row in enumerate(rows):
             for c, val in row:
                 if c == col:
                     rowind.append(row_idx)
                     data.append(val)
-        colptr.append(len(rowind))
-    return colptr, rowind, data
+                    n += 1
+        col_len.append(n)
+    return col_len, rowind, data
 
 
 def build_read_weights() -> bytes:
-    """CSC フォーマット: quant_scale[n_classes] + n_nonzero + colptr + rowind + data"""
-    colptr, rowind, data = to_csc(CSR_ROWS)
+    """CSC フォーマット（version 0x09）:
+    quant_scale[n_classes] + n_nonzero + col_len(uint16 × n_features) + rowind + data
+
+    0x08 までは colptr（uint32 の累積和 × n_features+1）だった。1 列の非ゼロ数は
+    高々 n_classes なので uint16 の列長で足りる。読み手が前置和して colptr にする。
+    """
+    col_len, rowind, data = to_csc(CSR_ROWS)
 
     n_nonzero = len(data)
     buf = bytearray()
     buf += struct.pack(f'<{N_CLASSES}f', *QUANT_SCALES_READ)
     buf += struct.pack('<I', n_nonzero)
-    buf += struct.pack(f'<{len(colptr)}I', *colptr)
+    buf += struct.pack(f'<{N_FEATURES}H', *col_len)
     buf += struct.pack(f'<{n_nonzero}H', *rowind)
     buf += struct.pack(f'<{n_nonzero}b', *data)
     return bytes(buf)
@@ -234,7 +306,8 @@ def build_boundary() -> bytes:
     buf = bytearray()
     buf.append(BOUNDARY_ALGO_LINEAR)
     buf += struct.pack('<f', QUANT_SCALE_BOUNDARY)
-    buf += struct.pack(f'<{N_FEATURES}b', *BOUNDARY_DATA)
+    # 線形境界の重みは feature_id で引くので、CSC の列と同じ順に並べ替える。
+    buf += struct.pack(f'<{N_FEATURES}b', *[BOUNDARY_DATA[c] for c in csc_column_order()])
     buf += struct.pack('<ff', *BOUNDARY_INTERCEPT)
     return bytes(buf)
 

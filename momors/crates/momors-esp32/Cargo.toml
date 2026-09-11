@@ -15,6 +15,12 @@ authors = ["KIRIAKE Masanori <seiken@rd01.net>"]
 name = "momors-esp32"
 harness = false
 
+[features]
+# REPL のベンチマーク/診断コマンド（:bench, :probe, :phases, :tp, :xip）を含める。
+# 既定は無効。出荷用バイナリはこの分だけ小さく・単純になる。開発中に測りたいときだけ
+# `cargo build --release --features bench-tools` を付ける。
+bench-tools = ["momors-core/diagnostics"]
+
 [profile.release]
 opt-level = 3
 debug = true       # シンボルはフラッシュサイズに影響しない（ELF にのみ残る）
@@ -24,7 +30,7 @@ debug = true
 opt-level = "z"
 
 [dependencies]
-momors-core = { path = "../momors-core", features = ["diagnostics"] }
+momors-core = { path = "../momors-core" }
 momors-braille = { path = "../momors-braille" }
 # esp-idf-svc / esp-idf-hal は ESP-IDF v5.5 のバインディングと版が合わず（esp-idf-hal 0.46.2 が
 # spi_transaction_t を不透明型として受け取る）、必要なのは生 API だけなので esp-idf-sys を直接使う。

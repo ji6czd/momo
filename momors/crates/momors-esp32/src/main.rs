@@ -30,6 +30,23 @@ fn heap_summary() -> String {
     )
 }
 
+/// main タスクのスタック使用量を "peak 18.2KB / 64.5KB (free 46.3KB)" 形式で返す。
+///
+/// `uxTaskGetStackHighWaterMark` が返すのは「起動以来の最小空き」なので、値は
+/// 単調に減る。各所での表示の差分がその区間の消費量になる（区間ごとの瞬時消費ではない）。
+fn stack_summary() -> String {
+    // SAFETY: NULL は呼び出し元タスク（main タスク）を指す。読み取り専用 API。
+    let free = unsafe { sys::uxTaskGetStackHighWaterMark(core::ptr::null_mut()) } as u32;
+    let total = sys::ESP_TASK_MAIN_STACK as u32;
+    let peak = total.saturating_sub(free);
+    format!(
+        "peak {:.1}KB / {:.1}KB (free {:.1}KB)",
+        peak as f64 / 1024.0,
+        total as f64 / 1024.0,
+        free as f64 / 1024.0
+    )
+}
+
 /// 標準入力をブロッキング読みできるようにコンソールドライバを VFS に接続する。
 ///
 /// ESP-IDF の既定はポーリング（非ブロッキング）で、`read_line` が即座に 0 を返す。
@@ -123,6 +140,7 @@ fn map_model_partition() -> Result<&'static [u8], String> {
 }
 
 /// `:bench` / `:probe` の既定テキスト（3 文・46 文字）。
+#[cfg(feature = "bench-tools")]
 const BENCH_TEXT: &str =
     "吾輩は猫である。今日は良い天気ですね。東京都渋谷区で3人の学生が本を読んだ。";
 
@@ -142,12 +160,16 @@ const BENCH_TEXT: &str =
 // それ以上ならロード時間だけのために払うには高い。
 
 /// 語彙エントリ相当の固定幅レコード長（`FeatureKey` + feature_id）。
+#[cfg(feature = "bench-tools")]
 const XIP_REC: usize = 16;
 /// CSC 1 列相当の連続読み長（nnz 約 32 × (u16 rowind + i8 data)）。
+#[cfg(feature = "bench-tools")]
 const XIP_COL: usize = 96;
 /// 比較に使うバッファ長。L2 に収まらない大きさにして、両者ともミス主体で比べる。
+#[cfg(feature = "bench-tools")]
 const XIP_BUF: usize = 4 * 1024 * 1024;
 
+#[cfg(feature = "bench-tools")]
 fn xorshift(state: &mut u64) -> u64 {
     let mut x = *state;
     x ^= x << 13;
@@ -161,6 +183,7 @@ fn xorshift(state: &mut u64) -> u64 {
 ///
 /// 実際にキー比較はせず、乱数で決めた目標位置へ区間を狭めていく。触るアドレスの
 /// 系列が本物の bsearch と同じであれば、メモリコストの比較としては十分。
+#[cfg(feature = "bench-tools")]
 #[inline(never)]
 fn xip_probe_bsearch(buf: &[u8], n_rec: usize, iters: usize, seed: &mut u64) -> (u64, u64) {
     let mut acc = 0u64;
@@ -183,6 +206,7 @@ fn xip_probe_bsearch(buf: &[u8], n_rec: usize, iters: usize, seed: &mut u64) -> 
 }
 
 /// ランダムな位置から 1 列分を連続読みする（CSC の列アクセス相当）。
+#[cfg(feature = "bench-tools")]
 #[inline(never)]
 fn xip_probe_seq(buf: &[u8], iters: usize, seed: &mut u64) -> u64 {
     let mut acc = 0u64;
@@ -197,6 +221,7 @@ fn xip_probe_seq(buf: &[u8], iters: usize, seed: &mut u64) -> u64 {
 }
 
 /// フラッシュ(XIP) と PSRAM で同じアクセスを回し、1 プローブ / 1 列あたりの時間と比を出す。
+#[cfg(feature = "bench-tools")]
 fn bench_xip(out: &mut impl Write, flash: &'static [u8], iters: usize) {
     if flash.len() < XIP_BUF {
         writeln!(out, "xip: model パーティションが小さすぎます").ok();
@@ -288,6 +313,7 @@ enum Mode {
 }
 
 /// 原稿用紙 1 枚 = 400 字。`:tp` の換算に使う。
+#[cfg(feature = "bench-tools")]
 const MANUSCRIPT_SHEET_CHARS: usize = 400;
 
 struct Engine {
@@ -295,8 +321,10 @@ struct Engine {
     translator: BrailleTranslator,
     mode: Mode,
     /// mmap した model パーティション（`:xip` のフラッシュ側バッファに使う）。
+    #[cfg(feature = "bench-tools")]
     model_bytes: Option<&'static [u8]>,
     /// `:feed` で溜めた実文（`:tp` のスループット測定に使う）。
+    #[cfg(feature = "bench-tools")]
     feed: Vec<String>,
 }
 
@@ -331,13 +359,15 @@ impl Engine {
         let total_ms = start.elapsed().as_millis();
         writeln!(
             out,
-            "time:    predict {predict_ms} ms / total {total_ms} ms   heap: {}",
-            heap_summary()
+            "time:    predict {predict_ms} ms / total {total_ms} ms   heap: {}  stack: {}",
+            heap_summary(),
+            stack_summary()
         )
         .ok();
     }
 
     /// 固定文を `n` 回 `predict` して、1 文字あたりの平均所要時間を出す。
+    #[cfg(feature = "bench-tools")]
     fn bench(&self, out: &mut impl Write, n: usize) {
         let Some(p) = &self.predictor else {
             writeln!(out, "model: none").ok();
@@ -365,6 +395,7 @@ impl Engine {
     /// 実運用と同じく **1 行ずつ** 変換して合計する（1 行 = 1 段落程度）。原稿用紙 100 枚
     /// （4 万字）に換算した所要時間も出す。点字まで含めた全段（predict → BrailleTranslator）を
     /// 測るのは、実用上の単位が「点字になるまで」だから。
+    #[cfg(feature = "bench-tools")]
     fn throughput(&self, out: &mut impl Write, passes: usize) {
         let Some(p) = &self.predictor else {
             writeln!(out, "model: none").ok();
@@ -430,6 +461,7 @@ impl Engine {
     }
 
     /// 1 文字ごとの 語彙引き/読み/境界 の内訳を出し、合計と平均をまとめる。
+    #[cfg(feature = "bench-tools")]
     fn probe(&self, out: &mut impl Write, text: &str) {
         let Some(p) = &self.predictor else {
             writeln!(out, "model: none").ok();
@@ -490,7 +522,7 @@ impl Engine {
     fn handle_command(&mut self, out: &mut impl Write, cmd: &str) {
         match cmd.split_whitespace().collect::<Vec<_>>().as_slice() {
             [":stat"] => {
-                writeln!(out, "heap: {}", heap_summary()).ok();
+                writeln!(out, "heap: {}  stack: {}", heap_summary(), stack_summary()).ok();
                 let model = match &self.predictor {
                     Some(p) => format!(
                         "loaded (features {}, classes {})",
@@ -513,6 +545,7 @@ impl Engine {
                 };
                 writeln!(out, "mode: {m}").ok();
             }
+            #[cfg(feature = "bench-tools")]
             [":probe", rest @ ..] => {
                 let text = if rest.is_empty() {
                     BENCH_TEXT
@@ -521,10 +554,12 @@ impl Engine {
                 };
                 self.probe(out, text);
             }
+            #[cfg(feature = "bench-tools")]
             [":bench", rest @ ..] => {
                 let n: usize = rest.first().and_then(|s| s.parse().ok()).unwrap_or(5);
                 self.bench(out, n);
             }
+            #[cfg(feature = "bench-tools")]
             [":phases", rest @ ..] => {
                 let n: usize = rest.first().and_then(|s| s.parse().ok()).unwrap_or(5);
                 match &self.predictor {
@@ -537,6 +572,7 @@ impl Engine {
                     }
                 }
             }
+            #[cfg(feature = "bench-tools")]
             [":feed", ..] => {
                 // 出力を最小にする（何百行も流し込むので、応答が長いと転送が律速になる）。
                 let text = cmd[":feed".len()..].trim();
@@ -544,18 +580,22 @@ impl Engine {
                     self.feed.push(text.to_owned());
                 }
             }
+            #[cfg(feature = "bench-tools")]
             [":feed?"] | [":tp?"] => {
                 let chars: usize = self.feed.iter().map(|l| l.chars().count()).sum();
                 writeln!(out, "feed: {} lines, {} chars", self.feed.len(), chars).ok();
             }
+            #[cfg(feature = "bench-tools")]
             [":clear"] => {
                 self.feed.clear();
                 writeln!(out, "feed: cleared").ok();
             }
+            #[cfg(feature = "bench-tools")]
             [":tp", rest @ ..] => {
                 let passes: usize = rest.first().and_then(|s| s.parse().ok()).unwrap_or(1);
                 self.throughput(out, passes);
             }
+            #[cfg(feature = "bench-tools")]
             [":xip", rest @ ..] => {
                 let n: usize = rest.first().and_then(|s| s.parse().ok()).unwrap_or(20_000);
                 match self.model_bytes {
@@ -568,38 +608,41 @@ impl Engine {
             [":help"] => {
                 writeln!(out, ":stat                   ヒープ/モデル情報").ok();
                 writeln!(out, ":mode kana|braille|all  出力の切替").ok();
-                writeln!(
-                    out,
-                    ":bench [N]              固定文を N 回推論して 1 文字あたりの時間を出す"
-                )
-                .ok();
-                writeln!(
-                    out,
-                    ":probe [text]           1 文字ごとの 語彙引き/読み/境界 の内訳 (ns)"
-                )
-                .ok();
-                writeln!(
-                    out,
-                    ":phases [N]             predict の段階別内訳 (us/char)"
-                )
-                .ok();
-                writeln!(
-                    out,
-                    ":xip [N]                フラッシュ(XIP) vs PSRAM の読み出しコスト比"
-                )
-                .ok();
-                writeln!(
-                    out,
-                    ":feed <text>            実文を1行バッファに溜める（応答なし）"
-                )
-                .ok();
-                writeln!(out, ":feed?                  溜まった行数/文字数").ok();
-                writeln!(
-                    out,
-                    ":tp [N]                 バッファを N 周変換して 字/秒 と原稿用紙100枚の時間"
-                )
-                .ok();
-                writeln!(out, ":clear                  バッファを空にする").ok();
+                #[cfg(feature = "bench-tools")]
+                {
+                    writeln!(
+                        out,
+                        ":bench [N]              固定文を N 回推論して 1 文字あたりの時間を出す"
+                    )
+                    .ok();
+                    writeln!(
+                        out,
+                        ":probe [text]           1 文字ごとの 語彙引き/読み/境界 の内訳 (ns)"
+                    )
+                    .ok();
+                    writeln!(
+                        out,
+                        ":phases [N]             predict の段階別内訳 (us/char)"
+                    )
+                    .ok();
+                    writeln!(
+                        out,
+                        ":xip [N]                フラッシュ(XIP) vs PSRAM の読み出しコスト比"
+                    )
+                    .ok();
+                    writeln!(
+                        out,
+                        ":feed <text>            実文を1行バッファに溜める（応答なし）"
+                    )
+                    .ok();
+                    writeln!(out, ":feed?                  溜まった行数/文字数").ok();
+                    writeln!(
+                        out,
+                        ":tp [N]                 バッファを N 周変換して 字/秒 と原稿用紙100枚の時間"
+                    )
+                    .ok();
+                    writeln!(out, ":clear                  バッファを空にする").ok();
+                }
                 writeln!(out, "それ以外の行は日本語テキストとして変換します").ok();
             }
             _ => {
@@ -622,9 +665,10 @@ fn main() {
     let boot_us = unsafe { sys::esp_timer_get_time() };
     writeln!(
         out,
-        "boot: {} ms to app start   heap: {}",
+        "boot: {} ms to app start   heap: {}  stack: {}",
         boot_us / 1000,
-        heap_summary()
+        heap_summary(),
+        stack_summary()
     )
     .unwrap();
     out.flush().unwrap();
@@ -636,18 +680,23 @@ fn main() {
     let translator = BrailleTranslator::new(japanese, None);
     writeln!(
         out,
-        "braille table: ready in {} ms   heap: {}",
+        "braille table: ready in {} ms   heap: {}  stack: {}",
         t.elapsed().as_millis(),
-        heap_summary()
+        heap_summary(),
+        stack_summary()
     )
     .unwrap();
     out.flush().unwrap();
 
     // ---- モデル ----
+    #[cfg(feature = "bench-tools")]
     let mut model_bytes: Option<&'static [u8]> = None;
     let predictor = match map_model_partition() {
         Ok(bytes) => {
-            model_bytes = Some(bytes);
+            #[cfg(feature = "bench-tools")]
+            {
+                model_bytes = Some(bytes);
+            }
             writeln!(
                 out,
                 "model partition: mapped {:.1}MB at {:p}",
@@ -661,11 +710,12 @@ fn main() {
                 Ok(p) => {
                     writeln!(
                         out,
-                        "model: loaded in {} ms (features {}, classes {})   heap: {}",
+                        "model: loaded in {} ms (features {}, classes {})   heap: {}  stack: {}",
                         t.elapsed().as_millis(),
                         p.n_features(),
                         p.n_classes(),
-                        heap_summary()
+                        heap_summary(),
+                        stack_summary()
                     )
                     .unwrap();
                     Some(p)
@@ -695,7 +745,9 @@ fn main() {
         predictor,
         translator,
         mode: Mode::All,
+        #[cfg(feature = "bench-tools")]
         model_bytes,
+        #[cfg(feature = "bench-tools")]
         feed: Vec::new(),
     };
 

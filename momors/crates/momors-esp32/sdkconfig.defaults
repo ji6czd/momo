@@ -42,8 +42,12 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 
 # ---- スタック ----
-# toml/serde の解析と推論バッファのため main タスクは大きめに
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=65536
+# 実測ピーク（TOML/serde 解析 + モデル展開 + 推論）は 17.0KB（`stack_summary()` の :stat 表示、
+# 2026-09-11 実機測定）。約 1.9 倍の余裕を見て 32KB にした。内部 SRAM は主タスクのスタックからしか
+# 取れない（FreeRTOSConfig.h の configSTACK_ALLOCATION_FROM_SEPARATE_HEAP=0 経由で
+# MALLOC_CAP_INTERNAL 固定）ため、64KB からの削減分がそのまま内部 SRAM の空きに戻る。
+# オーバーフローは静かに壊れず ESP-IDF 既定のカナリア方式で vApplicationStackOverflowHook に落ちる。
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=4096
 CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192

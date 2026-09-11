@@ -87,6 +87,14 @@ tasks:
     cmds:
       - cargo build --release
 
+  esp:benchbuild:
+    desc: Build ESP32-P4 firmware with bench-tools feature enabled
+    dir: momors/crates/momors-esp32
+    env:
+      CARGO_TARGET_DIR: "{{.ESP_TARGET_DIR}}"
+    cmds:
+      - cargo build --release --features bench-tools
+
   esp:flash:
     desc: Flash ESP32-P4 firmware
     dir: momors/crates/momors-esp32

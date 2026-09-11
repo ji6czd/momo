@@ -345,6 +345,8 @@ classes = ["stop", "pause", "open", "close", "inline"]
 "“" = { braille = "⠐⠤", class = "open" }
 "”" = { braille = "⠤⠂", class = "close" }
 "…" = { braille = "⠂⠂⠂", class = "inline" }
+"＜" = { braille = "⠔⠔", class = "open" }
+"＞" = { braille = "⠢⠢", class = "close" }
 "①" = "⠶⠼⠁⠶"
 "②" = "⠶⠼⠃⠶"
 "③" = "⠶⠼⠉⠶"

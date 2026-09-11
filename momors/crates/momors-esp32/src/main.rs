@@ -10,7 +10,7 @@ use std::io::{BufRead, Write};
 use std::time::Instant;
 
 use esp_idf_sys as sys;
-use momors_braille::{BrailleTranslator, JapaneseTranslator};
+use momors_braille::BrailleTranslator;
 use momors_core::Predictor;
 
 /// `partitions.csv` の model パーティション（type=0x40, subtype=0x00）。
@@ -59,7 +59,7 @@ fn install_console() {
         // 1 行として収まる大きさにする。
         let mut cfg = sys::usb_serial_jtag_driver_config_t {
             tx_buffer_size: 1024,
-            rx_buffer_size: 4096,
+            rx_buffer_size: 2048,
         };
         sys::esp!(sys::usb_serial_jtag_driver_install(&mut cfg))
             .expect("usb_serial_jtag_driver_install");
@@ -675,9 +675,7 @@ fn main() {
 
     // ---- 点字テーブル（埋め込み TOML を起動時に解析）----
     let t = Instant::now();
-    let japanese =
-        JapaneseTranslator::from_embedded().expect("埋め込み点字テーブルの読み込みに失敗");
-    let translator = BrailleTranslator::new(japanese, None);
+    let translator = BrailleTranslator::from_embedded().expect("埋め込み点字テーブルの読み込みに失敗");
     writeln!(
         out,
         "braille table: ready in {} ms   heap: {}  stack: {}",

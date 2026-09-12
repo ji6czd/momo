@@ -6,8 +6,9 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 
 [ファイルヘッダ]          16 bytes
   magic        : uint8[4]   "MOMO"
-  version      : uint8      0x09
+  version      : uint8      0x0A
   flags        : uint8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
+                            bit1 = ソート済み配列を差分 + LEB128 varint で書く（下記）
   _reserved    : uint8[2]   0x00 x2
   n_classes    : uint32     読みラベル数
   n_features   : uint32     特徴量次元数（語彙サイズ）
@@ -22,6 +23,8 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
     cat_code_base : uint32   セクション先頭エントリのカテゴリカルコード
   続いて、各セクションのキー配列をセクションの順に連結:
     key           : uint64 × count   詰めたキー（昇順・重複なし）
+                            flags bit1 のときはセクションごとに差分 varint 列
+                            （「差分 + varint レイアウト」の節を参照）
 
   キーの詰め方（`_pack_vocab_key`。Rust 側 vocab.rs::pack_key と一致）:
     char32×M   : cp[0] を上位に 21bit ずつ（M <= 3 なので 63bit）
@@ -59,8 +62,10 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
   col_len      : uint16 × n_features   列ごとの非ゼロ数。読み手が前置和して colptr にする
                             （0x08 までは uint32 × (n_features+1) の累積和だった。
                               1 列の非ゼロ数は高々 n_classes <= 65536 なので uint16 で足りる）
-  rowind       : uint16 × n_nonzero    行インデックス = クラスID
-  data         : int8  × n_nonzero
+                            flags bit1 のときは値ごとに varint
+  rowind       : uint16 × n_nonzero    行インデックス = クラスID（列内で昇順）
+                            flags bit1 のときは列ごとに差分 varint 列
+  data         : int8  × n_nonzero     （flags bit1 でも据え置き）
 
 [読みモデル intercept]
   intercept    : float32 × n_classes
@@ -86,11 +91,13 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
           leaf_value : float32
         --- split ---
           split_feature : uint32   カテゴリカル列インデックス（column_index と同じ空間）
+                                    flags bit1 のときは varint
           default_left  : uint8    0/1。この列に対応する特徴量がこの位置に存在しない
                                     （欠損）とき、左右どちらへ進むか
-          n_cats        : uint32
+          n_cats        : uint32   flags bit1 のときは varint
           cats          : uint32 × n_cats   昇順ソート済み。この集合に列のコードが
                                     含まれれば左の子へ、含まれなければ右の子へ
+                                    flags bit1 のときは差分 varint 列
           left_child    : 再帰的ノード
           right_child   : 再帰的ノード
       スコアリング: 全木の到達リーフ値の合計をそのまま生スコアとする（追加の
@@ -163,6 +170,38 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
         アクセスがノードごとの専有Vecよりキャッシュに悪かったとみられる。木は
         引き続き0x07までと同じBoxポインタ+再帰ノード列のまま）。
         0x07 ファイルは読み込み時にエラーになるため再エクスポートすること。
+  0x09: 統合語彙を特徴量タイプ別セクションに分け、エントリを詰めた uint64 キー
+        8 バイトだけにした（feature_id / cat_code / cat_column を採番し直して暗黙化）。
+        CSC の colptr(uint32 累積和) を col_len(uint16) に変更。ファイル 45〜50% 減。
+        0x08 ファイルは読み込み時にエラーになるため再エクスポートすること。
+  0x0A: ヘッダ flags bit1 を追加し、ソート済み配列を「隣との差分 + LEB128 varint」で
+        書く圧縮レイアウトを選べるようにした（下記「差分 + varint レイアウト」）。
+        0x09 ファイルは読み込み時にエラーになるため再エクスポートすること。
+
+差分 + varint レイアウト（version 0x0A、flags bit1 = FLAG_DELTA_VARINT）
+=======================================================================
+
+ファイルの大半を占める配列（語彙キー・CSC rowind・col_len・GBDT cats）は
+**どれもソート済み**なので、隣との差分は小さく、LEB128 varint（7bit/byte、
+下位バイト先行、最上位ビット = 継続）で書くと汎用圧縮なしで半分になる
+（実測 w4 6.3 → 3.4MiB、w7 18.4 → 9.5MiB）。減るのはフラッシュ上のサイズだけで、
+ローダーは同じメモリ構造に展開するので RAM は変わらない。推論経路には触れない。
+
+  ソート済み列 [a0, a1, a2, ...] → varint(a0), varint(a1 - a0), varint(a2 - a1), ...
+
+  対象                        | 列の区切り
+  ----------------------------|------------------------------------------
+  語彙キー (uint64)            | セクションごと（セクション内は昇順・重複なし）
+  CSC col_len (uint16)        | 差分なし。値ごとに varint（大半が 1 桁の小さい値）
+  CSC rowind (uint16)         | 列ごと（col_len で区切る。列内はクラスID昇順）
+  GBDT split_feature / n_cats | 差分なし。値ごとに varint
+  GBDT cats (uint32)          | split ごと（昇順）
+
+  それ以外（ヘッダ・セクションヘッダ・ラベル・quant_scale・CSC data・intercept・
+  木の node_tag / default_left / leaf_value・辞書）は固定幅のまま。
+
+差分符号化した配列は mmap でそのまま二分探索できないので、固定幅レイアウト
+（flags bit1 = 0）も引き続き書ける（`--fixed-width`）。ローダーは両方読む。
 
 .mbmf フォーマット（量子化前の float32 サイドカー）
 ====================================================
@@ -214,7 +253,7 @@ from .utils import parse_single_char_dict_tsv
 # `.mbm` と `.mbmf` はセクション構成を共通に保つ設計なので、バージョン番号も
 # 共有する（採番を分けると「どちらの 0x02 か」を常に意識する羽目になる）。
 # 区別は magic だけで行う。
-VERSION = 0x09
+VERSION = 0x0A
 
 # 統合語彙のキーを詰める際、コードポイント 1 個に割り当てるビット幅。
 # Unicode の上限 U+10FFFF が収まる。Rust 側 vocab.rs の CP_BITS と一致。
@@ -227,6 +266,9 @@ BOUNDARY_ALGO_TREE = 0x01
 # ヘッダ flags バイト（reserved[0]、version 0x07 で追加）。Rust 側 loader.rs の
 # FLAG_VOCAB_HAS_CAT と一致。bit0 = 統合語彙が GBDT カテゴリカル (column, code) を持つ。
 FLAG_VOCAB_HAS_CAT = 0x01
+# bit1 = ソート済み配列（語彙キー・CSC rowind/col_len・GBDT cats）を差分 + LEB128 varint で
+# 書く（version 0x0A）。Rust 側 loader.rs の FLAG_DELTA_VARINT と一致。
+FLAG_DELTA_VARINT = 0x02
 
 # カテゴリカル列なしの番兵（Rust 側 loader.rs の NO_CAT_COLUMN と一致）。
 NO_CAT_COLUMN = 0xFFFFFFFF
@@ -579,6 +621,59 @@ def quantize_csr_per_row_to_int8(
     return scales, quantized
 
 
+# =====================================================================
+# 差分 + varint 符号化（version 0x0A、flags bit1）
+# =====================================================================
+
+
+def _encode_varints(values) -> bytes:
+    """非負整数列を LEB128 varint（7bit/byte、下位先行、MSB = 継続）で連結する。
+
+    numpy でベクトル化してある。w7 の rowind は 400 万要素あり、Python のループでは
+    秒単位かかるため。値ごとのバイト数を先に数え、出力の位置を前置和で決めてから、
+    バイト位置 k ごとに一括で書く（最大 10 バイト = uint64）。
+    """
+    values = np.ascontiguousarray(values, dtype=np.uint64)
+    if values.size == 0:
+        return b""
+    nbytes = np.ones(values.shape, dtype=np.int64)
+    for k in range(1, 10):
+        nbytes += values >= np.uint64(1) << np.uint64(7 * k)
+    offsets = np.concatenate(([0], np.cumsum(nbytes)[:-1]))
+    out = np.zeros(int(nbytes.sum()), dtype=np.uint8)
+    for k in range(10):
+        mask = nbytes > k
+        if not mask.any():
+            break
+        chunk = (values[mask] >> np.uint64(7 * k)) & np.uint64(0x7F)
+        cont = (nbytes[mask] > k + 1).astype(np.uint8) << np.uint8(7)
+        out[offsets[mask] + k] = chunk.astype(np.uint8) | cont
+    return out.tobytes()
+
+
+def _encode_delta_varints(values, starts=None) -> bytes:
+    """昇順の整数列を「先頭の値 + 隣との差分」の varint 列にする。
+
+    `starts` を渡すと、その添字ごとに列を区切る（各区切りの先頭は差分でなく
+    値そのものを書く）。CSC rowind を列ごとに、GBDT cats を split ごとに
+    区切るときに使う。None なら全体を 1 本の列として扱う。
+    """
+    values = np.ascontiguousarray(values, dtype=np.uint64)
+    if values.size == 0:
+        return b""
+    delta = values.copy()
+    delta[1:] -= values[:-1]
+    if starts is None:
+        starts = np.zeros(1, dtype=np.int64)
+    starts = np.asarray(starts, dtype=np.int64)
+    starts = starts[starts < values.size]
+    delta[starts] = values[starts]
+    # 差分は uint64 で計算しているので、降順の箇所があれば巨大な値として現れる。
+    if (delta > values.max()).any():
+        raise ValueError("差分符号化する配列が区切り内で昇順になっていません")
+    return _encode_varints(delta)
+
+
 class VocabLayout:
     """統合語彙テーブル version 0x09 のレイアウト計画。
 
@@ -607,7 +702,7 @@ class VocabLayout:
 
 
 def _build_csc_weight_bytes(
-    csr, data, n_classes: int, n_features: int, col_order
+    csr, data, n_classes: int, n_features: int, col_order, delta: bool
 ) -> bytearray:
     """
     読みモデル重みを CSC 形式のバイト列にする（`.mbm` / `.mbmf` 共通）。
@@ -630,6 +725,9 @@ def _build_csc_weight_bytes(
 
     0x08 までは colptr を uint32 × (n_features+1) の累積和で書いていた。1 列の非ゼロ数は
     高々 n_classes（<= 65536）なので uint16 の列長で足り、w4 で 640KB・w7 で 2.16MB 減る。
+
+    `delta=True`（version 0x0A、flags bit1）のときは col_len を値ごとの varint、
+    rowind を列ごとの差分 varint 列で書く。data は据え置き。
     """
     if n_classes > MAX_CLASSES:
         raise ValueError(
@@ -651,8 +749,12 @@ def _build_csc_weight_bytes(
 
     out = bytearray()
     out += struct.pack("<I", csc.nnz)
-    out += col_len.astype("<u2").tobytes()
-    out += csc.indices.astype("<u2").tobytes()  # rowind = クラスID
+    if delta:
+        out += _encode_varints(col_len)
+        out += _encode_delta_varints(csc.indices, starts=csc.indptr[:-1])
+    else:
+        out += col_len.astype("<u2").tobytes()
+        out += csc.indices.astype("<u2").tobytes()  # rowind = クラスID
     out += csc.data.tobytes()
     return out
 
@@ -708,12 +810,15 @@ def _load_bundle(zip_path: str) -> Tuple[Any, list, str]:
     return bundle, name_entries, single_char_text
 
 
-def _build_tree_node_bytes(node: dict, cat_remap: dict) -> bytes:
+def _build_tree_node_bytes(node: dict, cat_remap: dict, delta: bool) -> bytes:
     """LightGBMの木構造（dump_model()の1ノード）を再帰的にバイト列へ変換する。
 
     `cat_remap[(column, old_code)] = new_code` でカテゴリコードを version 0x09 の
     採番（キー順）へ書き換える。学習時に現れたが統合語彙に居場所がないコードは
     ありえない（`_build_cat_by_feature_id` が突合済み）ので、未知コードは失敗させる。
+
+    `delta=True`（version 0x0A、flags bit1）のときは split_feature と n_cats を varint、
+    cats を差分 varint 列で書く。node_tag / default_left / leaf_value は据え置き。
     """
     if "leaf_value" in node:
         return struct.pack("<Bf", 0, float(node["leaf_value"]))
@@ -735,27 +840,35 @@ def _build_tree_node_bytes(node: dict, cat_remap: dict) -> bytes:
 
     out = bytearray()
     out.append(1)  # node_tag: split
-    out += struct.pack("<I", column)
-    out.append(1 if node.get("default_left") else 0)
-    out += struct.pack("<I", len(cats))
-    for c in cats:
-        out += struct.pack("<I", c)
-    out += _build_tree_node_bytes(node["left_child"], cat_remap)
-    out += _build_tree_node_bytes(node["right_child"], cat_remap)
+    if delta:
+        out += _encode_varints([column])
+        out.append(1 if node.get("default_left") else 0)
+        out += _encode_varints([len(cats)])
+        out += _encode_delta_varints(cats)
+    else:
+        out += struct.pack("<I", column)
+        out.append(1 if node.get("default_left") else 0)
+        out += struct.pack("<I", len(cats))
+        for c in cats:
+            out += struct.pack("<I", c)
+    out += _build_tree_node_bytes(node["left_child"], cat_remap, delta)
+    out += _build_tree_node_bytes(node["right_child"], cat_remap, delta)
     return bytes(out)
 
 
-def _build_boundary_tree_bytes(booster, cat_remap: dict) -> bytes:
+def _build_boundary_tree_bytes(booster, cat_remap: dict, delta: bool) -> bytes:
     """LightGBM Boosterの全木を再帰的にバイト列へ変換する。"""
     tree_info = booster.dump_model()["tree_info"]
     out = bytearray()
     out += struct.pack("<I", len(tree_info))
     for tree in tree_info:
-        out += _build_tree_node_bytes(tree["tree_structure"], cat_remap)
+        out += _build_tree_node_bytes(tree["tree_structure"], cat_remap, delta)
     return bytes(out)
 
 
-def _build_boundary_bytes(bundle: Any, quantize: bool, layout: VocabLayout) -> bytes:
+def _build_boundary_bytes(
+    bundle: Any, quantize: bool, layout: VocabLayout, delta: bool
+) -> bytes:
     """境界モデルセクション（algo_tagプレフィックス付き）を構築する。
 
     quantize=True: .mbm 用（線形モデルはint8量子化）。
@@ -796,7 +909,9 @@ def _build_boundary_bytes(bundle: Any, quantize: bool, layout: VocabLayout) -> b
         out = bytearray()
         out.append(BOUNDARY_ALGO_TREE)
         out += struct.pack("<I", len(bundle.boundary_cat_names))  # n_columns
-        out += _build_boundary_tree_bytes(bundle.model_boundary.booster_, layout.cat_remap)
+        out += _build_boundary_tree_bytes(
+            bundle.model_boundary.booster_, layout.cat_remap, delta
+        )
         return bytes(out)
 
     raise ValueError(f"未知の boundary_algo です: {algo!r}")
@@ -1024,7 +1139,7 @@ def _plan_vocab_layout(vocab: dict, cat_by_id: dict | None) -> VocabLayout:
     return VocabLayout(sections, old_fid_order, cat_remap)
 
 
-def _build_vocab_bytes(layout: VocabLayout) -> bytes:
+def _build_vocab_bytes(layout: VocabLayout, delta: bool = False) -> bytes:
     """統合語彙テーブル（version 0x09）のバイト列を作る。
 
     レイアウト:
@@ -1036,6 +1151,7 @@ def _build_vocab_bytes(layout: VocabLayout) -> bytes:
         cat_column    : uint32   0xFFFFFFFF = 列なし
         cat_code_base : uint32
       続いて、各セクションのキー配列（uint64 × count）をセクションの順に連結
+      （`delta=True` のときはセクションごとの差分 varint 列）
     """
     out = bytearray()
     out += struct.pack("<I", len(layout.sections))
@@ -1051,7 +1167,10 @@ def _build_vocab_bytes(layout: VocabLayout) -> bytes:
             sec["cat_code_base"],
         )
     for sec in layout.sections:
-        out += np.asarray(sec["keys"], dtype="<u8").tobytes()
+        if delta:
+            out += _encode_delta_varints(sec["keys"])
+        else:
+            out += np.asarray(sec["keys"], dtype="<u8").tobytes()
     return bytes(out)
 
 
@@ -1136,9 +1255,12 @@ def _write_sections(
 # =====================================================================
 
 
-def export(zip_path: str, out_path: str) -> None:
+def export(zip_path: str, out_path: str, *, compact: bool = True) -> None:
     """
     momo の .zip モデルを C++/Rust 向け量子化バイナリ (.mbm) に変換して書き出す。
+
+    `compact=True`（既定）はソート済み配列を差分 + varint で書く（flags bit1）。
+    `compact=False` は固定幅レイアウト（mmap で借用ロードする道を残すため）。
     """
     print(f"📦 モデル読み込み中: {zip_path}")
     bundle, name_entries, single_char_text = _load_bundle(zip_path)
@@ -1157,10 +1279,12 @@ def export(zip_path: str, out_path: str) -> None:
 
     # GBDT 境界のときだけ、カテゴリカル (column, code) を統合語彙に埋め込む。
     cat_by_id, flags = _unified_cat(bundle, vocab, boundary_algo)
+    if compact:
+        flags |= FLAG_DELTA_VARINT
 
-    print("🔨 統合語彙テーブル変換中...")
+    print(f"🔨 統合語彙テーブル変換中... (layout={'delta+varint' if compact else 'fixed'})")
     layout = _plan_vocab_layout(vocab, cat_by_id)
-    vocab_bytes = _build_vocab_bytes(layout)
+    vocab_bytes = _build_vocab_bytes(layout, delta=compact)
 
     print("🔨 読みラベルテーブル変換中...")
     label_bytes = _build_label_bytes(read_classes)
@@ -1172,7 +1296,9 @@ def export(zip_path: str, out_path: str) -> None:
 
     read_weight_bytes = bytearray()
     read_weight_bytes += struct.pack(f"<{n_classes}f", *scales_r.tolist())
-    read_weight_bytes += _build_csc_weight_bytes(csr, data_int8, n_classes, n_features, layout.old_fid_order)
+    read_weight_bytes += _build_csc_weight_bytes(
+        csr, data_int8, n_classes, n_features, layout.old_fid_order, delta=compact
+    )
 
     # --- 読みモデル intercept ---
     intercept_r_f32 = intercept_r.astype(np.float32)
@@ -1180,7 +1306,9 @@ def export(zip_path: str, out_path: str) -> None:
 
     # --- 境界モデル（線形はint8量子化、GBDTは量子化なし）---
     print(f"🔨 境界モデル変換中... (algo={boundary_algo})")
-    boundary_bytes = _build_boundary_bytes(bundle, quantize=True, layout=layout)
+    boundary_bytes = _build_boundary_bytes(
+        bundle, quantize=True, layout=layout, delta=compact
+    )
 
     print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
     name_dict_bytes = _build_name_dict_bytes(name_entries)
@@ -1229,10 +1357,11 @@ def export(zip_path: str, out_path: str) -> None:
     )
 
 
-def export_float(zip_path: str, out_path: str) -> None:
+def export_float(zip_path: str, out_path: str, *, compact: bool = True) -> None:
     """
     momo の .zip モデルを、量子化せず float32 のまま Rust 向けバイナリ (.mbmf) に
     変換して書き出す。`.mbm`（量子化後）と量子化前の状態を比較する用途のサイドカー。
+    `compact` の意味は `export()` と同じ。
 
     セクション構成は `.mbm` と同一だが、読みモデル重み・境界モデル重みの2セクション
     だけ quant_scale を持たず、int8 の代わりに float32 でそのまま格納する。
@@ -1254,10 +1383,12 @@ def export_float(zip_path: str, out_path: str) -> None:
 
     # .mbm と同一の統合語彙（feature_id 暗黙 + 任意のカテゴリカル）。
     cat_by_id, flags = _unified_cat(bundle, vocab, boundary_algo)
+    if compact:
+        flags |= FLAG_DELTA_VARINT
 
-    print("🔨 統合語彙テーブル変換中...")
+    print(f"🔨 統合語彙テーブル変換中... (layout={'delta+varint' if compact else 'fixed'})")
     layout = _plan_vocab_layout(vocab, cat_by_id)
-    vocab_bytes = _build_vocab_bytes(layout)
+    vocab_bytes = _build_vocab_bytes(layout, delta=compact)
 
     print("🔨 読みラベルテーブル変換中...")
     label_bytes = _build_label_bytes(read_classes)
@@ -1268,7 +1399,7 @@ def export_float(zip_path: str, out_path: str) -> None:
     data_f32 = csr.data.astype("<f4", copy=False)
 
     read_weight_bytes = _build_csc_weight_bytes(
-        csr, data_f32, n_classes, n_features, layout.old_fid_order
+        csr, data_f32, n_classes, n_features, layout.old_fid_order, delta=compact
     )
 
     # --- 読みモデル intercept ---
@@ -1277,7 +1408,9 @@ def export_float(zip_path: str, out_path: str) -> None:
 
     # --- 境界モデル（線形はfloat32・量子化なし、GBDTは元々量子化なし）---
     print(f"🔨 境界モデル変換中... (algo={boundary_algo})")
-    boundary_bytes = _build_boundary_bytes(bundle, quantize=False, layout=layout)
+    boundary_bytes = _build_boundary_bytes(
+        bundle, quantize=False, layout=layout, delta=compact
+    )
 
     print(f"🔨 人名辞書テーブル変換中... ({len(name_entries)} エントリ)")
     name_dict_bytes = _build_name_dict_bytes(name_entries)
@@ -1343,9 +1476,15 @@ if __name__ == "__main__":
         action="store_true",
         help="量子化せず float32 のまま .mbmf として書き出す（.mbm との比較用サイドカー）",
     )
+    parser.add_argument(
+        "--fixed-width",
+        action="store_true",
+        help="ソート済み配列を差分 + varint で圧縮せず固定幅で書く（mmap 借用ロード向け）",
+    )
     args = parser.parse_args()
 
+    compact = not args.fixed_width
     if args.float:
-        export_float(args.zip_path, args.out_path)
+        export_float(args.zip_path, args.out_path, compact=compact)
     else:
-        export(args.zip_path, args.out_path)
+        export(args.zip_path, args.out_path, compact=compact)

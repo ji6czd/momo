@@ -15,8 +15,9 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MBMF"
-//!   version      : u8      0x09    ← .mbm と同じ番号を共有する
-//!   flags        : u8      ← .mbm と同じ（bit0 = 統合語彙がカテゴリカルを持つ）
+//!   version      : u8      0x0A    ← .mbm と同じ番号を共有する
+//!   flags        : u8      ← .mbm と同じ（bit0 = 統合語彙がカテゴリカルを持つ、
+//!                             bit1 = ソート済み配列が差分 + varint）
 //!   _reserved    : u8[2]   0x00 × 2
 //!   n_classes    : u32 LE
 //!   n_features   : u32 LE
@@ -27,7 +28,7 @@
 //! [読みモデル重み (CSC・float32・量子化なし)]
 //!   n_nonzero    : u32 LE       ← 疎構造は .mbm と同一（read_csc_structure で共有）
 //!   col_len      : u16 × n_features  列ごとの非ゼロ数（読み手が前置和して colptr に）
-//!   rowind       : u16 × n_nonzero
+//!   rowind       : u16 × n_nonzero   ← flags bit1 では col_len / rowind とも .mbm と同じ varint 形
 //!   data         : f32 × n_nonzero   ← quant_scale なし、実値そのもの
 //!
 //! [読みモデル intercept]    .mbm と同一
@@ -48,8 +49,9 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::float_model::FloatMomoModel;
 use crate::loader::{
-    FLAG_VOCAB_HAS_CAT, MAX_CLASSES, MAX_REASONABLE_COUNT, VERSION, io_err, read_csc_structure,
-    read_f32_vec, read_labels, read_name_dict, read_single_char_dict, read_vocab,
+    ArrayLayout, FLAG_VOCAB_HAS_CAT, MAX_CLASSES, MAX_REASONABLE_COUNT, VERSION, io_err,
+    read_csc_structure, read_f32_vec, read_labels, read_name_dict, read_single_char_dict,
+    read_vocab,
 };
 use crate::{Error, Result};
 
@@ -95,6 +97,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
     let mut reserved = [0u8; 3];
     reader.read_exact(&mut reserved).map_err(io_err(path))?;
     let has_cat = reserved[0] & FLAG_VOCAB_HAS_CAT != 0;
+    let layout = ArrayLayout::from_flags(reserved[0]);
 
     let n_classes = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     let n_features = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
@@ -124,11 +127,12 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
     model.n_features = n_features;
 
     // ---- 統合語彙テーブル / 読みラベルテーブル (.mbm と共通実装) ----
-    model.vocab = read_vocab(reader, n_features, has_cat, path)?;
+    model.vocab = read_vocab(reader, n_features, has_cat, layout, path)?;
     model.read_classes = read_labels(reader, n_classes, path)?;
 
     // ---- 読みモデル重み (CSC・float32・量子化なし) ----
-    let (colptr, rowind, n_nonzero) = read_csc_structure(reader, n_classes, n_features, path)?;
+    let (colptr, rowind, n_nonzero) =
+        read_csc_structure(reader, n_classes, n_features, layout, path)?;
     model.csc_colptr = colptr;
     model.csc_rowind = rowind;
     model.csc_data = read_f32_vec(reader, n_nonzero, path)?;
@@ -137,7 +141,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<FloatMomoMod
     model.intercept_read = read_f32_vec(reader, n_classes as usize, path)?;
 
     // ---- 境界モデル (algo_tag で線形/木を分岐、boundary.rs) ----
-    model.boundary = crate::boundary::parse_float(reader, n_features as usize, path)?;
+    model.boundary = crate::boundary::parse_float(reader, n_features as usize, layout, path)?;
     if matches!(model.boundary, crate::boundary::FloatBoundary::Tree(_)) && !has_cat {
         return Err(Error::CorruptModel {
             reason: "GBDT 境界モデルですが flags に VOCAB_HAS_CAT が立っていません（統合語彙にカテゴリカル情報がありません）".to_string(),
@@ -250,7 +254,7 @@ mod tests {
     #[test]
     fn n_classes_over_u16_returns_error() {
         // .mbm 側と同じ理由 (csc_rowind が u16) で 65537 は弾かれる。
-        let bad_data = b"MBMF\x09\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MBMF\x0A\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));

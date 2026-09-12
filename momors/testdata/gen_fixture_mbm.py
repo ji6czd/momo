@@ -16,6 +16,11 @@ scikit-learn は使わず、ハードコードされた小さなモデルを `.m
       3: type_s=KANJI               (FT.TYPE_SELF, ct=0x42)
       4: kanji_run=2                (FT.KANJI_RUN_LEN, u8=2)
   - 重みは決定的なテストデータ
+
+version 0x0A から、同じモデルを 2 つのレイアウトで書く:
+  - fixture.mbm       固定幅（flags bit1 = 0）
+  - fixture_delta.mbm ソート済み配列を差分 + LEB128 varint で書いた圧縮形（flags bit1 = 1）
+ローダーは両方を同じメモリ構造に展開するので、テストで両者の一致を確認する。
 """
 
 import struct
@@ -39,11 +44,14 @@ CP_BITS = 21
 # ファイル識別情報（exporter.py の MAGIC_MBM / VERSION と同期）
 MAGIC = b'MOMO'
 # バージョンは `.mbmf`・GBDT フィクスチャと共有する（それぞれ base.VERSION を使う）
-VERSION = 0x09
+VERSION = 0x0A
 
 # ヘッダ flags（version 0x07）。bit0 = 統合語彙が GBDT カテゴリカルを持つ。
 # このフィクスチャは線形境界なので flags=0（vocab に column/code を書かない）。
 FLAG_VOCAB_HAS_CAT = 0x01
+# bit1 = ソート済み配列（語彙キー・CSC rowind/col_len・GBDT cats）が差分 + varint
+# （version 0x0A、exporter.py / loader.rs の FLAG_DELTA_VARINT と同期）
+FLAG_DELTA_VARINT = 0x02
 
 # カテゴリカル列なしの番兵（loader.rs の NO_CAT_COLUMN と一致）
 NO_CAT_COLUMN = 0xFFFFFFFF
@@ -53,6 +61,7 @@ BOUNDARY_ALGO_LINEAR = 0x00
 
 # 出力先
 OUT_PATH = Path(__file__).parent.parent / "testdata" / "fixture.mbm"
+OUT_PATH_DELTA = Path(__file__).parent.parent / "testdata" / "fixture_delta.mbm"
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -135,6 +144,30 @@ def is_uint8_payload(ft: int) -> bool:
     return (ft & 0xC0) == 0xC0
 
 
+def encode_varints(values) -> bytes:
+    """非負整数列を LEB128 varint（7bit/byte、下位先行、MSB = 継続）で連結する
+    （momo_py.exporter の `_encode_varints` と同じ規約）。"""
+    buf = bytearray()
+    for v in values:
+        assert v >= 0
+        while True:
+            byte = v & 0x7F
+            v >>= 7
+            if v == 0:
+                buf.append(byte)
+                break
+            buf.append(byte | 0x80)
+    return bytes(buf)
+
+
+def encode_delta_varints(values) -> bytes:
+    """昇順の整数列を「先頭の値 + 隣との差分」の varint 列にする（1 区切りぶん）。"""
+    values = list(values)
+    deltas = [values[0]] + [b - a for a, b in zip(values, values[1:])] if values else []
+    assert all(d >= 0 for d in deltas), "差分符号化する列は昇順であること"
+    return encode_varints(deltas)
+
+
 def build_header(flags: int = 0x00) -> bytes:
     return struct.pack(
         '<4sBBBBII',
@@ -203,7 +236,7 @@ def cat_code_of(cat_columns: dict | None) -> dict:
     return out
 
 
-def build_vocab(cat_columns: dict | None = None) -> bytes:
+def build_vocab(cat_columns: dict | None = None, delta: bool = False) -> bytes:
     """統合語彙テーブル（version 0x09）を組む。
 
     特徴量タイプごとのセクションヘッダを並べ、続けて各セクションの
@@ -212,7 +245,7 @@ def build_vocab(cat_columns: dict | None = None) -> bytes:
 
     `cat_columns`（`{feature_type: column}`、GBDT フィクスチャ用で flags bit0=1）を
     渡すと各セクションヘッダにその列を書く。None のとき（線形フィクスチャ、flags=0）は
-    すべて番兵にする。
+    すべて番兵にする。`delta=True` はキー配列をセクションごとの差分 varint 列で書く。
     """
     rows = sorted_vocab()
 
@@ -242,8 +275,11 @@ def build_vocab(cat_columns: dict | None = None) -> bytes:
         buf += struct.pack('<BBBBIII', sec['ft'], 0, 0, 0,
                            len(sec['keys']), sec['cat_column'], sec['cat_code_base'])
     for sec in sections:
-        for k in sec['keys']:
-            buf += struct.pack('<Q', k)
+        if delta:
+            buf += encode_delta_varints(sec['keys'])
+        else:
+            for k in sec['keys']:
+                buf += struct.pack('<Q', k)
     return bytes(buf)
 
 
@@ -279,7 +315,28 @@ def to_csc(rows: list) -> tuple:
     return col_len, rowind, data
 
 
-def build_read_weights() -> bytes:
+def build_csc_structure(col_len: list, rowind: list, delta: bool) -> bytes:
+    """CSC の疎構造 n_nonzero + col_len + rowind を書く（`.mbm` / `.mbmf` 共通）。
+
+    `delta=True`（version 0x0A、flags bit1）は col_len を値ごとの varint、rowind を
+    列ごと（col_len で区切る）の差分 varint 列で書く。
+    """
+    n_nonzero = len(rowind)
+    buf = bytearray()
+    buf += struct.pack('<I', n_nonzero)
+    if delta:
+        buf += encode_varints(col_len)
+        pos = 0
+        for n in col_len:
+            buf += encode_delta_varints(rowind[pos:pos + n])
+            pos += n
+    else:
+        buf += struct.pack(f'<{len(col_len)}H', *col_len)
+        buf += struct.pack(f'<{n_nonzero}H', *rowind)
+    return bytes(buf)
+
+
+def build_read_weights(delta: bool = False) -> bytes:
     """CSC フォーマット（version 0x09）:
     quant_scale[n_classes] + n_nonzero + col_len(uint16 × n_features) + rowind + data
 
@@ -291,9 +348,7 @@ def build_read_weights() -> bytes:
     n_nonzero = len(data)
     buf = bytearray()
     buf += struct.pack(f'<{N_CLASSES}f', *QUANT_SCALES_READ)
-    buf += struct.pack('<I', n_nonzero)
-    buf += struct.pack(f'<{N_FEATURES}H', *col_len)
-    buf += struct.pack(f'<{n_nonzero}H', *rowind)
+    buf += build_csc_structure(col_len, rowind, delta)
     buf += struct.pack(f'<{n_nonzero}b', *data)
     return bytes(buf)
 
@@ -356,27 +411,34 @@ def build_single_char_dict() -> bytes:
 # ----------------------------------------------------------------------
 # 書き出し
 # ----------------------------------------------------------------------
-def main() -> None:
-    parts = {
-        'header'        : build_header(),
-        'vocab'         : build_vocab(),
+def build_parts(delta: bool) -> dict:
+    return {
+        'header'        : build_header(FLAG_DELTA_VARINT if delta else 0x00),
+        'vocab'         : build_vocab(delta=delta),
         'labels'        : build_labels(),
-        'read_weights'  : build_read_weights(),
+        'read_weights'  : build_read_weights(delta=delta),
         'intercept_r'   : build_intercept_read(),
         'boundary'      : build_boundary(),
         'name_dict'     : build_name_dict(),
         'single_char_dict': build_single_char_dict(),
     }
 
-    blob = b''.join(parts.values())
-    OUT_PATH.write_bytes(blob)
 
-    print(f'Generated: {OUT_PATH}')
+def write_parts(out_path: Path, parts: dict) -> None:
+    blob = b''.join(parts.values())
+    out_path.write_bytes(blob)
+
+    print(f'Generated: {out_path}')
     print(f'Total size: {len(blob)} bytes')
-    print()
     print('Section sizes:')
     for name, data in parts.items():
         print(f'  {name:<14}: {len(data):>4} bytes')
+    print()
+
+
+def main() -> None:
+    write_parts(OUT_PATH, build_parts(delta=False))
+    write_parts(OUT_PATH_DELTA, build_parts(delta=True))
 
 
 if __name__ == '__main__':

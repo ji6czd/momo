@@ -51,12 +51,9 @@ def build_read_weights_float() -> bytes:
         for row_idx, row in enumerate(base.CSR_ROWS)
     ]
     col_len, rowind, data = base.to_csc(dequantized)
-
     n_nonzero = len(data)
     buf = bytearray()
-    buf += struct.pack('<I', n_nonzero)
-    buf += struct.pack(f'<{base.N_FEATURES}H', *col_len)
-    buf += struct.pack(f'<{n_nonzero}H', *rowind)
+    buf += base.build_csc_structure(col_len, rowind, delta=False)
     buf += struct.pack(f'<{n_nonzero}f', *data)
     return bytes(buf)
 

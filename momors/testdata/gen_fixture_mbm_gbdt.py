@@ -57,21 +57,30 @@ def build_leaf(value: float) -> bytes:
     return struct.pack('<Bf', 0, value)
 
 
-def build_split(column: int, default_left: bool, cats: list, left: bytes, right: bytes) -> bytes:
+def build_split(column: int, default_left: bool, cats: list, left: bytes, right: bytes,
+                delta: bool = False) -> bytes:
+    """split ノード。`delta=True`（version 0x0A、flags bit1）は split_feature と n_cats を
+    varint、cats を差分 varint 列で書く。node_tag / default_left は据え置き。"""
     buf = bytearray()
     buf.append(1)  # node_tag: split
-    buf += struct.pack('<I', column)
-    buf.append(1 if default_left else 0)
-    buf += struct.pack('<I', len(cats))
-    for c in cats:
-        buf += struct.pack('<I', c)
+    if delta:
+        buf += base.encode_varints([column])
+        buf.append(1 if default_left else 0)
+        buf += base.encode_varints([len(cats)])
+        buf += base.encode_delta_varints(cats)
+    else:
+        buf += struct.pack('<I', column)
+        buf.append(1 if default_left else 0)
+        buf += struct.pack('<I', len(cats))
+        for c in cats:
+            buf += struct.pack('<I', c)
     buf += left
     buf += right
     return bytes(buf)
 
 
-def build_trees() -> bytes:
-    tree0 = build_split(0, False, [KANJI_CODE], build_leaf(0.5), build_leaf(-0.5))
+def build_trees(delta: bool = False) -> bytes:
+    tree0 = build_split(0, False, [KANJI_CODE], build_leaf(0.5), build_leaf(-0.5), delta)
     tree1 = build_leaf(0.25)
     buf = bytearray()
     buf += struct.pack('<I', 2)  # n_trees
@@ -80,20 +89,21 @@ def build_trees() -> bytes:
     return bytes(buf)
 
 
-def build_boundary_tree() -> bytes:
+def build_boundary_tree(delta: bool = False) -> bytes:
     """version 0x07: algo_tag + n_columns + n_trees + 木（cat_vocab は持たない）。"""
     buf = bytearray()
     buf.append(BOUNDARY_ALGO_TREE)
     buf += struct.pack('<I', N_CAT_COLUMNS)
-    buf += build_trees()
+    buf += build_trees(delta)
     return bytes(buf)
 
 
-def build_header(magic: bytes) -> bytes:
-    # flags bit0 = 統合語彙が GBDT カテゴリカルを持つ。
+def build_header(magic: bytes, delta: bool = False) -> bytes:
+    # flags bit0 = 統合語彙が GBDT カテゴリカルを持つ。bit1 = 差分 + varint。
+    flags = base.FLAG_VOCAB_HAS_CAT | (base.FLAG_DELTA_VARINT if delta else 0)
     return struct.pack(
         '<4sBBBBII',
-        magic, VERSION, base.FLAG_VOCAB_HAS_CAT, 0x00, 0x00,
+        magic, VERSION, flags, 0x00, 0x00,
         base.N_CLASSES, base.N_FEATURES,
     )
 
@@ -116,6 +126,22 @@ def main() -> None:
     out_mbm = Path(__file__).parent.parent / "testdata" / "fixture_gbdt.mbm"
     out_mbm.write_bytes(b''.join(mbm_parts.values()))
     print(f'Generated: {out_mbm}')
+
+    # 同じモデルを差分 + varint レイアウト（version 0x0A、flags bit1）でも書く。
+    # 語彙キー・CSC・GBDT cats の 3 種類すべてが圧縮形になる唯一のフィクスチャ。
+    delta_parts = {
+        'header': build_header(MAGIC_MBM, delta=True),
+        'vocab': base.build_vocab(cat_columns=CAT_COLUMNS, delta=True),
+        'labels': base.build_labels(),
+        'read_weights': base.build_read_weights(delta=True),
+        'intercept_r': base.build_intercept_read(),
+        'boundary': build_boundary_tree(delta=True),
+        'name_dict': base.build_name_dict(),
+        'single_char_dict': base.build_single_char_dict(),
+    }
+    out_delta = Path(__file__).parent.parent / "testdata" / "fixture_gbdt_delta.mbm"
+    out_delta.write_bytes(b''.join(delta_parts.values()))
+    print(f'Generated: {out_delta}')
 
     # .mbmf は読みモデル重みだけ float32・量子化なしにする。境界モデル（木）は
     # 量子化しないため .mbm と完全に同一バイト列（boundary をそのまま再利用する）。

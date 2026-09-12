@@ -119,7 +119,7 @@ class TestExportNameDict:
 
         data = out.read_bytes()
         assert data[:4] == b"MOMO"
-        assert data[4] == 0x09  # version
+        assert data[4] == 0x0A  # version
 
         # 人名辞書テーブル（表層形 + ユニット別読み）+ 末尾に単一文字辞書テーブル
         expected = bytearray(struct.pack("<I", 2))
@@ -146,7 +146,7 @@ class TestExportNameDict:
         export(str(zip_path), str(out))
 
         data = out.read_bytes()
-        assert data[4] == 0x09
+        assert data[4] == 0x0A
         # 辞書なしモデルは n_names = 0、続けて単一文字辞書テーブル
         assert data.endswith(struct.pack("<I", 0) + _expected_single_char_section())
 
@@ -211,12 +211,13 @@ class TestExportFloat:
 
         data = out.read_bytes()
         assert data[:4] == b"MBMF"
-        assert data[4] == 0x09  # version（.mbm と共有。区別は magic だけで行う）
+        assert data[4] == 0x0A  # version（.mbm と共有。区別は magic だけで行う）
 
     def test_read_weights_are_plain_float32(self, tmp_path):
         zip_path = _make_model_zip(tmp_path, None)
         out = tmp_path / "model.mbmf"
-        export_float(str(zip_path), str(out))
+        # バイト列を直接読むので固定幅レイアウトで書く
+        export_float(str(zip_path), str(out), compact=False)
 
         data = out.read_bytes()
         n_classes, n_features = struct.unpack_from("<II", data, 8)
@@ -240,8 +241,9 @@ class TestExportFloat:
         zip_path = _make_model_zip(tmp_path, None)
         mbm_path = tmp_path / "model.mbm"
         mbmf_path = tmp_path / "model.mbmf"
-        export(str(zip_path), str(mbm_path))
-        export_float(str(zip_path), str(mbmf_path))
+        # バイト列を直接読むので固定幅レイアウトで書く
+        export(str(zip_path), str(mbm_path), compact=False)
+        export_float(str(zip_path), str(mbmf_path), compact=False)
 
         mbm = mbm_path.read_bytes()
         mbmf = mbmf_path.read_bytes()
@@ -366,3 +368,121 @@ class TestUnifiedVocab:
         cat_by_id = {0: (0, 0), 1: (1, 0)}
         with pytest.raises(ValueError, match="複数のカテゴリカル列"):
             _plan_vocab_layout(vocab, cat_by_id)
+
+
+# ------------------------------------------------------------------ #
+# 差分 + varint レイアウト（version 0x0A、flags bit1）
+# ------------------------------------------------------------------ #
+from momo_py.exporter import (  # noqa: E402
+    FLAG_DELTA_VARINT,
+    _encode_delta_varints,
+    _encode_varints,
+)
+
+
+def _decode_varints(buf: bytes, offset: int, count: int):
+    """LEB128 varint を count 個読む。戻り値: (values, next_offset)"""
+    values = []
+    for _ in range(count):
+        v = 0
+        shift = 0
+        while True:
+            byte = buf[offset]
+            offset += 1
+            v |= (byte & 0x7F) << shift
+            if byte & 0x80 == 0:
+                break
+            shift += 7
+        values.append(v)
+    return values, offset
+
+
+def _undelta(deltas):
+    out = []
+    for d in deltas:
+        out.append(d if not out else out[-1] + d)
+    return out
+
+
+class TestDeltaVarint:
+    def test_varint_roundtrip(self):
+        values = [0, 1, 127, 128, 300, 2**32 - 1, 2**63, 2**64 - 1]
+        data = _encode_varints(values)
+        # u64::MAX は 10 バイトぴったり
+        assert len(data) == 1 + 1 + 1 + 2 + 2 + 5 + 10 + 10
+        decoded, off = _decode_varints(data, 0, len(values))
+        assert decoded == values and off == len(data)
+
+    def test_delta_varints_split_by_starts(self):
+        # 区切り [0,3) [3,3) [3,6) [6,7)。区切りの先頭は値そのもの、以降は差分。
+        rowind = np.array([0, 3, 7, 1, 2, 9, 9], dtype=np.uint64)
+        data = _encode_delta_varints(rowind, starts=[0, 3, 3, 6])
+        decoded, _ = _decode_varints(data, 0, len(rowind))
+        assert decoded == [0, 3, 4, 1, 1, 7, 9]
+
+    def test_delta_varints_reject_descending(self):
+        with pytest.raises(ValueError, match="昇順"):
+            _encode_delta_varints(np.array([3, 1], dtype=np.uint64))
+
+    def test_vocab_bytes_delta_decodes_to_fixed_keys(self):
+        vocab = {"bias": 0, "char_s=漢": 1, "char_s=字": 2}
+        layout = _plan_vocab_layout(vocab, None)
+        fixed = _build_vocab_bytes(layout, delta=False)
+        delta = _build_vocab_bytes(layout, delta=True)
+        # セクションヘッダは同一。キー配列だけが変わる。
+        head = 4 + 16 * 2
+        assert fixed[:head] == delta[:head]
+        assert len(delta) < len(fixed)
+
+        # bias セクション 1 件、char_s セクション 2 件（字 U+5B57 < 漢 U+6F22）
+        fixed_keys = list(struct.unpack_from("<3Q", fixed, head))
+        off = head
+        bias_keys, off = _decode_varints(delta, off, 1)
+        char_keys, off = _decode_varints(delta, off, 2)
+        assert off == len(delta)
+        assert _undelta(bias_keys) + _undelta(char_keys) == fixed_keys
+        assert _undelta(char_keys) == [0x5B57, 0x6F22]
+
+    def test_export_compact_sets_flag_and_is_smaller(self, tmp_path):
+        zip_path = _make_model_zip(tmp_path, None)
+        fixed_path = tmp_path / "fixed.mbm"
+        compact_path = tmp_path / "compact.mbm"
+        export(str(zip_path), str(fixed_path), compact=False)
+        export(str(zip_path), str(compact_path))  # 既定は圧縮形
+
+        fixed = fixed_path.read_bytes()
+        compact = compact_path.read_bytes()
+        assert fixed[5] & FLAG_DELTA_VARINT == 0
+        assert compact[5] & FLAG_DELTA_VARINT != 0
+        # ヘッダのそれ以外と末尾の辞書テーブルは同一
+        assert fixed[:5] == compact[:5] and fixed[6:16] == compact[6:16]
+        assert compact.endswith(struct.pack("<I", 0) + _expected_single_char_section())
+        assert len(compact) < len(fixed)
+
+        # CSC を復号して固定幅と一致すること
+        n_classes, n_features = struct.unpack_from("<II", fixed, 8)
+        off_f = _skip_vocab(fixed, 16, n_features)
+        off_f = _skip_labels(fixed, off_f, n_classes) + 4 * n_classes
+        colptr_f, rowind_f, data_f, _ = _read_csc_weights(fixed, off_f, n_features, "b")
+
+        # 圧縮形: 語彙はセクションごとの varint 列なので、件数ぶん読み飛ばす
+        (n_sections,) = struct.unpack_from("<I", compact, 0 + 16)
+        off_c = 16 + 4
+        counts = [struct.unpack_from("<I", compact, off_c + 16 * i + 4)[0] for i in range(n_sections)]
+        off_c += 16 * n_sections
+        for c in counts:
+            _, off_c = _decode_varints(compact, off_c, c)
+        off_c = _skip_labels(compact, off_c, n_classes) + 4 * n_classes
+        (n_nonzero,) = struct.unpack_from("<I", compact, off_c)
+        off_c += 4
+        col_len, off_c = _decode_varints(compact, off_c, n_features)
+        rowind_c = []
+        for n in col_len:
+            d, off_c = _decode_varints(compact, off_c, n)
+            rowind_c += _undelta(d)
+        data_c = struct.unpack_from(f"<{n_nonzero}b", compact, off_c)
+
+        assert n_nonzero == colptr_f[-1]
+        assert tuple(np.diff(colptr_f)) == tuple(col_len)
+        assert tuple(rowind_c) == rowind_f
+        assert data_c == data_f

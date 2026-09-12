@@ -9,8 +9,9 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x09
+//!   version      : u8      0x0A
 //!   flags        : u8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
+//!                          bit1 = ソート済み配列を差分 + LEB128 varint で書く（後述）
 //!   _reserved    : u8[2]   0x00 × 2
 //!   n_classes    : u32 LE  読みラベル数
 //!   n_features   : u32 LE  特徴量次元数
@@ -25,6 +26,7 @@
 //!     cat_code_base : u32 LE  セクション先頭エントリのカテゴリカルコード
 //!   続いて各セクションのキー配列をセクションの順に連結:
 //!     key           : u64 LE × count   詰めたキー（昇順・重複なし）
+//!                                      flags bit1 ではセクションごとの差分 varint 列
 //!
 //!   キーの詰め方は [`crate::vocab::pack_key`]（exporter の `_pack_vocab_key` と一致）。
 //!
@@ -36,8 +38,10 @@
 //!   quant_scale  : f32 × n_classes  クラス(行)ごとの量子化スケール
 //!   n_nonzero    : u32 LE
 //!   col_len      : u16 × n_features 列ごとの非ゼロ数。読み手が前置和して colptr にする
-//!   rowind       : u16 × n_nonzero  行インデックス = クラスID
-//!   data         : i8  × n_nonzero
+//!                                   flags bit1 では値ごとに varint
+//!   rowind       : u16 × n_nonzero  行インデックス = クラスID（列内で昇順）
+//!                                   flags bit1 では列ごとの差分 varint 列
+//!   data         : i8  × n_nonzero  （flags bit1 でも据え置き）
 //!
 //! [読みモデル intercept]
 //!   intercept    : f32 × n_classes
@@ -74,7 +78,7 @@
 //!       utf8     : u8[len] 読み (カタカナ、UTF-8)
 //! ```
 //!
-//! version 0x08 以前は読めない。フォーマット互換性を装って誤動作するより
+//! version 0x09 以前は読めない。フォーマット互換性を装って誤動作するより
 //! 明示的にエラーにする方針（人名特徴量・読みの有無・語彙レイアウトが精度に
 //! 直結するため）。旧バージョンのファイルは再エクスポートが必要。
 //!
@@ -122,6 +126,31 @@
 //! ロード戦略（`Vec` に全読み込みするか mmap で借用するか）自体は変えていない。
 //! フォーマットを両対応可能な形にしただけで、ロード戦略の切り替えは対象外。
 //!
+//! ## 差分 + varint レイアウト（version 0x0A、flags bit1）
+//!
+//! 0x09 でファイルの大半を占めるようになった配列（語彙キー・CSC `rowind`・`col_len`・
+//! GBDT `cats`）は**どれもソート済み**なので、隣との差分は小さい。それを LEB128
+//! varint（7bit/byte、下位バイト先行、最上位ビット = 継続）で書くと、汎用圧縮なしで
+//! ファイルがさらに半分になる（w4 6.3 → 3.4MiB、w7 18.4 → 9.5MiB。ESP32-P4 の
+//! 12.0MiB パーティションに w7 まで載る）。
+//!
+//! 減るのはフラッシュ上のサイズだけで、**ローダーは 0x09 と同じメモリ構造に展開する**
+//! ので RAM は変わらず、推論経路にも触れない（出力のバイト一致は構造上保証される）。
+//!
+//! 区切りは「その配列がソートされている単位」:
+//!
+//! | 配列 | 区切り |
+//! |---|---|
+//! | 語彙キー (u64) | セクションごと |
+//! | CSC `col_len` (u16) | 差分なし。値ごとに varint |
+//! | CSC `rowind` (u16) | 列ごと（`col_len` で区切る） |
+//! | GBDT `split_feature` / `n_cats` | 差分なし。値ごとに varint |
+//! | GBDT `cats` (u32) | split ごと |
+//!
+//! 差分符号化した配列は mmap でそのまま二分探索できない。ゼロコピーの道を塞がない
+//! ため固定幅レイアウト（flags bit1 = 0）も残し、[`ArrayLayout`] でどちらも読む。
+//! exporter の既定は圧縮形、`--fixed-width` で固定幅。
+//!
 //! （境界GBDT木のフラット配列化も同時に試したが、PC上の合成木ベンチマークでは
 //! 高速化が見えたものの実モデルで検証したところ逆に40〜60%遅化したため見送った。
 //! 木は引き続き 0x07 までと同じ `Box<TreeNode>` 再帰構造・再帰ノード列のまま。
@@ -160,13 +189,40 @@ const MAGIC: [u8; 4] = *b"MOMO";
 /// フォーマットのバージョン。`.mbmf` (`float_loader.rs`) と同じ番号を共有する
 /// ―― 両者はセクション構成を共通に保つ設計なので、採番を分けると
 /// 「どちらの 0x02 か」を常に意識する羽目になる。
-pub(crate) const VERSION: u8 = 9;
+pub(crate) const VERSION: u8 = 10;
 
 /// ヘッダの flags バイト（`_reserved[0]`）のビット定義。
 ///
 /// bit0: 統合語彙テーブルの各エントリが GBDT カテゴリカル `(column, code)` を持つ。
 ///       GBDT 境界モデル（algo_tag=0x01）のとき立てる。線形境界では 0。
 pub(crate) const FLAG_VOCAB_HAS_CAT: u8 = 0x01;
+
+/// bit1: ソート済み配列（語彙キー・CSC `rowind` / `col_len`・GBDT `cats`）が
+///       差分 + LEB128 varint で書かれている（version 0x0A）。
+pub(crate) const FLAG_DELTA_VARINT: u8 = 0x02;
+
+/// ソート済み配列のファイル上の表現。ヘッダ flags bit1 で決まり、
+/// 語彙・CSC・GBDT の読み手すべてに同じ値を渡す。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ArrayLayout {
+    /// 固定幅（u64 / u16 / u32 LE）。mmap でそのまま二分探索できる形。
+    Fixed,
+    /// 先頭の値 + 隣との差分を LEB128 varint で書いた列。
+    DeltaVarint,
+}
+
+impl ArrayLayout {
+    pub(crate) fn from_flags(flags: u8) -> Self {
+        if flags & FLAG_DELTA_VARINT != 0 {
+            Self::DeltaVarint
+        } else {
+            Self::Fixed
+        }
+    }
+}
+
+/// LEB128 varint の最大バイト数（u64 = 64bit を 7bit ずつ → 10 バイト）。
+const MAX_VARINT_BYTES: u32 = 10;
 
 /// ヘッダ由来のカウント値（n_classes / n_features / n_nonzero）の妥当性上限。
 /// これを超える値をそのまま `Vec::with_capacity` 等に渡すと、壊れた/不正な
@@ -230,6 +286,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     let mut reserved = [0u8; 3];
     reader.read_exact(&mut reserved).map_err(io_err(path))?;
     let has_cat = reserved[0] & FLAG_VOCAB_HAS_CAT != 0;
+    let layout = ArrayLayout::from_flags(reserved[0]);
 
     let n_classes = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
     let n_features = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
@@ -263,14 +320,15 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     // キー順・重複なし・タイプごとに列が 1 個であることの検証は
     // `VocabBuilder`（vocab.rs）が行う。契約が破れているファイルを黙って通すと
     // binary_search が存在するキーを見失い静かに誤動作するため、必ずエラーにする。
-    model.vocab = read_vocab(reader, n_features, has_cat, path)?;
+    model.vocab = read_vocab(reader, n_features, has_cat, layout, path)?;
 
     // ---- 読みラベルテーブル ----
     model.read_classes = read_labels(reader, n_classes, path)?;
 
     // ---- 読みモデル重み (CSC・int8 量子化) ----
     model.read_scale = read_f32_vec(reader, n_classes as usize, path)?;
-    let (colptr, rowind, n_nonzero) = read_csc_structure(reader, n_classes, n_features, path)?;
+    let (colptr, rowind, n_nonzero) =
+        read_csc_structure(reader, n_classes, n_features, layout, path)?;
     model.csc_colptr = colptr;
     model.csc_rowind = rowind;
     model.csc_data = read_i8_vec(reader, n_nonzero, path)?;
@@ -279,7 +337,7 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
     model.intercept_read = read_f32_vec(reader, n_classes as usize, path)?;
 
     // ---- 境界モデル (algo_tag で線形/木を分岐、boundary.rs) ----
-    model.boundary = crate::boundary::parse_int8(reader, n_features as usize, path)?;
+    model.boundary = crate::boundary::parse_int8(reader, n_features as usize, layout, path)?;
     // GBDT 境界はカテゴリカル `(column, code)` を統合語彙から引くため、has_cat 必須。
     // flags と algo_tag の不整合（GBDT なのに語彙にカテゴリカル情報がない）は、
     // 全キーが欠損扱いになり境界判定が壊れるので、明示的に弾く。
@@ -330,10 +388,15 @@ fn load_from_reader<R: Read>(reader: &mut R, path: &Path) -> Result<MomoModel> {
 /// - `cat_column` = セクションが 1 個だけ持つ
 ///
 /// おかげでエントリごとのパースが消え、キー配列は一括読みで済む。
+///
+/// `layout` が [`ArrayLayout::DeltaVarint`] のときはキー配列がセクションごとの
+/// 差分 varint 列（version 0x0A）。復号した結果は固定幅と同じ `u64` の昇順列で、
+/// 昇順・重複なしの検証は `VocabBuilder` が同じように行う。
 pub(crate) fn read_vocab<R: Read>(
     reader: &mut R,
     n_features: u32,
     has_cat: bool,
+    layout: ArrayLayout,
     path: &Path,
 ) -> Result<Vocab> {
     let n_sections = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
@@ -391,12 +454,91 @@ pub(crate) fn read_vocab<R: Read>(
     let mut builder = VocabBuilder::new();
     for (feature_type, count, cat_column, cat_code_base) in headers {
         builder.begin_section(feature_type, count, cat_column, cat_code_base)?;
-        for _ in 0..count {
-            let key = reader.read_u64::<LittleEndian>().map_err(io_err(path))?;
-            builder.push_key(key)?;
+        match layout {
+            ArrayLayout::Fixed => {
+                for _ in 0..count {
+                    let key = reader.read_u64::<LittleEndian>().map_err(io_err(path))?;
+                    builder.push_key(key)?;
+                }
+            }
+            ArrayLayout::DeltaVarint => {
+                let mut prev = 0u64;
+                for i in 0..count {
+                    let v = read_varint(reader, path)?;
+                    // 先頭は値そのもの、以降は隣との差分。
+                    let key = if i == 0 {
+                        v
+                    } else {
+                        prev.checked_add(v).ok_or_else(|| Error::CorruptModel {
+                            reason: format!(
+                                "統合語彙セクション 0x{:02X} の差分 varint が u64 を超えました",
+                                feature_type as u8
+                            ),
+                        })?
+                    };
+                    builder.push_key(key)?;
+                    prev = key;
+                }
+            }
         }
     }
     builder.finish(n_features)
+}
+
+/// LEB128 varint（7bit/byte、下位バイト先行、最上位ビット = 継続）を 1 個読む。
+///
+/// version 0x0A の差分 + varint レイアウト（[`ArrayLayout::DeltaVarint`]）で使う。
+/// u64 に収まらない列（11 バイト以上、または 10 バイト目が 1 ビットを超える）は
+/// 壊れたファイルとして弾く。
+pub(crate) fn read_varint<R: Read>(reader: &mut R, path: &Path) -> Result<u64> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let byte = reader.read_u8().map_err(io_err(path))?;
+        let chunk = u64::from(byte & 0x7F);
+        // 10 バイト目（shift = 63）は下位 1 ビットしか u64 に入らない。溢れる分が
+        // 立っている、または 11 バイト目に続くなら不正。
+        let is_last = shift == 7 * (MAX_VARINT_BYTES - 1);
+        if is_last && (chunk > 1 || byte & 0x80 != 0) {
+            return Err(Error::CorruptModel {
+                reason: format!("varint が u64 に収まりません（{MAX_VARINT_BYTES} バイトを超過）"),
+            });
+        }
+        value |= chunk << shift;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+        shift += 7;
+    }
+}
+
+/// 差分 varint 列（先頭の値 + 隣との差分）を `len` 個復号して `u32` に詰める。
+///
+/// GBDT の `cats`（split ごと）用。CSC の `rowind` も同じ形だが、列数ぶんの小さな
+/// `Vec` を作らずに済むよう [`read_csc_structure`] が `u16` の配列へ直接復号する。
+/// 復号した値は `limit` 未満であることを検証する（添字として使うため）。
+pub(crate) fn read_delta_varints_u32<R: Read>(
+    reader: &mut R,
+    len: usize,
+    limit: u32,
+    what: &str,
+    path: &Path,
+) -> Result<Vec<u32>> {
+    let mut out = Vec::with_capacity(len);
+    let mut prev = 0u64;
+    for i in 0..len {
+        let v = read_varint(reader, path)?;
+        // 差分が巨大でも panic せず、飽和させて下の範囲チェックで弾く。
+        let value = if i == 0 { v } else { prev.saturating_add(v) };
+        if value >= u64::from(limit) {
+            return Err(Error::CorruptModel {
+                reason: format!("{what} の値 {value} が上限 {limit} 以上です"),
+            });
+        }
+        out.push(value as u32);
+        prev = value;
+    }
+    Ok(out)
 }
 
 /// 読みラベルテーブルを読む。
@@ -436,6 +578,7 @@ pub(crate) fn read_csc_structure<R: Read>(
     reader: &mut R,
     n_classes: u32,
     n_features: u32,
+    layout: ArrayLayout,
     path: &Path,
 ) -> Result<(Vec<u32>, Vec<u16>, usize)> {
     let n_nonzero = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
@@ -454,7 +597,19 @@ pub(crate) fn read_csc_structure<R: Read>(
     colptr.push(0u32);
     let mut acc = 0u32;
     for col in 0..n_features as usize {
-        let len = reader.read_u16::<LittleEndian>().map_err(io_err(path))? as u32;
+        // version 0x0A の差分 + varint レイアウトでは col_len は値ごとの varint
+        // （大半が 1 桁の小さい数なので 1 バイト）。
+        let len = match layout {
+            ArrayLayout::Fixed => reader.read_u16::<LittleEndian>().map_err(io_err(path))? as u32,
+            ArrayLayout::DeltaVarint => match u32::try_from(read_varint(reader, path)?) {
+                Ok(v) => v,
+                Err(_) => {
+                    return Err(Error::CorruptModel {
+                        reason: format!("CSC col_len[{col}] の varint が u32 を超えました"),
+                    });
+                }
+            },
+        };
         // 前置和が n_nonzero を超えないこと（列の範囲で csc_data / csc_rowind を
         // 添字アクセスするため、ここが崩れると範囲外参照になる）。
         acc = match acc.checked_add(len) {
@@ -477,11 +632,41 @@ pub(crate) fn read_csc_structure<R: Read>(
     }
 
     let mut rowind = vec![0u16; n_nonzero];
-    for slot in &mut rowind {
-        *slot = reader.read_u16::<LittleEndian>().map_err(io_err(path))?;
+    match layout {
+        ArrayLayout::Fixed => {
+            for slot in &mut rowind {
+                *slot = reader.read_u16::<LittleEndian>().map_err(io_err(path))?;
+            }
+        }
+        ArrayLayout::DeltaVarint => {
+            // 列ごとの差分 varint 列。列内はクラスID昇順なので差分は非負。
+            for col in 0..n_features as usize {
+                let (start, end) = (colptr[col] as usize, colptr[col + 1] as usize);
+                let mut prev = 0u32;
+                for (i, slot) in rowind[start..end].iter_mut().enumerate() {
+                    let v = read_varint(reader, path)?;
+                    let value = if i == 0 {
+                        v
+                    } else {
+                        u64::from(prev).saturating_add(v)
+                    };
+                    // n_classes <= 65536 なので、範囲内なら u16 に収まる。
+                    if value >= u64::from(n_classes) {
+                        return Err(Error::CorruptModel {
+                            reason: format!(
+                                "CSC rowind に不正なクラスID {value} があります（n_classes={n_classes}）"
+                            ),
+                        });
+                    }
+                    *slot = value as u16;
+                    prev = value as u32;
+                }
+            }
+        }
     }
     // 整合性チェック: 各クラスIDは n_classes 未満であること
     // （スコア配列 scores[cls] / read_scale[cls] を添字アクセスするため）。
+    // 差分 varint 経路は復号時に検証済みだが、固定幅と同じ契約をここで一度に担保する。
     if let Some(&bad) = rowind.iter().find(|&&row| row as u32 >= n_classes) {
         return Err(Error::CorruptModel {
             reason: format!(
@@ -826,7 +1011,7 @@ mod tests {
     fn n_classes_over_u16_returns_error() {
         // csc_rowind がクラスIDを u16 で持つため、n_classes は MAX_CLASSES (65536)
         // を超えてはならない。ここでは 65537 (0x00010001) を与えて弾かれることを確認する。
-        let bad_data = b"MOMO\x09\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MOMO\x0A\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
@@ -1030,7 +1215,7 @@ mod tests {
         bytes.extend_from_slice(&1u16.to_le_bytes()); // col_len[2]
         bytes.extend_from_slice(&5u16.to_le_bytes()); // rowind[0] = 5 (範囲外)
         let mut cursor = std::io::Cursor::new(bytes);
-        let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
+        let result = read_csc_structure(&mut cursor, 2, 3, ArrayLayout::Fixed, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
@@ -1045,7 +1230,7 @@ mod tests {
         bytes.extend_from_slice(&1u16.to_le_bytes()); // col_len[1] で累計 4 > 3
         bytes.extend_from_slice(&0u16.to_le_bytes()); // col_len[2]
         let mut cursor = std::io::Cursor::new(bytes);
-        let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
+        let result = read_csc_structure(&mut cursor, 2, 3, ArrayLayout::Fixed, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
@@ -1058,7 +1243,7 @@ mod tests {
         bytes.extend_from_slice(&1u16.to_le_bytes()); // col_len[1]
         bytes.extend_from_slice(&0u16.to_le_bytes()); // col_len[2]（合計 2 != 3）
         let mut cursor = std::io::Cursor::new(bytes);
-        let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
+        let result = read_csc_structure(&mut cursor, 2, 3, ArrayLayout::Fixed, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
@@ -1072,7 +1257,7 @@ mod tests {
         bytes.extend_from_slice(&0u32.to_le_bytes()); // colptr[2]
         bytes.extend_from_slice(&2u32.to_le_bytes()); // colptr[3] = 2 != n_nonzero
         let mut cursor = std::io::Cursor::new(bytes);
-        let result = read_csc_structure(&mut cursor, 2, 3, Path::new("test"));
+        let result = read_csc_structure(&mut cursor, 2, 3, ArrayLayout::Fixed, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));
     }
 
@@ -1086,9 +1271,177 @@ mod tests {
         }
         let mut cursor = std::io::Cursor::new(bytes);
         let (colptr, rowind, n_nonzero) =
-            read_csc_structure(&mut cursor, 2, 3, Path::new("test")).unwrap();
+            read_csc_structure(&mut cursor, 2, 3, ArrayLayout::Fixed, Path::new("test")).unwrap();
         assert_eq!(colptr, vec![0, 0, 0, 0]);
         assert!(rowind.is_empty());
         assert_eq!(n_nonzero, 0);
+    }
+
+    // --- 差分 + varint レイアウト (version 0x0A) のテスト ---
+
+    /// LEB128 varint を書く（exporter の `_encode_varints` と同じ規約）。
+    fn put_varint(out: &mut Vec<u8>, mut v: u64) {
+        loop {
+            let byte = (v & 0x7F) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(byte);
+                return;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+
+    #[test]
+    fn varint_roundtrip_and_limits() {
+        let values = [
+            0u64,
+            1,
+            127,
+            128,
+            300,
+            16_383,
+            16_384,
+            u32::MAX as u64,
+            1 << 63,
+            u64::MAX,
+        ];
+        let mut bytes = Vec::new();
+        for &v in &values {
+            put_varint(&mut bytes, v);
+        }
+        // u64::MAX は 10 バイトぴったり。
+        assert_eq!(bytes.len(), 1 + 1 + 1 + 2 + 2 + 2 + 3 + 5 + 10 + 10);
+        let mut cursor = std::io::Cursor::new(bytes);
+        for &v in &values {
+            assert_eq!(read_varint(&mut cursor, Path::new("test")).unwrap(), v);
+        }
+
+        // 11 バイト目まで継続ビットが立っている列は u64 に収まらない。
+        let too_long = vec![0x80u8; 10];
+        let mut cursor = std::io::Cursor::new(too_long);
+        assert!(matches!(
+            read_varint(&mut cursor, Path::new("test")),
+            Err(Error::CorruptModel { .. })
+        ));
+        // 10 バイト目が 2 以上（65bit 目が立つ）も不正。
+        let mut overflow = vec![0xFFu8; 9];
+        overflow.push(0x02);
+        let mut cursor = std::io::Cursor::new(overflow);
+        assert!(matches!(
+            read_varint(&mut cursor, Path::new("test")),
+            Err(Error::CorruptModel { .. })
+        ));
+        // 途中で EOF になれば I/O エラー。
+        let mut cursor = std::io::Cursor::new(vec![0x80u8]);
+        assert!(matches!(
+            read_varint(&mut cursor, Path::new("test")),
+            Err(Error::ModelIo { .. })
+        ));
+    }
+
+    #[test]
+    fn csc_delta_varint_matches_fixed() {
+        // n_classes=4, n_features=3。列ごとに rowind は昇順:
+        //   col0: [0, 2, 3]  col1: []  col2: [1, 3]
+        let n_nonzero = 5u32;
+        let mut fixed = Vec::new();
+        fixed.extend_from_slice(&n_nonzero.to_le_bytes());
+        for len in [3u16, 0, 2] {
+            fixed.extend_from_slice(&len.to_le_bytes());
+        }
+        for row in [0u16, 2, 3, 1, 3] {
+            fixed.extend_from_slice(&row.to_le_bytes());
+        }
+
+        let mut delta = Vec::new();
+        delta.extend_from_slice(&n_nonzero.to_le_bytes());
+        for len in [3u64, 0, 2] {
+            put_varint(&mut delta, len);
+        }
+        // 列ごとに「先頭の値 + 差分」
+        for d in [0u64, 2, 1, 1, 2] {
+            put_varint(&mut delta, d);
+        }
+
+        let got_fixed = read_csc_structure(
+            &mut std::io::Cursor::new(fixed),
+            4,
+            3,
+            ArrayLayout::Fixed,
+            Path::new("test"),
+        )
+        .unwrap();
+        let got_delta = read_csc_structure(
+            &mut std::io::Cursor::new(delta),
+            4,
+            3,
+            ArrayLayout::DeltaVarint,
+            Path::new("test"),
+        )
+        .unwrap();
+        assert_eq!(got_fixed, got_delta);
+        assert_eq!(got_delta.0, vec![0, 3, 3, 5]);
+        assert_eq!(got_delta.1, vec![0, 2, 3, 1, 3]);
+    }
+
+    #[test]
+    fn csc_delta_varint_rowind_out_of_range_returns_error() {
+        // 差分の累計が n_classes を超えたら弾く（col0: [0, 2, 3] で n_classes=3）。
+        let mut delta = Vec::new();
+        delta.extend_from_slice(&3u32.to_le_bytes());
+        put_varint(&mut delta, 3);
+        put_varint(&mut delta, 0);
+        for d in [0u64, 2, 1] {
+            put_varint(&mut delta, d);
+        }
+        let result = read_csc_structure(
+            &mut std::io::Cursor::new(delta),
+            3,
+            2,
+            ArrayLayout::DeltaVarint,
+            Path::new("test"),
+        );
+        assert!(matches!(result, Err(Error::CorruptModel { .. })));
+    }
+
+    #[test]
+    fn load_fixture_delta_matches_fixed() {
+        // gen_fixture_mbm.py は同じモデルを固定幅 (fixture.mbm) と差分 varint
+        // (fixture_delta.mbm) の両方で書く。展開後の構造が完全に一致すること。
+        let fixed = load(fixture_path()).unwrap();
+        let delta_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture_delta.mbm");
+        let delta = load(delta_path).expect("fixture_delta.mbm が読めること");
+        assert_eq!(fixed.csc_colptr, delta.csc_colptr);
+        assert_eq!(fixed.csc_rowind, delta.csc_rowind);
+        assert_eq!(fixed.csc_data, delta.csc_data);
+        assert_eq!(fixed.n_features(), delta.n_features());
+        for (key, id) in [
+            (FeatureKey::no_payload(FeatureType::Bias), 0),
+            (FeatureKey::char_1(FeatureType::CharSelf, 0x6F22), 3),
+        ] {
+            assert_eq!(fixed.vocab.feature_id(&key), Some(id));
+            assert_eq!(delta.vocab.feature_id(&key), Some(id));
+        }
+    }
+
+    #[test]
+    fn load_fixture_gbdt_delta_matches_fixed() {
+        use crate::weight_model::WeightModel;
+
+        let fixed = load(fixture_gbdt_path()).unwrap();
+        let delta_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixture_gbdt_delta.mbm");
+        let delta = load(delta_path).expect("fixture_gbdt_delta.mbm が読めること");
+        assert!(matches!(delta.boundary, crate::boundary::Boundary::Tree(_)));
+        let kanji = vec![FeatureKey::char_1(FeatureType::CharSelf, 0x6F22)];
+        let ji = vec![FeatureKey::char_1(FeatureType::CharSelf, 0x5B57)];
+        for keys in [kanji, ji, vec![]] {
+            assert_eq!(
+                fixed.compute_boundary_score(&keys),
+                delta.compute_boundary_score(&keys)
+            );
+        }
     }
 }

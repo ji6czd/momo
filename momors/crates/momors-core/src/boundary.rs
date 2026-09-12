@@ -31,7 +31,10 @@ use std::path::Path;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::feature::FeatureKey;
-use crate::loader::{MAX_REASONABLE_COUNT, io_err, read_f32_vec, read_i8_vec};
+use crate::loader::{
+    ArrayLayout, MAX_REASONABLE_COUNT, io_err, read_delta_varints_u32, read_f32_vec, read_i8_vec,
+    read_varint,
+};
 use crate::{Error, Result};
 
 /// カテゴリカル境界列数の妥当性上限（スコア計算時の固定長スタック配列のサイズ）。
@@ -467,6 +470,7 @@ impl TreeEnsemble {
 pub(crate) fn parse_int8<R: Read>(
     reader: &mut R,
     n_features: usize,
+    layout: ArrayLayout,
     path: &Path,
 ) -> Result<Boundary> {
     match read_algo_tag(reader, path)? {
@@ -480,7 +484,7 @@ pub(crate) fn parse_int8<R: Read>(
                 intercept,
             })
         }
-        AlgoTag::Tree => Ok(Boundary::Tree(parse_tree_ensemble(reader, path)?)),
+        AlgoTag::Tree => Ok(Boundary::Tree(parse_tree_ensemble(reader, layout, path)?)),
     }
 }
 
@@ -488,6 +492,7 @@ pub(crate) fn parse_int8<R: Read>(
 pub(crate) fn parse_float<R: Read>(
     reader: &mut R,
     n_features: usize,
+    layout: ArrayLayout,
     path: &Path,
 ) -> Result<FloatBoundary> {
     match read_algo_tag(reader, path)? {
@@ -496,7 +501,9 @@ pub(crate) fn parse_float<R: Read>(
             let intercept = read_intercept(reader, path)?;
             Ok(FloatBoundary::Linear { data, intercept })
         }
-        AlgoTag::Tree => Ok(FloatBoundary::Tree(parse_tree_ensemble(reader, path)?)),
+        AlgoTag::Tree => Ok(FloatBoundary::Tree(parse_tree_ensemble(
+            reader, layout, path,
+        )?)),
     }
 }
 
@@ -522,7 +529,11 @@ fn read_intercept<R: Read>(reader: &mut R, path: &Path) -> Result<[f32; 2]> {
     ])
 }
 
-fn parse_tree_ensemble<R: Read>(reader: &mut R, path: &Path) -> Result<TreeEnsemble> {
+fn parse_tree_ensemble<R: Read>(
+    reader: &mut R,
+    layout: ArrayLayout,
+    path: &Path,
+) -> Result<TreeEnsemble> {
     // version 0x07: 木のアンサンブルは cat_vocab を持たず、n_columns と木だけ。
     // カテゴリカル `(column, code)` は統合語彙テーブル（loader.rs の read_vocab）が持つ。
     let n_columns = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
@@ -544,15 +555,21 @@ fn parse_tree_ensemble<R: Read>(reader: &mut R, path: &Path) -> Result<TreeEnsem
     }
     let mut trees = Vec::with_capacity(n_trees as usize);
     for _ in 0..n_trees {
-        trees.push(parse_tree_node(reader, path, n_columns, 0)?);
+        trees.push(parse_tree_node(reader, path, n_columns, layout, 0)?);
     }
     Ok(TreeEnsemble::new(trees))
 }
 
+/// 木のノードを 1 個（子も再帰的に）読む。
+///
+/// `layout` が [`ArrayLayout::DeltaVarint`]（version 0x0A）のときは `split_feature` と
+/// `n_cats` が varint、`cats` が split ごとの差分 varint 列。`node_tag` /
+/// `default_left` / `leaf_value` は固定幅のまま。
 fn parse_tree_node<R: Read>(
     reader: &mut R,
     path: &Path,
     n_columns: u32,
+    layout: ArrayLayout,
     depth: u32,
 ) -> Result<TreeNode> {
     if depth > MAX_TREE_DEPTH {
@@ -569,7 +586,17 @@ fn parse_tree_node<R: Read>(
             Ok(TreeNode::Leaf { value })
         }
         1 => {
-            let column = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+            let read_count = |reader: &mut R, what: &str| -> Result<u32> {
+                match layout {
+                    ArrayLayout::Fixed => reader.read_u32::<LittleEndian>().map_err(io_err(path)),
+                    ArrayLayout::DeltaVarint => {
+                        u32::try_from(read_varint(reader, path)?).map_err(|_| Error::CorruptModel {
+                            reason: format!("境界モデルの{what}の varint が u32 を超えました"),
+                        })
+                    }
+                }
+            };
+            let column = read_count(reader, "split_feature")?;
             if column >= n_columns {
                 return Err(Error::CorruptModel {
                     reason: format!(
@@ -578,7 +605,7 @@ fn parse_tree_node<R: Read>(
                 });
             }
             let default_left = reader.read_u8().map_err(io_err(path))? != 0;
-            let n_cats = reader.read_u32::<LittleEndian>().map_err(io_err(path))?;
+            let n_cats = read_count(reader, "n_cats")?;
             if n_cats > MAX_REASONABLE_COUNT {
                 return Err(Error::CorruptModel {
                     reason: format!(
@@ -586,12 +613,26 @@ fn parse_tree_node<R: Read>(
                     ),
                 });
             }
-            let mut cats = Vec::with_capacity(n_cats as usize);
-            for _ in 0..n_cats {
-                cats.push(reader.read_u32::<LittleEndian>().map_err(io_err(path))?);
-            }
-            let left = Box::new(parse_tree_node(reader, path, n_columns, depth + 1)?);
-            let right = Box::new(parse_tree_node(reader, path, n_columns, depth + 1)?);
+            let cats = match layout {
+                ArrayLayout::Fixed => {
+                    let mut cats = Vec::with_capacity(n_cats as usize);
+                    for _ in 0..n_cats {
+                        cats.push(reader.read_u32::<LittleEndian>().map_err(io_err(path))?);
+                    }
+                    cats
+                }
+                // cats は split 内で昇順。コードは統合語彙のセクション内添字由来で
+                // u32 に収まるので、上限 u32::MAX で復号する。
+                ArrayLayout::DeltaVarint => read_delta_varints_u32(
+                    reader,
+                    n_cats as usize,
+                    u32::MAX,
+                    "境界モデルの cats",
+                    path,
+                )?,
+            };
+            let left = Box::new(parse_tree_node(reader, path, n_columns, layout, depth + 1)?);
+            let right = Box::new(parse_tree_node(reader, path, n_columns, layout, depth + 1)?);
             Ok(TreeNode::Split {
                 column,
                 default_left,

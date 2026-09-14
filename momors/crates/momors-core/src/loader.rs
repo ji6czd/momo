@@ -9,7 +9,7 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MOMO"
-//!   version      : u8      0x0A
+//!   version      : u8      0x0B
 //!   flags        : u8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
 //!                          bit1 = ソート済み配列を差分 + LEB128 varint で書く（後述）
 //!   _reserved    : u8[2]   0x00 × 2
@@ -156,6 +156,14 @@
 //! 木は引き続き 0x07 までと同じ `Box<TreeNode>` 再帰構造・再帰ノード列のまま。
 //! 詳細は `docs/zerocopy-model-plan.md`）。
 //!
+//! ## 確定済みの前方読み特徴量（version 0x0B）
+//!
+//! 読みモデルに `read_p1/p2/p3`（[`FeatureType::ReadPrev1`] 〜 `ReadPrev3`、
+//! char32×1 のペイロード＝読みクラスの添字）を追加した。学習時は隣接行の正解
+//! ラベル（教師強制）、推論時は `prediction.rs` の逐次ループが確定した読みを使う。
+//! レイアウトは 0x0A と同じで、新しい FeatureType バイトを受理するかどうかだけが
+//! 違う。0x0A ファイルは読み込み時にエラーになるため再エクスポートすること。
+//!
 //! ## CSC 形式で保存する理由
 //!
 //! 推論時のアクセスパターンは「アクティブな特徴量 (列) で走査」なので、
@@ -189,7 +197,7 @@ const MAGIC: [u8; 4] = *b"MOMO";
 /// フォーマットのバージョン。`.mbmf` (`float_loader.rs`) と同じ番号を共有する
 /// ―― 両者はセクション構成を共通に保つ設計なので、採番を分けると
 /// 「どちらの 0x02 か」を常に意識する羽目になる。
-pub(crate) const VERSION: u8 = 10;
+pub(crate) const VERSION: u8 = 11;
 
 /// ヘッダの flags バイト（`_reserved[0]`）のビット定義。
 ///
@@ -1011,7 +1019,7 @@ mod tests {
     fn n_classes_over_u16_returns_error() {
         // csc_rowind がクラスIDを u16 で持つため、n_classes は MAX_CLASSES (65536)
         // を超えてはならない。ここでは 65537 (0x00010001) を与えて弾かれることを確認する。
-        let bad_data = b"MOMO\x0A\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MOMO\x0B\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));

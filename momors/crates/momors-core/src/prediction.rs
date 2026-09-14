@@ -18,7 +18,7 @@ use crate::boundary::VocabRef;
 use crate::bracket::{self, Role, Treatment};
 use crate::char_type::{CharType, get_char_type};
 use crate::counter::{CounterAction, arabic_run, counter_needs_gate, resolve_multi, resolve_phono};
-use crate::feature::FeatureKey;
+use crate::feature::{FeatureKey, FeatureType};
 use crate::featurize::{SourceEntry, compute_source_features, to_source_seq};
 use crate::model::MomoModel;
 use crate::numeric::{
@@ -485,6 +485,21 @@ pub struct Predictor<M: WeightModel = MomoModel> {
     /// カスタム辞書（フレーズ単位の読み完全上書き）。モデル同梱は無く、
     /// `custom_dict_path` の明示指定が無ければ常に空。
     custom_dict: crate::custom_dict::CustomDictIndex,
+    /// 読みラベル → クラス id の逆引き。ラベルのバイト順に並べたクラス id の順列で、
+    /// `binary_search` で引く（ファイル内の順序に依存せず、RAM は n_classes × 4B）。
+    /// `read_p*` 特徴量（確定済みの前方読み）のペイロードに使う。
+    class_order: Vec<u32>,
+}
+
+/// クラス id をラベルのバイト順に並べた順列を作る。
+fn build_class_order(classes: &[String]) -> Vec<u32> {
+    let mut order: Vec<u32> = (0..classes.len() as u32).collect();
+    order.sort_by(|&a, &b| {
+        classes[a as usize]
+            .as_bytes()
+            .cmp(classes[b as usize].as_bytes())
+    });
+    order
 }
 
 impl<M: WeightModel> Predictor<M> {
@@ -505,11 +520,13 @@ impl<M: WeightModel> Predictor<M> {
         } else {
             crate::custom_dict::CustomDictIndex::new()
         };
+        let class_order = build_class_order(model.read_classes());
         Ok(Self {
             config,
             model,
             single_char_dict,
             custom_dict,
+            class_order,
         })
     }
 
@@ -527,12 +544,79 @@ impl<M: WeightModel> Predictor<M> {
         };
         let single_char_dict =
             resolve_single_char_dict(model.take_single_char_dict(), model.read_classes());
+        let class_order = build_class_order(model.read_classes());
         Ok(Self {
             config,
             model,
             single_char_dict,
             custom_dict: crate::custom_dict::CustomDictIndex::new(),
+            class_order,
         })
+    }
+
+    /// 読みラベル文字列 → クラス id。モデルのクラスに無ければ `None`。
+    fn read_class_id(&self, label: &str) -> Option<u32> {
+        let classes = self.model.read_classes();
+        self.class_order
+            .binary_search_by(|&id| classes[id as usize].as_bytes().cmp(label.as_bytes()))
+            .ok()
+            .map(|pos| self.class_order[pos])
+    }
+
+    /// 1 文字（コードポイント）をラベルとみなしてクラス id を引く（割り当てなし）。
+    fn read_class_id_cp(&self, cp: u32) -> Option<u32> {
+        let ch = char::from_u32(cp)?;
+        let mut buf = [0u8; 4];
+        self.read_class_id(ch.encode_utf8(&mut buf))
+    }
+
+    /// 位置 `i` の読みモデル入力 = 静的特徴量 id + 確定済みの前方読み特徴量 id。
+    ///
+    /// `decided[i-k]`（k = 1..=3）が確定していて語彙にあるものだけを足す
+    /// （未確定・語彙外は沈黙＝生文字特徴量だけの判定に戻る）。
+    fn read_feat_ids<'a>(
+        &self,
+        static_ids: &[u32],
+        decided: &[Option<u32>],
+        i: usize,
+        buf: &'a mut Vec<u32>,
+    ) -> &'a [u32] {
+        buf.clear();
+        buf.extend_from_slice(static_ids);
+        for k in 1..=3 {
+            let Some(cls) = i.checked_sub(k).and_then(|j| decided[j]) else {
+                continue;
+            };
+            let key = FeatureKey::char_1(FeatureType::read_prev(k).unwrap(), cls);
+            if let Some(id) = self.model.vocab_find(&key) {
+                buf.push(id);
+            }
+        }
+        buf
+    }
+
+    /// 人間可読な特徴量名。`read_p*` はクラス添字をラベル文字列に戻す
+    /// （`read_p1=オトトイ`）。それ以外は [`FeatureKey`] の `Display` と同じ。
+    pub fn feature_name(&self, key: &FeatureKey) -> String {
+        if key.feature_type.is_read_prev()
+            && let Some(label) = self.model.read_class(key.cp[0])
+        {
+            let k = key.feature_type as u8 - FeatureType::ReadPrev1 as u8 + 1;
+            return format!("read_p{k}={label}");
+        }
+        key.to_string()
+    }
+
+    /// 特徴量名を [`FeatureKey`] に解析する。[`FeatureKey::parse_name`] に加えて、
+    /// `read_p*` のラベル文字列形（`read_p1=オトトイ`）をモデルのクラス表で解決する。
+    pub fn parse_feature_name(&self, name: &str) -> Option<FeatureKey> {
+        if let Some(k) = FeatureKey::parse_name(name) {
+            return Some(k);
+        }
+        let (prefix, label) = name.split_once('=')?;
+        let k = prefix.strip_prefix("read_p")?.parse::<usize>().ok()?;
+        let ft = FeatureType::read_prev(k)?;
+        Some(FeatureKey::char_1(ft, self.read_class_id(label)?))
     }
 
     /// 設定を参照する。
@@ -773,6 +857,16 @@ impl<M: WeightModel> Predictor<M> {
         // インデックスをここまで飛ばす（この位置未満は処理済みとして読み飛ばす）。
         let mut skip_until: usize = 0;
 
+        // 各位置の「確定した読み」のクラス id（`read_p*` 特徴量の元）。意味は
+        // 「学習データでその位置に付くラベル」: ユニット先頭は出力した読み、
+        // 先頭以外は CONTINUE、記号など出力しない位置は SKIP。学習に行が無い位置
+        // （空白・skip 文字種）と、モデルのクラスに無い読みは None（特徴量を出さない）。
+        // skip_until で飛ばす範囲は分岐内で先に埋める。
+        let mut decided: Vec<Option<u32>> = vec![None; n];
+        let cls_continue = self.read_class_id(LABEL_CONTINUE);
+        let cls_skip = self.read_class_id(LABEL_SKIP);
+        let mut feat_buf: Vec<u32> = Vec::with_capacity(64);
+
         // --- 各文字を処理 ---
         let loop_guard = phase::Guard::new(Phase::Loop);
         for i in 0..n {
@@ -795,6 +889,7 @@ impl<M: WeightModel> Predictor<M> {
                 let last = i + m.units.len() - 1;
                 for (k, reading) in m.readings.iter().enumerate() {
                     let idx = i + k;
+                    decided[idx] = self.read_class_id(reading);
                     self.emit_label(
                         &source_seq[idx],
                         reading,
@@ -848,6 +943,10 @@ impl<M: WeightModel> Predictor<M> {
             // （ALPHA・カタカナと同型の「読み素通し＋境界モデル」扱い）。
             // ============================================================
             if entry.ctype.is_bypass() {
+                // 学習では記号類は LABEL_SKIP、空白は行そのものが無い。
+                if entry.ctype != CharType::Space {
+                    decided[i] = cls_skip;
+                }
                 self.emit_char_passthrough(entry, 1.0, DecisionSource::Bypass, &mut result);
                 parent_src_idx = Some(i);
                 parent_is_bypass = true;
@@ -875,6 +974,7 @@ impl<M: WeightModel> Predictor<M> {
             // 学習させるため。カタカナ分岐と同型（読み素通し＋境界モデル）。
             // ============================================================
             if entry.ctype == CharType::Alpha {
+                decided[i] = cls_skip;
                 self.emit_char_passthrough(entry, 1.0, DecisionSource::Bypass, &mut result);
                 parent_src_idx = Some(i);
                 parent_is_bypass = true;
@@ -899,6 +999,7 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
             if entry.ctype == CharType::Katakana && !is_counter_small_kana(entry.cp) {
                 let direct = katakana_passthrough(entry);
+                decided[i] = self.read_class_id(&direct);
                 self.emit_label(entry, &direct, 1.0, DecisionSource::Lr, &mut result);
                 parent_src_idx = Some(i);
                 parent_is_bypass = false;
@@ -938,7 +1039,12 @@ impl<M: WeightModel> Predictor<M> {
                 let model_reading = if counter_needs_gate(counter_cp) {
                     let (cls, _) = self.read_argmax(
                         &source_seq[run_end],
-                        &all_feat_ids[run_end],
+                        self.read_feat_ids(
+                            &all_feat_ids[run_end],
+                            &decided,
+                            run_end,
+                            &mut feat_buf,
+                        ),
                         &mut read_scratch,
                         &mut scores,
                     );
@@ -953,6 +1059,8 @@ impl<M: WeightModel> Predictor<M> {
                     match action {
                         CounterAction::Spell(kana) => {
                             // 綴り読みは分解できない（トオカ・ハツカ）。ラン先頭に束ねる。
+                            decided[i] = self.read_class_id(kana);
+                            decided[i + 1..=run_end].fill(cls_continue);
                             self.emit_label(
                                 entry,
                                 kana,
@@ -963,7 +1071,8 @@ impl<M: WeightModel> Predictor<M> {
                         }
                         CounterAction::DigitsPlus(suffix) => {
                             // 数字はそのまま（原文の桁）＋接尾。下一桁への特殊読み漏れを断つ。
-                            for digit in &source_seq[i..run_end] {
+                            for (j, digit) in source_seq[i..run_end].iter().enumerate() {
+                                decided[i + j] = self.read_class_id_cp(digit.cp);
                                 self.emit_char_passthrough(
                                     digit,
                                     1.0,
@@ -971,6 +1080,7 @@ impl<M: WeightModel> Predictor<M> {
                                     &mut result,
                                 );
                             }
+                            decided[run_end] = self.read_class_id(suffix);
                             self.emit_label(
                                 &source_seq[run_end],
                                 suffix,
@@ -1023,7 +1133,8 @@ impl<M: WeightModel> Predictor<M> {
                 let has_split =
                     self.boundary_has_split(&all_feat_refs[run_end], &source_seq, run_end);
 
-                for digit in &source_seq[i..run_end] {
+                for (j, digit) in source_seq[i..run_end].iter().enumerate() {
+                    decided[i + j] = self.read_class_id_cp(digit.cp);
                     self.emit_char_passthrough(
                         digit,
                         1.0,
@@ -1031,6 +1142,7 @@ impl<M: WeightModel> Predictor<M> {
                         &mut result,
                     );
                 }
+                decided[run_end] = self.read_class_id(reading);
                 self.emit_label(
                     &source_seq[run_end],
                     reading,
@@ -1064,11 +1176,17 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
             // スコア計算 + argmax（単一文字辞書制約付き）
             // ============================================================
-            let (best_cls, best_score) =
-                self.read_argmax(entry, &all_feat_ids[i], &mut read_scratch, &mut scores);
+            let (best_cls, best_score) = self.read_argmax(
+                entry,
+                self.read_feat_ids(&all_feat_ids[i], &decided, i, &mut feat_buf),
+                &mut read_scratch,
+                &mut scores,
+            );
 
             let conf = sigmoid(best_score);
             let label = self.model.read_class(best_cls as u32).unwrap_or("");
+            // 以降の分岐が読みを差し替えない限り、この位置の確定読みはモデルのラベル。
+            decided[i] = Some(best_cls as u32);
 
             // ============================================================
             // JAPANESE_NUMERIC ルールベース変換
@@ -1077,14 +1195,21 @@ impl<M: WeightModel> Predictor<M> {
             // 人→リ 等）ならば数字化せずモデルの読み（ミッ 等）を信用する。
             // 助数詞の読み自体が曖昧性を解決する（人→リ＝ふたり は信用、
             // 人→ニン＝さんにん は数字化）。漢数字専用（アラビアは別ロジック）。
+            //
+            // ユニットコヒーレンス: 自分の読みが数字ラベルでなく（オトトイ・ハツカ等）、
+            // かつ直後の文字の予測が CONTINUE なら、モデルは「ここから複数文字ユニット
+            // （熟字訓）が始まる」と言っているので同様に信用する。直後の予測は仮確定した
+            // 自分の読みを read_p1 として見るため、一昨日の「昨」が --- に倒れる根拠と
+            // 「一」を数字化しない根拠が同じ特徴量で噛み合う。自分の読みが数字（三→3）の
+            // ときは従来どおり数字化するので、数の合成経路には触れない。
             // ============================================================
-            let next_is_kun_counter = if entry.ctype == CharType::JapaneseNumeric
+            let next_keeps_model_reading = if entry.ctype == CharType::JapaneseNumeric
                 && conf < self.config.numeric_confidence_threshold
                 && i + 1 < n
             {
                 let (next_cls, _) = self.read_argmax(
                     &source_seq[i + 1],
-                    &all_feat_ids[i + 1],
+                    self.read_feat_ids(&all_feat_ids[i + 1], &decided, i + 1, &mut feat_buf),
                     &mut read_scratch,
                     &mut scores,
                 );
@@ -1093,21 +1218,24 @@ impl<M: WeightModel> Predictor<M> {
                     .map(|c| c.to_string())
                     .unwrap_or_default();
                 is_kun_counter_signal(&next_char, next_label)
+                    || (!is_digit_label(label) && next_label == LABEL_CONTINUE)
             } else {
                 false
             };
 
             if entry.ctype == CharType::JapaneseNumeric
                 && conf < self.config.numeric_confidence_threshold
-                && !next_is_kun_counter
+                && !next_keeps_model_reading
             {
                 match convert_japanese_numeric(i, &source_seq) {
                     NumericFallback::Skip => {
                         // 出力せずにスキップ (「三百二十」の「十」など)
+                        decided[i] = cls_skip;
                         continue;
                     }
                     NumericFallback::Output(fallback) => {
                         let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                        decided[i] = self.read_class_id(fallback);
                         self.emit_label(
                             entry,
                             fallback,
@@ -1157,7 +1285,12 @@ impl<M: WeightModel> Predictor<M> {
                     let next_is_kun_counter = if i + 1 < n {
                         let (next_cls, _) = self.read_argmax(
                             &source_seq[i + 1],
-                            &all_feat_ids[i + 1],
+                            self.read_feat_ids(
+                                &all_feat_ids[i + 1],
+                                &decided,
+                                i + 1,
+                                &mut feat_buf,
+                            ),
                             &mut read_scratch,
                             &mut scores,
                         );
@@ -1173,6 +1306,7 @@ impl<M: WeightModel> Predictor<M> {
                 };
                 if revert {
                     let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                    decided[i] = self.read_class_id_cp(entry.cp);
                     self.emit_char_passthrough(
                         entry,
                         conf,
@@ -1205,6 +1339,7 @@ impl<M: WeightModel> Predictor<M> {
                 // 1. 孤立 CONTINUE 救済: 親がない・bypass・KANJI以外が親の場合は
                 //    現在の文字を「親」にして、文字をそのまま出力する。
                 if parent_src_idx.is_none() || parent_is_bypass || !parent_is_kanji {
+                    decided[i] = self.read_class_id_cp(entry.cp);
                     self.emit_char_passthrough(
                         entry,
                         conf,
@@ -1228,6 +1363,7 @@ impl<M: WeightModel> Predictor<M> {
 
                 // 2. NUMERIC + CONTINUE 救済: 数字 (1, 2, ...) を素通し
                 if entry.ctype == CharType::Numeric {
+                    decided[i] = self.read_class_id_cp(entry.cp);
                     self.emit_char_passthrough(entry, conf, DecisionSource::Lr, &mut result);
                     continue;
                 }
@@ -1269,6 +1405,7 @@ impl<M: WeightModel> Predictor<M> {
             if label == LABEL_SKIP {
                 // NUMERIC + SKIP 救済: 数字を素通し
                 if entry.ctype == CharType::Numeric {
+                    decided[i] = self.read_class_id_cp(entry.cp);
                     self.emit_char_passthrough(entry, conf, DecisionSource::Lr, &mut result);
                     continue;
                 }
@@ -1325,12 +1462,20 @@ impl<M: WeightModel> Predictor<M> {
                 label.to_string()
             };
 
+            if effective_label != label {
+                decided[i] = self.read_class_id(&effective_label);
+            }
             self.emit_label(entry, &effective_label, conf, dec, &mut result);
 
             // 親情報更新
             parent_src_idx = Some(i);
             parent_is_bypass = false;
-            parent_is_kanji = entry.ctype == CharType::Kanji;
+            // 漢数字がかな読みでユニット先頭になる熟字訓（一昨日・二十日）の後続
+            // CONTINUE を孤立救済で潰さないよう、漢数字も「漢字の親」として扱う。
+            parent_is_kanji = matches!(
+                entry.ctype,
+                CharType::Kanji | CharType::JapaneseNumeric
+            );
             // 親ラベルに小書き仮名が含まれているか確認（C++ 版と同じ判定）
             parent_has_small_kana = effective_label.chars().any(|c| is_small_kana(c as u32));
             parent_kana_byte_end = result.kana_text.len();
@@ -1581,7 +1726,7 @@ impl<M: WeightModel> Predictor<M> {
     /// を引いて形骸化していたのを、現行の特徴量名に合わせて修正したもの）。
     /// 未知・不正な特徴量名、または語彙に無い特徴量は空 Vec。
     pub fn feature_label_weights(&self, feature: &str) -> Vec<(String, f32)> {
-        let key = match FeatureKey::parse_name(feature) {
+        let key = match self.parse_feature_name(feature) {
             Some(k) => k,
             None => {
                 // 特徴量名として解釈できなければ、単一（複合）文字の char_s とみなす。
@@ -1629,6 +1774,11 @@ impl<M: WeightModel> Predictor<M> {
         let mut scratch = self.model.new_scratch();
         let mut scores = vec![0f32; n_cls];
 
+        // 確定済みの前方読み（read_p*）は、この診断経路では各位置の argmax を
+        // そのまま確定読みとみなす（本経路のフォールバックや括弧処理は再現しない。
+        // 寄与度は元々 LR 駆動の文字にしか付けないので、診断用途には十分）。
+        let mut decided: Vec<Option<u32>> = vec![None; source_seq.len()];
+
         for (i, entry) in source_seq.iter().enumerate() {
             // 発火特徴量の (FeatureKey, feature_id) ペアを集める。
             let mut pairs: Vec<(FeatureKey, u32)> = Vec::new();
@@ -1639,8 +1789,19 @@ impl<M: WeightModel> Predictor<M> {
                     ids.push(id);
                 }
             }
+            for k in 1..=3 {
+                let Some(cls) = i.checked_sub(k).and_then(|j| decided[j]) else {
+                    continue;
+                };
+                let key = FeatureKey::char_1(FeatureType::read_prev(k).unwrap(), cls);
+                if let Some(id) = self.model.vocab_find(&key) {
+                    pairs.push((key, id));
+                    ids.push(id);
+                }
+            }
             let (best_cls, _) = self.read_argmax(entry, &ids, &mut scratch, &mut scores);
             let best_cls = best_cls as u32;
+            decided[i] = Some(best_cls);
 
             // 採用クラスに対して非ゼロ重みを持つ特徴量だけを寄与度に集める。
             let mut contribs: Vec<Contribution> = Vec::new();
@@ -1652,7 +1813,7 @@ impl<M: WeightModel> Predictor<M> {
                     .find(|(cls, _)| *cls == best_cls)
                 {
                     contribs.push(Contribution {
-                        feature: key.to_string(),
+                        feature: self.feature_name(key),
                         weight: w,
                     });
                 }
@@ -2846,6 +3007,145 @@ mod tests {
         let mut r = make_result("あい", "アイ", &[0, 3]);
         trim_trailing_boundary_spaces(&mut r, "あい");
         assert_eq!(r.kana_text, "アイ");
+    }
+
+    // --- 確定済みの前方読み特徴量 (read_p*) ---
+
+    /// `read_p1` を持つ最小のインメモリモデルで予測器を組む。
+    ///
+    /// クラス: `---` / `カン` / `ジ`。語彙: `char_s=字` → ジ、`char_s=漢` → カン、
+    /// `read_p1=カン` → `---`（`char_s=字` より強い）。つまり「漢字」は
+    /// 「漢→カン、字→前の読みがカンなので CONTINUE」＝「カン」になり、
+    /// 「字」単独は「ジ」になる。
+    fn predictor_with_read_prev() -> Predictor {
+        use crate::vocab::{VocabBuilder, pack_key};
+        // ラベルのバイト順（np.unique と同じ）: --- < オトトイ < カン < ジ
+        let classes = ["---", "オトトイ", "カン", "ジ"];
+        let cls_ototoi = 1u32;
+        let cls_kan = 2u32;
+
+        let mut b = VocabBuilder::new();
+        b.begin_section(FeatureType::CharSelf, 3, crate::model::NO_CAT_COLUMN, 0)
+            .unwrap();
+        // 詰めたキーは昇順: 一 (U+4E00) < 字 (U+5B57) < 漢 (U+6F22)
+        for ch in ['一', '字', '漢'] {
+            b.push_key(pack_key(&FeatureKey::char_1(FeatureType::CharSelf, ch as u32)))
+                .unwrap();
+        }
+        b.begin_section(FeatureType::ReadPrev1, 2, crate::model::NO_CAT_COLUMN, 0)
+            .unwrap();
+        for cls in [cls_ototoi, cls_kan] {
+            b.push_key(pack_key(&FeatureKey::char_1(FeatureType::ReadPrev1, cls)))
+                .unwrap();
+        }
+        let vocab = b.finish(5).unwrap();
+
+        let model = MomoModel {
+            vocab,
+            read_classes: classes.iter().map(|s| s.to_string()).collect(),
+            read_scale: vec![0.01; 4],
+            // 列 0 (一)→オトトイ=95（intercept 込みで score<0＝低自信度）、列 1 (字)→ジ=80、
+            // 列 2 (漢)→カン=80、列 3/4 (read_p1=オトトイ / カン)→---=120
+            csc_colptr: vec![0, 1, 2, 3, 4, 5],
+            csc_rowind: vec![1, 3, 2, 0, 0],
+            csc_data: vec![95, 80, 80, 120, 120],
+            // 発火しないクラスが argmax に勝たないよう全体を負に寄せる。
+            intercept_read: vec![-1.0; 4],
+            // 境界は常に「区切らない」（intercept 負）。
+            boundary: crate::boundary::Boundary::Linear {
+                scale: 1.0,
+                data: Vec::new(),
+                intercept: [0.0, -1.0],
+            },
+            n_classes: 4,
+            n_features: 5,
+            ..MomoModel::default()
+        };
+        let class_order = build_class_order(model.read_classes());
+        Predictor {
+            config: PredictorConfig::new("<memory>"),
+            model,
+            single_char_dict: Vec::new(),
+            custom_dict: crate::custom_dict::CustomDictIndex::new(),
+            class_order,
+        }
+    }
+
+    #[test]
+    fn read_class_id_resolves_labels_regardless_of_file_order() {
+        let p = predictor_with_read_prev();
+        assert_eq!(p.read_class_id("---"), Some(0));
+        assert_eq!(p.read_class_id("オトトイ"), Some(1));
+        assert_eq!(p.read_class_id("カン"), Some(2));
+        assert_eq!(p.read_class_id("ジ"), Some(3));
+        assert_eq!(p.read_class_id("ナシ"), None);
+        assert_eq!(p.read_class_id_cp('ジ' as u32), Some(3));
+        assert_eq!(p.read_class_id_cp('漢' as u32), None);
+    }
+
+    #[test]
+    fn read_prev_feature_turns_second_char_into_continue() {
+        let p = predictor_with_read_prev();
+        // 「字」単独: read_p1 は無い（先頭）ので char_s=字 → ジ。
+        assert_eq!(p.predict("字").unwrap().kana_text(), "ジ");
+        // 「漢字」: 漢→カン が確定した後、字は read_p1=カン で --- に倒れる。
+        assert_eq!(p.predict("漢字").unwrap().kana_text(), "カン");
+    }
+
+    #[test]
+    fn low_confidence_kanji_numeral_keeps_reading_when_next_is_continue() {
+        let p = predictor_with_read_prev();
+        // 「一」は JAPANESE_NUMERIC。モデルの読み（オトトイ）は低自信度なので従来は
+        // 数字化（1）されていたが、仮確定したオトトイを read_p1 として見た「字」が
+        // --- を返す＝複数文字ユニットの先頭なので、モデルの読みを信用する。
+        assert_eq!(p.predict("一字").unwrap().kana_text(), "オトトイ");
+        // 直後が無ければ従来どおり数字化する（このトイモデルは read_p1=オトトイ だけで
+        // 次を --- に倒すので、直後がある否定例は実モデルの regression に委ねる）。
+        assert_eq!(p.predict("一").unwrap().kana_text(), "1");
+    }
+
+    #[test]
+    fn read_prev_feature_is_silent_after_unknown_reading() {
+        let p = predictor_with_read_prev();
+        // 「字字」: 1 文字目はジ（クラスあり）だが read_p1=ジ は語彙に無いので沈黙し、
+        // 2 文字目も生文字特徴量だけでジ。読みが伝播しないことの確認。
+        assert_eq!(p.predict("字字").unwrap().kana_text(), "ジジ");
+        // 記号を挟むと決定読みは `_`（クラスに無い→None）で、read_p1 は出ない。
+        assert_eq!(p.predict("漢、字").unwrap().kana_text(), "カン、ジ");
+    }
+
+    #[test]
+    fn read_prev_feature_name_roundtrip_via_predictor() {
+        let p = predictor_with_read_prev();
+        let key = FeatureKey::char_1(FeatureType::ReadPrev1, 2);
+        assert_eq!(p.feature_name(&key), "read_p1=カン");
+        assert_eq!(p.parse_feature_name("read_p1=カン"), Some(key));
+        assert_eq!(p.parse_feature_name("read_p1=#2"), Some(key));
+        assert_eq!(p.parse_feature_name("read_p1=ナシ"), None);
+        assert_eq!(p.parse_feature_name("read_p9=カン"), None);
+        // 語彙にある特徴量の重みが引ける（momo-inspect label 用）。
+        let w = p.feature_label_weights("read_p1=カン");
+        assert_eq!(w.first().map(|(l, _)| l.as_str()), Some("---"));
+        // 通常の特徴量名は従来どおり。
+        assert_eq!(
+            p.feature_name(&FeatureKey::char_1(FeatureType::CharSelf, '漢' as u32)),
+            "char_s=漢"
+        );
+    }
+
+    #[test]
+    fn explain_shows_read_prev_contribution_with_label_name() {
+        let p = predictor_with_read_prev();
+        // 字 は UTF-8 バイト位置 3（漢 が 3 バイト）。診断経路も左から順に確定読みを
+        // 持ち回るので、字 の採用クラス（---）への寄与に read_p1=カン が現れる。
+        let explain = p.explain_by_source_byte("漢字", 5);
+        let contribs = &explain[&3];
+        assert!(
+            contribs.iter().any(|c| c.feature == "read_p1=カン"),
+            "{contribs:?}"
+        );
+        // 先頭の 漢 には前方読みが無い。
+        assert!(!explain[&0].iter().any(|c| c.feature.starts_with("read_p")));
     }
 
     // --- predict() の動作確認テスト (テスト用モデルで) ---

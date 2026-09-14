@@ -6,7 +6,7 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
 
 [ファイルヘッダ]          16 bytes
   magic        : uint8[4]   "MOMO"
-  version      : uint8      0x0A
+  version      : uint8      0x0B
   flags        : uint8      bit0 = 統合語彙が GBDT カテゴリカル(column,code)を持つ
                             bit1 = ソート済み配列を差分 + LEB128 varint で書く（下記）
   _reserved    : uint8[2]   0x00 x2
@@ -177,6 +177,11 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
   0x0A: ヘッダ flags bit1 を追加し、ソート済み配列を「隣との差分 + LEB128 varint」で
         書く圧縮レイアウトを選べるようにした（下記「差分 + varint レイアウト」）。
         0x09 ファイルは読み込み時にエラーになるため再エクスポートすること。
+  0x0B: 読みモデルに「確定済みの前方読み」特徴量 read_p1/p2/p3（FeatureType
+        0x97/0x98/0x99、char32×1 のペイロード＝読みクラスの添字）を追加。
+        学習時は隣接行の正解ラベル（教師強制）、推論時は逐次ループが確定した読み。
+        レイアウトは 0x0A と同じ。0x0A ファイルは読み込み時にエラーになるため
+        再エクスポートすること。
 
 差分 + varint レイアウト（version 0x0A、flags bit1 = FLAG_DELTA_VARINT）
 =======================================================================
@@ -253,7 +258,7 @@ from .utils import parse_single_char_dict_tsv
 # `.mbm` と `.mbmf` はセクション構成を共通に保つ設計なので、バージョン番号も
 # 共有する（採番を分けると「どちらの 0x02 か」を常に意識する羽目になる）。
 # 区別は magic だけで行う。
-VERSION = 0x0A
+VERSION = 0x0B
 
 # 統合語彙のキーを詰める際、コードポイント 1 個に割り当てるビット幅。
 # Unicode の上限 U+10FFFF が収まる。Rust 側 vocab.rs の CP_BITS と一致。
@@ -343,6 +348,11 @@ class FT:
     CHAR_NEXT2 = 0x94
     CHAR_PREV3 = 0x95
     CHAR_NEXT3 = 0x96
+    # 確定済みの前方読み。char32_t×1 のペイロードは文字ではなく
+    # 読みクラスの添字（read_classes の位置）。version 0x0B で追加。
+    READ_PREV1 = 0x97
+    READ_PREV2 = 0x98
+    READ_PREV3 = 0x99
 
     BIGRAM_PREV1_SELF = 0xA0  # char32_t×2
     BIGRAM_PREV2_PREV1 = 0xA1
@@ -568,7 +578,39 @@ def parse_feature_key(key: str) -> Tuple[int, list, list, int | None]:
     if m:
         return FT.CHAR_NEXT3, [], [ord(m.group(1))], None
 
+    # --- read 系（char32_t×1、値はクラス添字）---
+    # 学習時の生ラベル形 `read_p1=オトトイ` は resolve_read_feature_keys() で
+    # 添字形 `read_p1=#12` に変換してから渡すこと。
+    m = re.fullmatch(r"read_p([123])=#(\d+)", key)
+    if m:
+        ft = {"1": FT.READ_PREV1, "2": FT.READ_PREV2, "3": FT.READ_PREV3}[m.group(1)]
+        return ft, [], [int(m.group(2))], None
+
     raise ValueError(f"未知の特徴量キー: {key!r}")
+
+
+_READ_KEY_RE = re.compile(r"(read_p[123])=(.+)", re.DOTALL)
+
+
+def resolve_read_feature_keys(vocab: dict[str, int], read_classes) -> dict[str, int]:
+    """
+    語彙の `read_pK=<ラベル>` キーを `read_pK=#<クラス添字>` に書き換える。
+
+    教師強制ではラベルは必ず read_classes に含まれるので、含まれないものは
+    データ不整合としてエラーにする。他のキーはそのまま。
+    """
+    label_to_idx = {label: idx for idx, label in enumerate(read_classes)}
+    out: dict[str, int] = {}
+    for key, fid in vocab.items():
+        m = _READ_KEY_RE.fullmatch(key)
+        if m:
+            label = m.group(2)
+            if label not in label_to_idx:
+                raise ValueError(f"read_p* のラベルが読みクラスにありません: {key!r}")
+            out[f"{m.group(1)}=#{label_to_idx[label]}"] = fid
+        else:
+            out[key] = fid
+    return out
 
 
 # =====================================================================
@@ -964,7 +1006,9 @@ def _build_cat_by_feature_id(vocab: dict, cat_names: list, cat_vocabs: dict) -> 
     return cat_by_id
 
 
-def _unified_cat(bundle: Any, vocab: dict, boundary_algo: str) -> Tuple[dict | None, int]:
+def _unified_cat(
+    bundle: Any, vocab: dict, boundary_algo: str
+) -> Tuple[dict | None, int]:
     """統合語彙に埋め込むカテゴリカル写像とヘッダ flags を決める。
 
     GBDT 境界のときだけ `({feature_id: (column, code)}, FLAG_VOCAB_HAS_CAT)` を返す。
@@ -1022,7 +1066,9 @@ def _pack_vocab_key(ft: int, ct_vals: list, cp_vals: list, u8_val: int | None) -
     return 0
 
 
-def _vocab_row_sort_key(ft: int, u8_val: int | None, ct_vals: list, cp_vals: list) -> tuple:
+def _vocab_row_sort_key(
+    ft: int, u8_val: int | None, ct_vals: list, cp_vals: list
+) -> tuple:
     """統合語彙テーブルの行を並べる正準ソートキー。
 
     Rust `FeatureKey` の `derive(Ord)` と同じフィールド優先順位
@@ -1265,10 +1311,12 @@ def export(zip_path: str, out_path: str, *, compact: bool = True) -> None:
     print(f"📦 モデル読み込み中: {zip_path}")
     bundle, name_entries, single_char_text = _load_bundle(zip_path)
 
-    vocab = bundle.vectorizer_read.vocabulary_  # {key_str: feature_id}
+    read_classes = bundle.read_classes  # str array (n_classes,)
+    vocab = resolve_read_feature_keys(
+        bundle.vectorizer_read.vocabulary_, read_classes
+    )  # {key_str: feature_id}
     coef_sparse = bundle.coef_read_sparse  # CSR (n_classes × n_features)
     intercept_r = bundle.intercept_read  # float32 (n_classes,)
-    read_classes = bundle.read_classes  # str array (n_classes,)
     boundary_algo = getattr(bundle, "boundary_algo", "sgd")
 
     n_classes = len(read_classes)
@@ -1282,7 +1330,9 @@ def export(zip_path: str, out_path: str, *, compact: bool = True) -> None:
     if compact:
         flags |= FLAG_DELTA_VARINT
 
-    print(f"🔨 統合語彙テーブル変換中... (layout={'delta+varint' if compact else 'fixed'})")
+    print(
+        f"🔨 統合語彙テーブル変換中... (layout={'delta+varint' if compact else 'fixed'})"
+    )
     layout = _plan_vocab_layout(vocab, cat_by_id)
     vocab_bytes = _build_vocab_bytes(layout, delta=compact)
 
@@ -1348,7 +1398,9 @@ def export(zip_path: str, out_path: str, *, compact: bool = True) -> None:
         f"   読みモデル重み: {len(read_weight_bytes):>10,} bytes  (scale: min={scales_r.min():.6f} max={scales_r.max():.6f})"
     )
     print(f"   読み intercept: {len(intercept_r_bytes):>10,} bytes")
-    print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (algo={boundary_algo})")
+    print(
+        f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (algo={boundary_algo})"
+    )
     print(
         f"   人名辞書      : {len(name_dict_bytes):>10,} bytes  ({len(name_entries)} エントリ)"
     )
@@ -1369,10 +1421,10 @@ def export_float(zip_path: str, out_path: str, *, compact: bool = True) -> None:
     print(f"📦 モデル読み込み中: {zip_path}")
     bundle, name_entries, single_char_text = _load_bundle(zip_path)
 
-    vocab = bundle.vectorizer_read.vocabulary_
+    read_classes = bundle.read_classes
+    vocab = resolve_read_feature_keys(bundle.vectorizer_read.vocabulary_, read_classes)
     coef_sparse = bundle.coef_read_sparse
     intercept_r = bundle.intercept_read
-    read_classes = bundle.read_classes
     boundary_algo = getattr(bundle, "boundary_algo", "sgd")
 
     n_classes = len(read_classes)
@@ -1386,7 +1438,9 @@ def export_float(zip_path: str, out_path: str, *, compact: bool = True) -> None:
     if compact:
         flags |= FLAG_DELTA_VARINT
 
-    print(f"🔨 統合語彙テーブル変換中... (layout={'delta+varint' if compact else 'fixed'})")
+    print(
+        f"🔨 統合語彙テーブル変換中... (layout={'delta+varint' if compact else 'fixed'})"
+    )
     layout = _plan_vocab_layout(vocab, cat_by_id)
     vocab_bytes = _build_vocab_bytes(layout, delta=compact)
 
@@ -1450,7 +1504,9 @@ def export_float(zip_path: str, out_path: str, *, compact: bool = True) -> None:
         f"   読みモデル重み: {len(read_weight_bytes):>10,} bytes  (float32、量子化なし)"
     )
     print(f"   読み intercept: {len(intercept_r_bytes):>10,} bytes")
-    print(f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (algo={boundary_algo}、量子化なし)")
+    print(
+        f"   境界モデル    : {len(boundary_bytes):>10,} bytes  (algo={boundary_algo}、量子化なし)"
+    )
     print(
         f"   人名辞書      : {len(name_dict_bytes):>10,} bytes  ({len(name_entries)} エントリ)"
     )

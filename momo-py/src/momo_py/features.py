@@ -16,6 +16,9 @@ SourceEntry = Tuple[str, int, str]
 MORA_SPLIT = "+S"
 LABEL_CONTINUE = "---"
 LABEL_SKIP = "_"
+# ASIDE 括弧のプレースホルダ行のラベル（bracket.py 参照）。読みクラスではなく、
+# Rust 推論側では実位置として存在しないため、read_p* の隣接行の数え上げから除く。
+LABEL_CONTEXT_ONLY = "@"
 
 # --- [特徴量キー定数] ---
 # 実際のキーは f'{F_xxx}={value}' の形式（ペイロードなし系は定数そのまま）。
@@ -55,6 +58,11 @@ F_KANJI_RUN = "kanji_run"
 F_KANJI_POS_FIRST = "kanji_pos_first"
 F_JNUM_RUN = "jnum_run"
 F_JNUM_RUN_P1 = "jnum_run_p1"
+# 確定済みの前方読みラベル（値は読みクラスのラベル文字列。学習時は正解ラベル＝
+# 教師強制、推論時は Rust の逐次ループが確定した読み）。
+F_READ_P1 = "read_p1"
+F_READ_P2 = "read_p2"
+F_READ_P3 = "read_p3"
 # 人名辞書マッチフラグ（値は B/I。name_dict.compute_name_flags が生成する）
 F_NAME_S = "name_s"
 F_NAME_P1 = "name_p1"
@@ -141,15 +149,22 @@ def compute_source_features(
     window: int = 7,
     name_flags: List[str] | None = None,
     bracket_flags: List[str] | None = None,
+    read_labels: List[str] | None = None,
 ) -> List[FeatureDict]:
     """
     ソース文字系列全体に対して、各文字の文脈特徴量を一括計算する。
     pycrfsuiteネイティブの { "feature_name=value": 1.0 } 形式で出力する。
 
     window: 参照する文字数。4, 5, 7 を指定する。
-      7 (デフォルト): 前後3文字まで参照（bigram×6, trigram×5）
-      5             : 前後2文字まで参照（bigram×4, trigram×3）
-      4             : 前1・後2文字参照 [-1,0,+1,+2]（bigram×3, trigram×2）
+      7 (デフォルト): 前後3文字まで参照（bigram×6, trigram×5, read_p1〜p3）
+      5             : 前後2文字まで参照（bigram×4, trigram×3, read_p1〜p2）
+      4             : 前1・後2文字参照 [-1,0,+1,+2]（bigram×2, trigram×2, read_p1）
+                      前1の生文字（char_p1 / bi_p1_s）は read_p1 で置き換える
+                      （軽量モデルの語彙を増やさないため）。
+    read_labels: 各行の読みラベル（+S 除去済み）。source_seq と同じ長さ。
+      read_pK の値になる。None の場合は read_p* を出力しない。
+      LABEL_CONTEXT_ONLY の行は隣接行の数え上げから除く（Rust 推論側では
+      その行が実位置として存在しないため）。
     name_flags: 人名辞書マッチフラグ（B/I/O）の系列。source_seq と同じ長さ。
       None の場合は人名特徴量を出力しない（人名辞書なしの従来動作）。
       学習・推論とも name_dict.compute_name_flags() で生成すること
@@ -171,8 +186,24 @@ def compute_source_features(
             f"bracket_flags の長さ（{len(bracket_flags)}）が "
             f"source_seq（{len(source_seq)}）と一致しません"
         )
+    if read_labels is not None and len(read_labels) != len(source_seq):
+        raise ValueError(
+            f"read_labels の長さ（{len(read_labels)}）が "
+            f"source_seq（{len(source_seq)}）と一致しません"
+        )
     result: List[FeatureDict] = []
     n = len(source_seq)
+
+    # 各行の「直前 3 つの実ラベル」(read_p1, read_p2, read_p3)。
+    # LABEL_CONTEXT_ONLY の行は数え上げから除き、値にもしない。
+    prev_reads: List[Tuple[str, str, str]] = []
+    if read_labels is not None:
+        history: List[str] = []
+        for lab in read_labels:
+            h = history[-3:][::-1]
+            prev_reads.append(tuple(h + [""] * (3 - len(h))))
+            if lab != LABEL_CONTEXT_ONLY:
+                history.append(lab)
 
     for i, (char, _orig_idx, ctype) in enumerate(source_seq):
         # 文脈特徴量（bigram/trigram/char_p*/n*）は各エントリの先頭1文字を使用。
@@ -194,10 +225,10 @@ def compute_source_features(
         next3_ctype = source_seq[i + 3][2] if i < n - 3 else ""
 
         # 各エントリの先頭1文字（文脈用）
-        pc  = prev_char[0]  if prev_char  else ""
+        pc = prev_char[0] if prev_char else ""
         pc2 = prev2_char[0] if prev2_char else ""
         pc3 = prev3_char[0] if prev3_char else ""
-        nc  = next_char[0]  if next_char  else ""
+        nc = next_char[0] if next_char else ""
         nc2 = next2_char[0] if next2_char else ""
         nc3 = next3_char[0] if next3_char else ""
 
@@ -208,9 +239,11 @@ def compute_source_features(
         }
 
         if i > 0:
-            features[f"{F_CHAR_P1}={pc}"] = 1.0
+            # window=4 は前1の生文字（char_p1 / bi_p1_s）を read_p1 で置き換える。
+            if window >= 5:
+                features[f"{F_CHAR_P1}={pc}"] = 1.0
+                features[f"{F_BI_P1_S}={pc}{c}"] = 1.0
             features[f"{F_TYPE_P1}={prev_ctype}"] = 1.0
-            features[f"{F_BI_P1_S}={pc}{c}"] = 1.0
             if window >= 5 and i > 1:
                 features[f"{F_CHAR_P2}={pc2}"] = 1.0
                 features[f"{F_TYPE_P2}={prev2_ctype}"] = 1.0
@@ -233,6 +266,16 @@ def compute_source_features(
                     features[f"{F_BI_N2_N3}={nc2}{nc3}"] = 1.0
         if i > 0:
             features[f"{F_TYPE_TRANS_P1_S}={prev_ctype}->{ctype}"] = 1.0
+
+        # 確定済みの前方読み（char_pK と同じオフセットのゲーティング）。
+        if prev_reads:
+            r1, r2, r3 = prev_reads[i]
+            if r1:
+                features[f"{F_READ_P1}={r1}"] = 1.0
+            if window >= 5 and r2:
+                features[f"{F_READ_P2}={r2}"] = 1.0
+            if window >= 7 and r3:
+                features[f"{F_READ_P3}={r3}"] = 1.0
 
         # trigram: 前3-前2-前1（window=7 のみ）
         if window >= 7 and i > 2:

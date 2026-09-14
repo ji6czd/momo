@@ -4,8 +4,14 @@ features.py の単体テスト
   - get_units()
   - compute_source_features()
 """
+
 import pytest
-from momo_py.features import get_char_type, get_units, compute_source_features, SourceEntry
+from momo_py.features import (
+    get_char_type,
+    get_units,
+    compute_source_features,
+    SourceEntry,
+)
 
 
 # ------------------------------------------------------------------ #
@@ -26,16 +32,16 @@ class TestGetCharType:
 
     def test_kanji_extension_b(self):
         # 𠮟る の「𠮟」(U+20B9F、人名・地名用漢字) は拡張B
-        assert get_char_type("\U00020B9F") == "KANJI"
+        assert get_char_type("\U00020b9f") == "KANJI"
 
     def test_kanji_extension_g_h(self):
         assert get_char_type("\U00030000") == "KANJI"  # 拡張G 先頭
-        assert get_char_type("\U000323AF") == "KANJI"  # 拡張H 末尾
+        assert get_char_type("\U000323af") == "KANJI"  # 拡張H 末尾
 
     def test_kanji_extension_gap_is_other(self):
         # 拡張B〜F・I の直後と拡張G直前は非漢字ブロック
-        assert get_char_type("\U0002EE60") == "OTHER"
-        assert get_char_type("\U0002FFFF") == "OTHER"
+        assert get_char_type("\U0002ee60") == "OTHER"
+        assert get_char_type("\U0002ffff") == "OTHER"
 
     def test_alpha(self):
         assert get_char_type("A") == "ALPHA"
@@ -85,7 +91,11 @@ class TestGetCharType:
 class TestGetUnits:
     def test_single_hiragana(self):
         units = get_units("あいう")
-        assert units == [("あ", 0, "HIRAGANA"), ("い", 1, "HIRAGANA"), ("う", 2, "HIRAGANA")]
+        assert units == [
+            ("あ", 0, "HIRAGANA"),
+            ("い", 1, "HIRAGANA"),
+            ("う", 2, "HIRAGANA"),
+        ]
 
     def test_compound_mora(self):
         # 拗音（きゃ など）は2文字で1ユニット
@@ -97,14 +107,14 @@ class TestGetUnits:
         # 英字はまとめるが、数字は1文字ずつ個別ユニットになる
         units = get_units("abc123")
         chars = [u[0] for u in units]
-        assert "abc" in chars          # 英字ブロックはまとめる
+        assert "abc" in chars  # 英字ブロックはまとめる
         assert "1" in chars and "2" in chars and "3" in chars  # 数字は個別
 
     def test_alphanumeric_with_hyphen(self):
         # ハイフンは英字と同じグループ、数字は個別
         units = get_units("abc-123")
         chars = [u[0] for u in units]
-        assert "abc-" in chars         # 英字+ハイフンはまとめる
+        assert "abc-" in chars  # 英字+ハイフンはまとめる
         assert "1" in chars and "2" in chars and "3" in chars
 
     def test_bracket_notation(self):
@@ -141,6 +151,7 @@ class TestGetUnits:
 class TestComputeSourceFeatures:
     def _make_seq(self, text: str) -> list[SourceEntry]:
         from momo_py.features import get_char_type
+
         return [(c, i, get_char_type(c)) for i, c in enumerate(text)]
 
     def test_length_matches_input(self):
@@ -233,3 +244,75 @@ class TestNameFlagFeatures:
         seq = self._make_seq("佐藤さん")
         with pytest.raises(ValueError, match="name_flags"):
             compute_source_features(seq, name_flags=["B", "I"])
+
+
+# ------------------------------------------------------------------ #
+# 確定済みの前方読み特徴量（read_p1 / read_p2 / read_p3）
+# ------------------------------------------------------------------ #
+class TestReadPrevFeatures:
+    def _make_seq(self, text):
+        return get_units(text)
+
+    def _read_keys(self, feats):
+        return {k for k in feats if k.startswith("read_p")}
+
+    def test_window7_emits_p1_p2_p3(self):
+        seq = self._make_seq("一昨日の夜")
+        labels = ["オトトイ", "---", "---", "ノ", "ヨル"]
+        feats = compute_source_features(seq, window=7, read_labels=labels)
+        assert self._read_keys(feats[0]) == set()
+        assert self._read_keys(feats[1]) == {"read_p1=オトトイ"}
+        assert self._read_keys(feats[2]) == {"read_p1=---", "read_p2=オトトイ"}
+        assert self._read_keys(feats[3]) == {
+            "read_p1=---",
+            "read_p2=---",
+            "read_p3=オトトイ",
+        }
+        assert self._read_keys(feats[4]) == {
+            "read_p1=ノ",
+            "read_p2=---",
+            "read_p3=---",
+        }
+
+    def test_window5_emits_p1_p2_only(self):
+        seq = self._make_seq("一昨日の")
+        labels = ["オトトイ", "---", "---", "ノ"]
+        feats = compute_source_features(seq, window=5, read_labels=labels)
+        assert self._read_keys(feats[3]) == {"read_p1=---", "read_p2=---"}
+
+    def test_window4_emits_p1_only_and_replaces_raw_prev_char(self):
+        seq = self._make_seq("一昨日の")
+        labels = ["オトトイ", "---", "---", "ノ"]
+        feats = compute_source_features(seq, window=4, read_labels=labels)
+        assert self._read_keys(feats[1]) == {"read_p1=オトトイ"}
+        assert self._read_keys(feats[3]) == {"read_p1=---"}
+        # window=4 では前1の生文字 (char_p1 / bi_p1_s) を read_p1 で置き換える。
+        assert not any(k.startswith("char_p1=") for k in feats[1])
+        assert not any(k.startswith("bi_p1_s=") for k in feats[1])
+        # 文字種系と trigram は残る。
+        assert feats[1].get("type_p1=JAPANESE_NUMERIC") == 1.0
+        assert feats[1].get("tri_p1_s_n1=一昨日") == 1.0
+
+    def test_window5_keeps_raw_prev_char(self):
+        seq = self._make_seq("一昨日の")
+        labels = ["オトトイ", "---", "---", "ノ"]
+        feats = compute_source_features(seq, window=5, read_labels=labels)
+        assert feats[1].get("char_p1=一") == 1.0
+        assert feats[1].get("bi_p1_s=一昨") == 1.0
+
+    def test_context_only_rows_are_skipped(self):
+        # "@"（ASIDE 括弧のプレースホルダ行）は数え上げから除き、値にもしない。
+        seq = self._make_seq("あ（い")
+        labels = ["ア", "@", "イ"]
+        feats = compute_source_features(seq, window=7, read_labels=labels)
+        assert self._read_keys(feats[2]) == {"read_p1=ア"}
+
+    def test_none_labels_emit_nothing(self):
+        seq = self._make_seq("一昨日")
+        feats = compute_source_features(seq)
+        assert not any(k.startswith("read_p") for f in feats for k in f)
+
+    def test_length_mismatch_raises(self):
+        seq = self._make_seq("一昨日")
+        with pytest.raises(ValueError, match="read_labels"):
+            compute_source_features(seq, read_labels=["オトトイ"])

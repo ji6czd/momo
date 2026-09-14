@@ -25,6 +25,9 @@ from .features import (
     LABEL_CONTINUE,
     LABEL_SKIP,
     MORA_SPLIT,
+    F_READ_P1,
+    F_READ_P2,
+    F_READ_P3,
 )
 from .utils import (
     split_on_unescaped_slash,
@@ -167,8 +170,10 @@ def _check_non_ascii_identity(
     if clean_label in (LABEL_SKIP, LABEL_CONTINUE, target_chars):
         return
     # 単一数字のかな読み（"３"→"ミッ" 等）は半角数字（"3"→"ミッ"）と同様に許容する
-    if ctype == CharType.NUMERIC and clean_label and all(
-        get_basic_char_category(c) == CharType.KATAKANA for c in clean_label
+    if (
+        ctype == CharType.NUMERIC
+        and clean_label
+        and all(get_basic_char_category(c) == CharType.KATAKANA for c in clean_label)
     ):
         return
     print(
@@ -418,9 +423,7 @@ def _tokenize_bracket_sentences(tsv_lines: List[str]) -> List[List[str]]:
 # ==========================================
 # 🌟 5. メインルーチン
 # ==========================================
-def create_data(
-    rawdata: str, tsvdata: str, name_dict_path: str | None = None
-) -> None:
+def create_data(rawdata: str, tsvdata: str, name_dict_path: str | None = None) -> None:
     print(f"📊 過去の実績 ({tsvdata}) から統計辞書を構築中...")
     stats = build_stats_from_tsv(tsvdata)
 
@@ -474,16 +477,17 @@ def create_data(
             reading = max(readings, key=lambda r: readings[r])
             if len(readings) > 1:
                 others = ", ".join(
-                    f"{r}×{c}"
-                    for r, c in sorted(readings.items(), key=lambda x: -x[1])
+                    f"{r}×{c}" for r, c in sorted(readings.items(), key=lambda x: -x[1])
                 )
                 print(
                     f"⚠️  人名 {surface!r} に複数の読みがあります（{others}）"
                     f" → 最頻の {reading!r} を採用します。誤記でないか確認してください。"
                 )
             blocks = reading.split("/")
-            if reading and LABEL_SKIP not in blocks and len(blocks) == len(
-                get_units(surface)
+            if (
+                reading
+                and LABEL_SKIP not in blocks
+                and len(blocks) == len(get_units(surface))
             ):
                 dict_lines.append(f"{surface}\t{reading}\t{total}")
             else:
@@ -511,6 +515,18 @@ def _split_labels(raw_labels: List[str]) -> tuple:
         for label in raw_labels
     ]
     return y_read, y_boundary
+
+
+_READ_FEATURE_PREFIXES = (f"{F_READ_P1}=", f"{F_READ_P2}=", f"{F_READ_P3}=")
+
+
+def _is_read_feature(key: str) -> bool:
+    return key.startswith(_READ_FEATURE_PREFIXES)
+
+
+def _strip_read_features(feat: FeatureDict) -> FeatureDict:
+    """境界モデル用に read_p* を除いた特徴量辞書を返す。"""
+    return {k: v for k, v in feat.items() if not _is_read_feature(k)}
 
 
 # ==========================================
@@ -650,10 +666,11 @@ def train(
         raw_labels = [p[1] for p in sentence]
 
         name_flags = compute_name_flags(source_seq, name_index) if name_index else None
-        features = compute_source_features(
-            source_seq, window=window, name_flags=name_flags
-        )
         y_read, y_boundary = _split_labels(raw_labels)
+        # read_p* は隣接行の正解ラベル（教師強制）。推論側は確定済みの読みを使う。
+        features = compute_source_features(
+            source_seq, window=window, name_flags=name_flags, read_labels=y_read
+        )
 
         # LABEL_CONTEXT_ONLY（括弧の圧縮アイデンティティ・トークン、bracket.py参照）
         # の行は、隣接文字のbigram/trigram/kanji_run計算にはsource_seq経由で
@@ -678,6 +695,8 @@ def train(
     X_read.indices = X_read.indices.astype(np.int32, copy=False)  # type: ignore[union-attr]
     X_read.indptr = X_read.indptr.astype(np.int32, copy=False)  # type: ignore[union-attr]
     print(f"   特徴量ベクトル次元数: {X_read.shape[1]}")
+    n_read_feats = sum(1 for k in vect_read.vocabulary_ if _is_read_feature(k))
+    print(f"   うち read_p* 特徴量: {n_read_feats}")
     print(f"   読みラベル種類数: {len(set(Y_read))}")
     if dry_run:
         print("⚠️  dry_run=True のため、ここまでで終了します。")
@@ -737,16 +756,24 @@ def train(
     # 境界モデル: boundary_algo で切り替え
     # ==========================================
     if boundary_algo not in ("sgd", "gbdt"):
-        raise ValueError(f"boundary_algo は 'sgd' か 'gbdt' でなければなりません: {boundary_algo!r}")
+        raise ValueError(
+            f"boundary_algo は 'sgd' か 'gbdt' でなければなりません: {boundary_algo!r}"
+        )
 
     vect_boundary = None
     boundary_cat_names = None
     boundary_cat_vocabs = None
 
+    # 境界モデルには read_p* を入れない（読みモデル限定。GBDT は特徴量の組み合わせを
+    # 木で覚えるため、推論時の誤読み伝播の影響が線形モデルより出やすい）。
+    X_dicts_boundary = [_strip_read_features(d) for d in X_dicts]
+
     if boundary_algo == "sgd":
         print("\n🏋️  [境界モデル] ベクトル化中...")
-        vect_boundary = DictVectorizer(sparse=True)
-        X_boundary = vect_boundary.fit_transform(X_dicts)
+        # 線形境界の重みは exporter が読みモデルの feature_id で引くので、
+        # 読みモデルと同じ語彙空間で変換する（read_p* の列は常にゼロになる）。
+        vect_boundary = vect_read
+        X_boundary = vect_boundary.transform(X_dicts_boundary)
         X_boundary.data = X_boundary.data.astype(np.float32, copy=False)  # type: ignore[union-attr]
         X_boundary.indices = X_boundary.indices.astype(np.int32, copy=False)  # type: ignore[union-attr]
         X_boundary.indptr = X_boundary.indptr.astype(np.int32, copy=False)  # type: ignore[union-attr]
@@ -767,7 +794,9 @@ def train(
         from .categorical import fit_categorical
 
         print("\n🏋️  [境界モデル] カテゴリカル特徴量に変換中...")
-        X_boundary_cat, boundary_cat_names, boundary_cat_vocabs = fit_categorical(X_dicts)
+        X_boundary_cat, boundary_cat_names, boundary_cat_vocabs = fit_categorical(
+            X_dicts_boundary
+        )
         print(f"   カテゴリカル列数: {len(boundary_cat_names)}")
 
         print(
@@ -781,7 +810,9 @@ def train(
             verbose=-1,
         )
         model_boundary.fit(
-            X_boundary_cat, Y_boundary, categorical_feature=list(range(len(boundary_cat_names)))
+            X_boundary_cat,
+            Y_boundary,
+            categorical_feature=list(range(len(boundary_cat_names))),
         )
     print("💾 [境界モデル] 学習完了")
 
@@ -815,7 +846,9 @@ def train(
         boundary_cat_vocabs=boundary_cat_vocabs,
     )
 
-    boundary_algo_label = "SGDClassifier" if boundary_algo == "sgd" else "LGBMClassifier(categorical)"
+    boundary_algo_label = (
+        "SGDClassifier" if boundary_algo == "sgd" else "LGBMClassifier(categorical)"
+    )
     version_info = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "model_bundle": bundle_name,

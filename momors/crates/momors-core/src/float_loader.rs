@@ -15,7 +15,7 @@
 //! ```text
 //! [ファイルヘッダ]          16 bytes
 //!   magic        : u8[4]   "MBMF"
-//!   version      : u8      0x0A    ← .mbm と同じ番号を共有する
+//!   version      : u8      0x0B    ← .mbm と同じ番号を共有する
 //!   flags        : u8      ← .mbm と同じ（bit0 = 統合語彙がカテゴリカルを持つ、
 //!                             bit1 = ソート済み配列が差分 + varint）
 //!   _reserved    : u8[2]   0x00 × 2
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn n_classes_over_u16_returns_error() {
         // .mbm 側と同じ理由 (csc_rowind が u16) で 65537 は弾かれる。
-        let bad_data = b"MBMF\x0A\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
+        let bad_data = b"MBMF\x0B\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00\x00";
         let mut cursor = std::io::Cursor::new(&bad_data[..]);
         let result = load_from_reader(&mut cursor, Path::new("test"));
         assert!(matches!(result, Err(Error::CorruptModel { .. })));

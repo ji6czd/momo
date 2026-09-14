@@ -286,7 +286,7 @@
 
   <dl class="strip">
     <div><dt>Magic</dt><dd>MOMO</dd></div>
-    <div><dt>Version</dt><dd>0x0A</dd></div>
+    <div><dt>Version</dt><dd>0x0B</dd></div>
     <div><dt>Byte order</dt><dd>little-endian</dd></div>
     <div><dt>Reader</dt><dd>streaming</dd></div>
   </dl>
@@ -314,7 +314,7 @@
       <p class="purpose">Identifies the format and carries the two dimensions that size everything below.</p>
       <div class="fields">
         <span class="fname">magic</span><span class="ftype">u8[4]</span><span class="fnote"><span class="hl">"MOMO"</span> — distinguishes it from the <span class="hl">.mbmf</span> float sidecar</span>
-        <span class="fname">version</span><span class="ftype">u8</span><span class="fnote"><span class="hl">0x0A</span>. Older versions are rejected, never silently misread</span>
+        <span class="fname">version</span><span class="ftype">u8</span><span class="fnote"><span class="hl">0x0B</span>. Older versions are rejected, never silently misread</span>
         <span class="fname">flags</span><span class="ftype">u8</span><span class="fnote">bit0 = the vocab carries GBDT categorical <span class="hl">(column, code)</span>; bit1 = sorted arrays (vocab keys, CSC col_len/rowind, GBDT cats) are stored as <span class="hl">delta + LEB128 varint</span> instead of fixed width (v0x0A, the exporter's default)</span>
         <span class="fname">_reserved</span><span class="ftype">u8[2]</span><span class="fnote"><em>padding to a 16-byte header</em></span>
         <span class="fname">n_classes</span><span class="ftype">u32</span><span class="fnote">number of kana reading labels (≈ 1,587)</span>
@@ -340,6 +340,8 @@
         <span class="fname">cat_code_base</span><span class="ftype">u32</span><span class="fnote">the first entry's code; <span class="k">cat_code = base + index</span></span>
         <span class="subhead">then the key arrays, concatenated in section order</span>
         <span class="fname">key</span><span class="ftype">u64×count</span><span class="fnote">ascending, no duplicates. char32×M packs cp[0] into the high bits, 21 bits each; chartype×N packs ct[0] high, 8 bits each; uint8 payloads are the value; no payload is 0. <span class="k">feature_id = section base + index</span>. With flags bit1, each section's keys are one varint run: <span class="k">varint(key₀), varint(key₁−key₀), …</span></span>
+        <span class="subhead">decided-reading features (v0x0B)</span>
+        <span class="fname">read_p1 / p2 / p3</span><span class="ftype">0x97 / 0x98 / 0x99</span><span class="fnote">char32×1 sections whose payload is not a code point but the <span class="hl">read-class index</span> (position in §2 labels) of the reading already decided for the 1st / 2nd / 3rd previous position. Training fills them from the gold labels of neighbouring rows (teacher forcing); inference from the labels the sequential loop has emitted so far. Only the reading model uses them (never a GBDT cat column). window=4 models replace <span class="k">char_p1</span> / <span class="k">bi_p1_s</span> with read_p1; window=5/7 add read_p1..p2 / p1..p3 alongside the raw-character features.</span>
       </div>
     </section>
 

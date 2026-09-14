@@ -65,6 +65,15 @@ pub enum FeatureType {
     CharNext2 = 0x94,
     CharPrev3 = 0x95,
     CharNext3 = 0x96,
+    /// 確定済みの前1文字の読み。ペイロード `cp[0]` は文字ではなく
+    /// **読みクラスの添字**（モデルの `read_classes` の位置）。
+    /// 学習時は隣接行の正解ラベル（教師強制）、推論時は逐次ループが確定した読み。
+    /// Python 版 `read_p1=<ラベル>`（exporter が `read_p1=#<添字>` に解決）。
+    ReadPrev1 = 0x97,
+    /// 確定済みの前2文字の読み（`ReadPrev1` 参照）。
+    ReadPrev2 = 0x98,
+    /// 確定済みの前3文字の読み（`ReadPrev1` 参照）。
+    ReadPrev3 = 0x99,
 
     // --- char32_t×2 (0b10'10'xxxx) ---
     BigramPrev1Self = 0xA0,
@@ -170,6 +179,9 @@ impl FeatureType {
             0x94 => CharNext2,
             0x95 => CharPrev3,
             0x96 => CharNext3,
+            0x97 => ReadPrev1,
+            0x98 => ReadPrev2,
+            0x99 => ReadPrev3,
 
             0xA0 => BigramPrev1Self,
             0xA1 => BigramPrev2Prev1,
@@ -342,6 +354,31 @@ fn cp_char(cp: u32) -> char {
     char::from_u32(cp).unwrap_or('\u{FFFD}')
 }
 
+/// `#<n>` → クラス添字。
+fn parse_class_index(s: &str) -> Option<u32> {
+    s.strip_prefix('#')?.parse().ok()
+}
+
+impl FeatureType {
+    /// 前 `k` 文字（k = 1..=3）の確定済み読み特徴量タイプ。範囲外は `None`。
+    pub fn read_prev(k: usize) -> Option<Self> {
+        match k {
+            1 => Some(FeatureType::ReadPrev1),
+            2 => Some(FeatureType::ReadPrev2),
+            3 => Some(FeatureType::ReadPrev3),
+            _ => None,
+        }
+    }
+
+    /// 確定済み読み特徴量（`ReadPrev1..3`）かどうか。
+    pub fn is_read_prev(self) -> bool {
+        matches!(
+            self,
+            FeatureType::ReadPrev1 | FeatureType::ReadPrev2 | FeatureType::ReadPrev3
+        )
+    }
+}
+
 impl std::fmt::Display for FeatureKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use FeatureType::*;
@@ -406,6 +443,11 @@ impl std::fmt::Display for FeatureKey {
             CharNext1 => write!(f, "char_n1={}", cp_char(cp[0])),
             CharNext2 => write!(f, "char_n2={}", cp_char(cp[0])),
             CharNext3 => write!(f, "char_n3={}", cp_char(cp[0])),
+            // ペイロードはクラス添字。ラベル文字列への変換はモデルが要るので
+            // Predictor 側（trace 表示）で行う。
+            ReadPrev1 => write!(f, "read_p1=#{}", cp[0]),
+            ReadPrev2 => write!(f, "read_p2=#{}", cp[0]),
+            ReadPrev3 => write!(f, "read_p3=#{}", cp[0]),
 
             BigramPrev1Self => write!(f, "bi_p1_s={}{}", cp_char(cp[0]), cp_char(cp[1])),
             BigramPrev2Prev1 => write!(f, "bi_p2_p1={}{}", cp_char(cp[0]), cp_char(cp[1])),
@@ -530,6 +572,13 @@ impl FeatureKey {
                 NameFlagNext1,
                 parse_name_flag(value)?,
             )),
+
+            // --- read 系（char32×1、値はクラス添字 `#<n>`）---
+            // ラベル文字列形（`read_p1=オトトイ`）はモデルが要るので
+            // `Predictor::parse_feature_name` で解決する。
+            "read_p1" => Some(FeatureKey::char_1(ReadPrev1, parse_class_index(value)?)),
+            "read_p2" => Some(FeatureKey::char_1(ReadPrev2, parse_class_index(value)?)),
+            "read_p3" => Some(FeatureKey::char_1(ReadPrev3, parse_class_index(value)?)),
 
             // --- type_tri（CharType×3）---
             "type_tri_p3_p2_p1" => {
@@ -710,6 +759,42 @@ mod tests {
         assert_eq!(FeatureType::from_u8(0xFF), None);
         assert_eq!(FeatureType::from_u8(0xC6), None);
         assert_eq!(FeatureType::from_u8(0xB6), None);
+        assert_eq!(FeatureType::from_u8(0x9A), None);
+    }
+
+    #[test]
+    fn read_prev_values_and_payload_kind() {
+        assert_eq!(FeatureType::from_u8(0x97), Some(FeatureType::ReadPrev1));
+        assert_eq!(FeatureType::from_u8(0x98), Some(FeatureType::ReadPrev2));
+        assert_eq!(FeatureType::from_u8(0x99), Some(FeatureType::ReadPrev3));
+        for k in 1..=3 {
+            let ft = FeatureType::read_prev(k).unwrap();
+            assert_eq!(ft.char32_count(), 1);
+            assert_eq!(ft.chartype_count(), 0);
+            assert!(!ft.is_uint8_payload());
+            assert!(ft.is_read_prev());
+        }
+        assert_eq!(FeatureType::read_prev(0), None);
+        assert_eq!(FeatureType::read_prev(4), None);
+        assert!(!FeatureType::CharPrev1.is_read_prev());
+        // 語彙セクションの昇順: char_n3 (0x96) の直後、bigram (0xA0) の前。
+        assert!(FeatureType::CharNext3 < FeatureType::ReadPrev1);
+        assert!(FeatureType::ReadPrev3 < FeatureType::BigramPrev1Self);
+    }
+
+    #[test]
+    fn read_prev_display_and_parse_roundtrip() {
+        let k = FeatureKey::char_1(FeatureType::ReadPrev2, 12);
+        assert_eq!(k.to_string(), "read_p2=#12");
+        assert_eq!(FeatureKey::parse_name("read_p2=#12"), Some(k));
+        assert_eq!(
+            FeatureKey::parse_name("read_p1=#0"),
+            Some(FeatureKey::char_1(FeatureType::ReadPrev1, 0))
+        );
+        // ラベル文字列形は純粋関数では解決できない（Predictor 側で行う）。
+        assert_eq!(FeatureKey::parse_name("read_p1=オトトイ"), None);
+        assert_eq!(FeatureKey::parse_name("read_p1=#x"), None);
+        assert_eq!(FeatureKey::parse_name("read_p4=#1"), None);
     }
 
     #[test]

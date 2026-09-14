@@ -12,6 +12,7 @@ from enum import Enum
 from typing import List, Optional, Tuple
 
 from .features import MORA_SPLIT
+from .features import LABEL_CONTEXT_ONLY as _LABEL_CONTEXT_ONLY
 
 
 class Role(str, Enum):
@@ -137,7 +138,7 @@ def _with_char_and_label(row: Row, new_char: str, new_label: str) -> Row:
 # INLINE括弧には使わない（tokenize_for_training参照）。中身と一緒に本文の
 # 流れに残るため、開き・閉じの行自体もRust推論側で実際の境界判定対象になる
 # ─ その行自身のラベル（+Sの有無）をそのまま学習に使う。
-LABEL_CONTEXT_ONLY = "@"
+LABEL_CONTEXT_ONLY = _LABEL_CONTEXT_ONLY
 
 
 def strip_for_training(rows: Sentence) -> Tuple[Sentence, List[Sentence]]:
@@ -181,7 +182,9 @@ def strip_for_training(rows: Sentence) -> Tuple[Sentence, List[Sentence]]:
                     print(f"⚠️  開き括弧行に+S(未対応パターン、無視): {row}")
             else:  # CLOSE
                 if out_rows and _has_space(row[1]):
-                    out_rows[-1] = _with_label(out_rows[-1], _set_space(out_rows[-1][1], True))
+                    out_rows[-1] = _with_label(
+                        out_rows[-1], _set_space(out_rows[-1][1], True)
+                    )
                 elif _has_space(row[1]):
                     print(f"⚠️  文頭付近の閉じ括弧+Sを移設できません(無視): {row}")
             i += 1

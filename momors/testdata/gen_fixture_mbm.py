@@ -44,7 +44,7 @@ CP_BITS = 21
 # ファイル識別情報（exporter.py の MAGIC_MBM / VERSION と同期）
 MAGIC = b'MOMO'
 # バージョンは `.mbmf`・GBDT フィクスチャと共有する（それぞれ base.VERSION を使う）
-VERSION = 0x0A
+VERSION = 0x0B
 
 # ヘッダ flags（version 0x07）。bit0 = 統合語彙が GBDT カテゴリカルを持つ。
 # このフィクスチャは線形境界なので flags=0（vocab に column/code を書かない）。

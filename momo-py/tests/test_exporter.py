@@ -3,6 +3,7 @@ exporter.py の単体テスト
   - parse_feature_key()（人名フラグ系）
   - export()（人名辞書テーブルの書き出し）
 """
+
 import io
 import json
 import struct
@@ -23,6 +24,7 @@ from momo_py.exporter import (
     export_float,
     is_uint8_payload,
     parse_feature_key,
+    resolve_read_feature_keys,
 )
 from momo_py.bundle import LRModelBundle
 
@@ -49,13 +51,52 @@ class TestParseNameFlagKeys:
 
 
 # ------------------------------------------------------------------ #
+# parse_feature_key / resolve_read_feature_keys（確定済みの前方読み系）
+# ------------------------------------------------------------------ #
+class TestReadPrevKeys:
+    def test_resolved_form_parses_to_class_index(self):
+        assert parse_feature_key("read_p1=#0") == (FT.READ_PREV1, [], [0], None)
+        assert parse_feature_key("read_p2=#12") == (FT.READ_PREV2, [], [12], None)
+        assert parse_feature_key("read_p3=#1587") == (FT.READ_PREV3, [], [1587], None)
+
+    def test_read_prev_is_char32x1_payload(self):
+        for ft in (FT.READ_PREV1, FT.READ_PREV2, FT.READ_PREV3):
+            assert char32_count(ft) == 1
+            assert chartype_count(ft) == 0
+            assert not is_uint8_payload(ft)
+        # char_n3 (0x96) の直後に並ぶ（語彙セクションの昇順）。
+        assert FT.CHAR_NEXT3 < FT.READ_PREV1 < FT.READ_PREV2 < FT.READ_PREV3 < 0xA0
+
+    def test_raw_label_form_raises(self):
+        with pytest.raises(ValueError, match="未知の特徴量キー"):
+            parse_feature_key("read_p1=オトトイ")
+
+    def test_resolve_rewrites_labels_to_indices(self):
+        vocab = {"bias": 0, "read_p1=トー": 1, "read_p2=サ": 2, "char_s=藤": 3}
+        out = resolve_read_feature_keys(vocab, ["サ", "トー"])
+        assert out == {"bias": 0, "read_p1=#1": 1, "read_p2=#0": 2, "char_s=藤": 3}
+
+    def test_resolve_unknown_label_raises(self):
+        with pytest.raises(ValueError, match="読みクラスにありません"):
+            resolve_read_feature_keys({"read_p1=ナシ": 0}, ["サ", "トー"])
+
+
+# ------------------------------------------------------------------ #
 # export（人名辞書テーブル）
 # ------------------------------------------------------------------ #
-def _make_model_zip(tmp_path, name_dict_text=None, single_char_dict_text="漢\tカン\tゲン\n"):
+def _make_model_zip(
+    tmp_path, name_dict_text=None, single_char_dict_text="漢\tカン\tゲン\n"
+):
     """人名フラグ特徴量を含む最小のモデルZIPを組み立てる。"""
     feats = [
         {"bias": 1.0, "char_s=佐": 1.0, "name_s=B": 1.0, "name_n1=I": 1.0},
-        {"bias": 1.0, "char_s=藤": 1.0, "name_s=I": 1.0, "name_p1=B": 1.0},
+        {
+            "bias": 1.0,
+            "char_s=藤": 1.0,
+            "name_s=I": 1.0,
+            "name_p1=B": 1.0,
+            "read_p1=サ": 1.0,
+        },
     ]
     vect = DictVectorizer(sparse=True)
     X = vect.fit_transform(feats)
@@ -63,9 +104,7 @@ def _make_model_zip(tmp_path, name_dict_text=None, single_char_dict_text="漢\t�
     X.indptr = X.indptr.astype(np.int32, copy=False)
     n_feat = len(vect.vocabulary_)
 
-    coef = csr_matrix(
-        np.array([[0.5] * n_feat, [-0.25] * n_feat], dtype=np.float32)
-    )
+    coef = csr_matrix(np.array([[0.5] * n_feat, [-0.25] * n_feat], dtype=np.float32))
     boundary = SGDClassifier(loss="modified_huber", max_iter=10)
     boundary.fit(X, ["0", "1"])
 
@@ -119,7 +158,7 @@ class TestExportNameDict:
 
         data = out.read_bytes()
         assert data[:4] == b"MOMO"
-        assert data[4] == 0x0A  # version
+        assert data[4] == 0x0B  # version
 
         # 人名辞書テーブル（表層形 + ユニット別読み）+ 末尾に単一文字辞書テーブル
         expected = bytearray(struct.pack("<I", 2))
@@ -146,7 +185,7 @@ class TestExportNameDict:
         export(str(zip_path), str(out))
 
         data = out.read_bytes()
-        assert data[4] == 0x0A
+        assert data[4] == 0x0B
         # 辞書なしモデルは n_names = 0、続けて単一文字辞書テーブル
         assert data.endswith(struct.pack("<I", 0) + _expected_single_char_section())
 
@@ -169,7 +208,9 @@ def _skip_vocab(buf: bytes, offset: int, n_features: int, has_cat: bool = False)
         (count,) = struct.unpack_from("<I", buf, offset + 16 * i + 4)
         total += count
     offset += 16 * n_sections
-    assert total == n_features, f"セクションの件数合計 {total} != n_features {n_features}"
+    assert total == n_features, (
+        f"セクションの件数合計 {total} != n_features {n_features}"
+    )
     return offset + 8 * n_features
 
 
@@ -211,7 +252,7 @@ class TestExportFloat:
 
         data = out.read_bytes()
         assert data[:4] == b"MBMF"
-        assert data[4] == 0x0A  # version（.mbm と共有。区別は magic だけで行う）
+        assert data[4] == 0x0B  # version（.mbm と共有。区別は magic だけで行う）
 
     def test_read_weights_are_plain_float32(self, tmp_path):
         zip_path = _make_model_zip(tmp_path, None)
@@ -254,7 +295,9 @@ class TestExportFloat:
         # --- .mbmf: 読みモデル重み + 境界モデル重み ---
         off_f = _skip_vocab(mbmf, 16, n_features)
         off_f = _skip_labels(mbmf, off_f, n_classes)
-        _, rowind_f, read_data_f, off_f = _read_csc_weights(mbmf, off_f, n_features, "f")
+        _, rowind_f, read_data_f, off_f = _read_csc_weights(
+            mbmf, off_f, n_features, "f"
+        )
         off_f += 4 * n_classes  # intercept_read
         boundary_data_f = struct.unpack_from(f"<{n_features}f", mbmf, off_f)
 
@@ -343,7 +386,10 @@ class TestUnifiedVocab:
         layout = _plan_vocab_layout(vocab, None)
         # 新 feature_id 0 は bias（元 1）、新 1 は char_s=漢（元 0）
         assert layout.old_fid_order == [1, 0]
-        assert [sec["feature_type"] for sec in layout.sections] == [FT.BIAS, FT.CHAR_SELF]
+        assert [sec["feature_type"] for sec in layout.sections] == [
+            FT.BIAS,
+            FT.CHAR_SELF,
+        ]
 
     def test_cat_codes_are_renumbered_in_key_order(self):
         # GBDT: 列はセクションが持ち、コードはキー順の通し番号に振り直す。
@@ -468,7 +514,10 @@ class TestDeltaVarint:
         # 圧縮形: 語彙はセクションごとの varint 列なので、件数ぶん読み飛ばす
         (n_sections,) = struct.unpack_from("<I", compact, 0 + 16)
         off_c = 16 + 4
-        counts = [struct.unpack_from("<I", compact, off_c + 16 * i + 4)[0] for i in range(n_sections)]
+        counts = [
+            struct.unpack_from("<I", compact, off_c + 16 * i + 4)[0]
+            for i in range(n_sections)
+        ]
         off_c += 16 * n_sections
         for c in counts:
             _, off_c = _decode_varints(compact, off_c, c)

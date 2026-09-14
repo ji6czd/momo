@@ -272,11 +272,18 @@ def _create_tsv_rows(
     # 漢字などは LABEL_CONTINUE で1文字ずつに分割する（推論は1文字単位のため）。
     if len(target_chars) == 1 or ctype in (CharType.HIRAGANA, CharType.KATAKANA):
         return [f"{target_chars}\t{r_label}\t{ctype}\t{orig_idx}\t{name_flag}"]
+    # 文字種は文字ごとに付ける。括弧グループ [一昨日] はユニットとしては先頭文字の
+    # JAPANESE_NUMERIC だが、推論側（Rust to_source_seq）は「昨」「日」を KANJI と
+    # 見るので、先頭の文字種を全行に付けると type_s / kanji_run / jnum_run 系の
+    # 特徴量が学習と推論で食い違う。get_units は位取り文字の昇格も同じ規則で行う。
+    char_types = [u[2] for u in get_units(target_chars)]
+    if len(char_types) != len(target_chars):
+        char_types = [ctype] * len(target_chars)
     rows = []
     for i, char in enumerate(target_chars):
         r_val = r_label if i == 0 else LABEL_CONTINUE
         rows.append(
-            f"{char}\t{r_val}\t{ctype}\t{orig_idx + i}\t{_expand_name_flag(name_flag, i)}"
+            f"{char}\t{r_val}\t{char_types[i]}\t{orig_idx + i}\t{_expand_name_flag(name_flag, i)}"
         )
     return rows
 

@@ -1047,6 +1047,7 @@ impl<M: WeightModel> Predictor<M> {
                         ),
                         &mut read_scratch,
                         &mut scores,
+                        self.resolved_read_label(&decided, run_end - 1),
                     );
                     self.model.read_class(cls as u32).unwrap_or("")
                 } else {
@@ -1176,11 +1177,15 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
             // スコア計算 + argmax（単一文字辞書制約付き）
             // ============================================================
+            let prev_read_label = i
+                .checked_sub(1)
+                .and_then(|j| self.resolved_read_label(&decided, j));
             let (best_cls, best_score) = self.read_argmax(
                 entry,
                 self.read_feat_ids(&all_feat_ids[i], &decided, i, &mut feat_buf),
                 &mut read_scratch,
                 &mut scores,
+                prev_read_label,
             );
 
             let conf = sigmoid(best_score);
@@ -1212,6 +1217,7 @@ impl<M: WeightModel> Predictor<M> {
                     self.read_feat_ids(&all_feat_ids[i + 1], &decided, i + 1, &mut feat_buf),
                     &mut read_scratch,
                     &mut scores,
+                    self.resolved_read_label(&decided, i),
                 );
                 let next_label = self.model.read_class(next_cls as u32).unwrap_or("");
                 let next_char = char::from_u32(source_seq[i + 1].cp)
@@ -1293,6 +1299,7 @@ impl<M: WeightModel> Predictor<M> {
                             ),
                             &mut read_scratch,
                             &mut scores,
+                            self.resolved_read_label(&decided, i),
                         );
                         let next_label = self.model.read_class(next_cls as u32).unwrap_or("");
                         let next_char = char::from_u32(source_seq[i + 1].cp)
@@ -1472,10 +1479,7 @@ impl<M: WeightModel> Predictor<M> {
             parent_is_bypass = false;
             // 漢数字がかな読みでユニット先頭になる熟字訓（一昨日・二十日）の後続
             // CONTINUE を孤立救済で潰さないよう、漢数字も「漢字の親」として扱う。
-            parent_is_kanji = matches!(
-                entry.ctype,
-                CharType::Kanji | CharType::JapaneseNumeric
-            );
+            parent_is_kanji = matches!(entry.ctype, CharType::Kanji | CharType::JapaneseNumeric);
             // 親ラベルに小書き仮名が含まれているか確認（C++ 版と同じ判定）
             parent_has_small_kana = effective_label.chars().any(|c| is_small_kana(c as u32));
             parent_kana_byte_end = result.kana_text.len();
@@ -1516,17 +1520,53 @@ impl<M: WeightModel> Predictor<M> {
     // private helpers
     // ============================================================
 
+    /// `decided[i]` があれば、その読みラベルを返す（LABEL_CONTINUE/LABEL_SKIP は除く）。
+    fn resolved_read_label<'b>(&'b self, decided: &[Option<u32>], i: usize) -> Option<&'b str> {
+        let label = self.model.read_class(decided[i]?)?;
+        (label != LABEL_CONTINUE && label != LABEL_SKIP).then_some(label)
+    }
+
     /// 1文字分の読みスコアを計算し、（単一文字辞書制約付き）argmax のクラスとスコアを返す。
     /// `scratch` / `scores` はスクラッチバッファ（呼び出しごとに上書きされる）。
+    /// `prev_read_label` は直前の文字の確定読み（「々」の連濁判定に使う）。
     fn read_argmax(
         &self,
         entry: &SourceEntry,
         feat_ids: &[u32],
         scratch: &mut M::Scratch,
         scores: &mut [f32],
+        prev_read_label: Option<&str>,
     ) -> (usize, f32) {
         let _g = phase::Guard::new(Phase::Read);
         self.model.compute_read_scores(feat_ids, scratch, scores);
+
+        // 「々」（漢字の繰返し記号）: 単一文字辞書のフラットな読み一覧ではなく、
+        // 直前の文字の確定読みそのもの、またはその連濁形の2つだけに候補を絞る。
+        // 「々」の読みは本来「々」固有の性質ではなく直前の漢字の読みを機械的に
+        // 引き継ぐだけなので、学習データに出た読み文字列を集めた辞書（データが
+        // 増えるほど候補が膨らみ続け、未見の熟語は原理的に候補外になる）より、
+        // その場で確定読みから候補を作る方が構造的に正しい。basic_raw.tsv への
+        // データ追加だけで対応できる従来の入力フローは変えない。
+        if entry.ctype == CharType::Kanji && char::from_u32(entry.cp) == Some('々') {
+            if let Some(base) = prev_read_label {
+                let voiced = rendaku_form(base);
+                let mut candidates = [0usize; 2];
+                let mut n = 0;
+                if let Some(id) = self.read_class_id(base) {
+                    candidates[n] = id as usize;
+                    n += 1;
+                }
+                if let Some(id) = voiced.as_deref().and_then(|v| self.read_class_id(v)) {
+                    candidates[n] = id as usize;
+                    n += 1;
+                }
+                if n > 0 {
+                    if let Some(result) = constrained_argmax_cls(scores, &candidates[..n]) {
+                        return result;
+                    }
+                }
+            }
+        }
 
         // 単一文字辞書制約付き argmax（漢字・算用数字1文字が対象）。
         // 算用数字は「1」→{"1","ヒト","ツイ"} のように辞書の候補外の読み
@@ -1799,7 +1839,11 @@ impl<M: WeightModel> Predictor<M> {
                     ids.push(id);
                 }
             }
-            let (best_cls, _) = self.read_argmax(entry, &ids, &mut scratch, &mut scores);
+            let prev_read_label = i
+                .checked_sub(1)
+                .and_then(|j| self.resolved_read_label(&decided, j));
+            let (best_cls, _) =
+                self.read_argmax(entry, &ids, &mut scratch, &mut scores, prev_read_label);
             let best_cls = best_cls as u32;
             decided[i] = Some(best_cls);
 
@@ -2486,25 +2530,24 @@ fn is_voiced_obstruent(c: char) -> bool {
     )
 }
 
+/// `reading` の連濁形（先頭モーラを濁音化した文字列）を返す。
+/// 先頭モーラが濁音化できない、または `reading` が既に濁音を含む
+/// （ライマンの法則: 二重連濁は起きない）場合は `None`。
+fn rendaku_form(reading: &str) -> Option<String> {
+    let mut chars = reading.chars();
+    let first = chars.next()?;
+    let voiced = rendaku_first(first)?;
+    if reading.chars().any(is_voiced_obstruent) {
+        return None;
+    }
+    Some(std::iter::once(voiced).chain(chars).collect())
+}
+
 /// 々の予測として妥当かどうかを検証する。
 ///
 /// `label` が `last_fallback` そのまま、または連濁形（ライマンの法則に反しない場合）なら true。
 fn is_valid_repeat(label: &str, last_fallback: &str) -> bool {
-    if label == last_fallback {
-        return true;
-    }
-    let mut chars = last_fallback.chars();
-    if let Some(first) = chars.next() {
-        if let Some(voiced) = rendaku_first(first) {
-            if !last_fallback.chars().any(is_voiced_obstruent) {
-                let rendaku: String = std::iter::once(voiced).chain(chars).collect();
-                if label == rendaku {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    label == last_fallback || rendaku_form(last_fallback).as_deref() == Some(label)
 }
 
 fn is_valid_kana_prediction(entry: &SourceEntry, label: &str, direct: &str) -> bool {
@@ -2907,7 +2950,7 @@ mod tests {
 
         let mut scratch = predictor.model.new_scratch();
         let mut scores = vec![0f32; predictor.model.n_classes() as usize];
-        let (cls, _) = predictor.read_argmax(&source_seq[0], &ids, &mut scratch, &mut scores);
+        let (cls, _) = predictor.read_argmax(&source_seq[0], &ids, &mut scratch, &mut scores, None);
         assert_eq!(predictor.model.read_class(cls as u32), Some("ク"));
     }
 
@@ -3029,8 +3072,11 @@ mod tests {
             .unwrap();
         // 詰めたキーは昇順: 一 (U+4E00) < 字 (U+5B57) < 漢 (U+6F22)
         for ch in ['一', '字', '漢'] {
-            b.push_key(pack_key(&FeatureKey::char_1(FeatureType::CharSelf, ch as u32)))
-                .unwrap();
+            b.push_key(pack_key(&FeatureKey::char_1(
+                FeatureType::CharSelf,
+                ch as u32,
+            )))
+            .unwrap();
         }
         b.begin_section(FeatureType::ReadPrev1, 2, crate::model::NO_CAT_COLUMN, 0)
             .unwrap();

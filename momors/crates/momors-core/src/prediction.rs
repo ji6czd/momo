@@ -41,6 +41,11 @@ const LABEL_SKIP: &str = "_";
 /// 々 (同の字点) の Unicode コードポイント。
 const CHAR_NOMA: u32 = 0x3005;
 
+/// 々が繰り返す対象（直前の確定読み）を持たずに単独出現したとき（文頭・記号直後など、
+/// 記号そのものへの言及）の固定読み。正式名称「どうのじてん」は長いため、点字で
+/// 読んでもストレスの少ない短い読みに倒す。
+const NOMA_STANDALONE_READING: &str = "ドー";
+
 /// 人名辞書読みフォールバックを発動させる自信度の上限。
 /// 人名スパン内の読みがこれ未満の自信度のとき、辞書の固定読みで置換する。
 /// Python 版 `_LR_LOW_THRESHOLD` と対応。
@@ -1547,7 +1552,7 @@ impl<M: WeightModel> Predictor<M> {
         // 増えるほど候補が膨らみ続け、未見の熟語は原理的に候補外になる）より、
         // その場で確定読みから候補を作る方が構造的に正しい。basic_raw.tsv への
         // データ追加だけで対応できる従来の入力フローは変えない。
-        if entry.ctype == CharType::Kanji && char::from_u32(entry.cp) == Some('々') {
+        if entry.ctype == CharType::Kanji && entry.cp == CHAR_NOMA {
             if let Some(base) = prev_read_label {
                 let voiced = rendaku_form(base);
                 let mut candidates = [0usize; 2];
@@ -1564,6 +1569,11 @@ impl<M: WeightModel> Predictor<M> {
                     if let Some(result) = constrained_argmax_cls(scores, &candidates[..n]) {
                         return result;
                     }
+                }
+            } else if let Some(id) = self.read_class_id(NOMA_STANDALONE_READING) {
+                // 繰り返す対象が無い単独出現（文頭・記号直後など、記号自体への言及）。
+                if let Some(result) = constrained_argmax_cls(scores, &[id as usize]) {
+                    return result;
                 }
             }
         }

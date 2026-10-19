@@ -106,9 +106,9 @@ tasks:
       - espflash flash {{if .PORT}}-p {{.PORT}}{{end}} --flash-size 16mb --flash-mode qio --flash-freq 80mhz --partition-table partitions.csv "{{.ELF}}"
 
   esp:flash-model:
-    desc: Write the window=4 model (.mbm) into the "model" partition (offset 0x400000)
+    desc: Write the window=5 model (.mbm) into the "model" partition (offset 0x400000)
     vars:
-      MODEL: "{{.ROOT_DIR}}/dataset/basic_data_4.mbm"
+      MODEL: "{{.ROOT_DIR}}/dataset/basic_data_5.mbm"
     cmds:
       - espflash write-bin {{if .PORT}}-p {{.PORT}}{{end}} 0x400000 "{{.MODEL}}"
 

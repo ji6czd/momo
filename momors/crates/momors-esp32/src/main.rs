@@ -330,25 +330,23 @@ struct Engine {
 
 impl Engine {
     fn handle_text(&self, out: &mut impl Write, text: &str) {
+        writeln!(out, "src:     {text}").ok();
         let start = Instant::now();
-        let (kana, seg) = match &self.predictor {
+        let kana = match &self.predictor {
             Some(p) => match p.predict(text) {
-                Ok(r) => (r.kana_text().to_owned(), Some(r.format_source_segmented())),
+                Ok(r) => r.kana_text().to_owned(),
                 Err(e) => {
                     writeln!(out, "error: {e}").ok();
                     return;
                 }
             },
             // モデルなし: 入力をかなとみなす
-            None => (text.to_owned(), None),
+            None => text.to_owned(),
         };
         let predict_ms = start.elapsed().as_millis();
 
         if self.mode != Mode::Braille {
             writeln!(out, "kana:    {kana}").ok();
-            if let Some(seg) = &seg {
-                writeln!(out, "seg:     {seg}").ok();
-            }
         }
         if self.mode != Mode::Kana {
             match self.translator.translate(&kana) {
@@ -675,7 +673,8 @@ fn main() {
 
     // ---- 点字テーブル（埋め込み TOML を起動時に解析）----
     let t = Instant::now();
-    let translator = BrailleTranslator::from_embedded().expect("埋め込み点字テーブルの読み込みに失敗");
+    let translator =
+        BrailleTranslator::from_embedded().expect("埋め込み点字テーブルの読み込みに失敗");
     writeln!(
         out,
         "braille table: ready in {} ms   heap: {}  stack: {}",

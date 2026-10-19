@@ -1,0 +1,15 @@
+[project]
+name = "momo-llm-gpu-kit"
+version = "0.1.0"
+description = "momo: LLM に文字ごとの候補から漢字の読みを選ばせる評価（クラウドの GPU 用）"
+requires-python = ">=3.11"
+dependencies = [
+    "accelerate",  # device_map で大きいモデルを GPU へ直接載せる
+    "protobuf",
+    "sentencepiece",
+    "torch",
+    "transformers",
+]
+
+[tool.uv]
+package = false

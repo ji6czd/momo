@@ -1,0 +1,26 @@
+[project]
+name = "llm-reading"
+version = "0.1.0"
+description = "LLM 読み推定の前段（フェーズ A）: 学習曲線・誤りの分解・分け方の監査"
+readme = "README.md"
+authors = [
+    { name = "KIRIAKE Masanori", email = "seiken@rd01.net" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "momo-py",
+    "momors-py",
+]
+
+[dependency-groups]
+# 05_llm_select.py（素の LLM に候補から読みを選ばせる予備実験）用。CPU で動かす
+llm = [
+    "protobuf",  # sentencepiece の model を transformers が変換するのに要る
+    "sentencepiece",  # Sarashina のトークナイザ（tokenizer.model）を読むのに要る
+    "torch",
+    "transformers",
+]
+
+[tool.uv.sources]
+momo-py = { path = "../../momo-py", editable = true }
+momors-py = { path = "../../momors/crates/momors-pyo3/dist/momors_py-0.11.0-cp313-abi3-win_amd64.whl" }

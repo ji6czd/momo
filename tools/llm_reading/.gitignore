@@ -1,0 +1,6 @@
+# 仮想環境
+.venv/
+__pycache__/
+
+# 中間ファイル（_common.py の WORK）。分割・学習曲線のモデル・集計結果
+work/

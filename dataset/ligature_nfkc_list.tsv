@@ -1,0 +1,616 @@
+カテゴリ	コードポイント	文字	NFKC展開	文字数	展開内容	Unicode名
+1. 元号合字	U+32FF	㋿	令和	1→2	漢字	SQUARE ERA NAME REIWA
+1. 元号合字	U+337B	㍻	平成	1→2	漢字	SQUARE ERA NAME HEISEI
+1. 元号合字	U+337C	㍼	昭和	1→2	漢字	SQUARE ERA NAME SYOUWA
+1. 元号合字	U+337D	㍽	大正	1→2	漢字	SQUARE ERA NAME TAISYOU
+1. 元号合字	U+337E	㍾	明治	1→2	漢字	SQUARE ERA NAME MEIZI
+2. 企業・略語合字	U+2121	℡	TEL	1→3	半角英字	TELEPHONE SIGN
+2. 企業・略語合字	U+2116	№	No	1→2	半角英字	NUMERO SIGN
+2. 企業・略語合字	U+3231	㈱	(株)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH STOCK
+2. 企業・略語合字	U+3232	㈲	(有)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH HAVE
+2. 企業・略語合字	U+3233	㈳	(社)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH SOCIETY
+2. 企業・略語合字	U+3234	㈴	(名)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH NAME
+2. 企業・略語合字	U+3235	㈵	(特)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH SPECIAL
+2. 企業・略語合字	U+3236	㈶	(財)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH FINANCIAL
+2. 企業・略語合字	U+3237	㈷	(祝)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH CONGRATULATION
+2. 企業・略語合字	U+3238	㈸	(労)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH LABOR
+2. 企業・略語合字	U+3239	㈹	(代)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH REPRESENT
+2. 企業・略語合字	U+323A	㈺	(呼)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH CALL
+2. 企業・略語合字	U+323B	㈻	(学)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH STUDY
+2. 企業・略語合字	U+323C	㈼	(監)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH SUPERVISE
+2. 企業・略語合字	U+323D	㈽	(企)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH ENTERPRISE
+2. 企業・略語合字	U+323E	㈾	(資)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH RESOURCE
+2. 企業・略語合字	U+323F	㈿	(協)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH ALLIANCE
+2. 企業・略語合字	U+3240	㉀	(祭)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH FESTIVAL
+2. 企業・略語合字	U+3241	㉁	(休)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH REST
+2. 企業・略語合字	U+3242	㉂	(自)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH SELF
+2. 企業・略語合字	U+3243	㉃	(至)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH REACH
+2. 企業・略語合字	U+337F	㍿	株式会社	1→4	漢字	SQUARE CORPORATION
+2. 企業・略語合字	U+32A4	㊤	上	1→1	漢字	CIRCLED IDEOGRAPH HIGH
+2. 企業・略語合字	U+32A5	㊥	中	1→1	漢字	CIRCLED IDEOGRAPH CENTRE
+2. 企業・略語合字	U+32A6	㊦	下	1→1	漢字	CIRCLED IDEOGRAPH LOW
+2. 企業・略語合字	U+32A7	㊧	左	1→1	漢字	CIRCLED IDEOGRAPH LEFT
+2. 企業・略語合字	U+32A8	㊨	右	1→1	漢字	CIRCLED IDEOGRAPH RIGHT
+3. 単位カタカナ合字	U+3300	㌀	アパート	1→4	カタカナ	SQUARE APAATO
+3. 単位カタカナ合字	U+3301	㌁	アルファ	1→4	カタカナ	SQUARE ARUHUA
+3. 単位カタカナ合字	U+3302	㌂	アンペア	1→4	カタカナ	SQUARE ANPEA
+3. 単位カタカナ合字	U+3303	㌃	アール	1→3	カタカナ	SQUARE AARU
+3. 単位カタカナ合字	U+3304	㌄	イニング	1→4	カタカナ	SQUARE ININGU
+3. 単位カタカナ合字	U+3305	㌅	インチ	1→3	カタカナ	SQUARE INTI
+3. 単位カタカナ合字	U+3306	㌆	ウォン	1→3	カタカナ	SQUARE UON
+3. 単位カタカナ合字	U+3307	㌇	エスクード	1→5	カタカナ	SQUARE ESUKUUDO
+3. 単位カタカナ合字	U+3308	㌈	エーカー	1→4	カタカナ	SQUARE EEKAA
+3. 単位カタカナ合字	U+3309	㌉	オンス	1→3	カタカナ	SQUARE ONSU
+3. 単位カタカナ合字	U+330A	㌊	オーム	1→3	カタカナ	SQUARE OOMU
+3. 単位カタカナ合字	U+330B	㌋	カイリ	1→3	カタカナ	SQUARE KAIRI
+3. 単位カタカナ合字	U+330C	㌌	カラット	1→4	カタカナ	SQUARE KARATTO
+3. 単位カタカナ合字	U+330D	㌍	カロリー	1→4	カタカナ	SQUARE KARORII
+3. 単位カタカナ合字	U+330E	㌎	ガロン	1→3	カタカナ	SQUARE GARON
+3. 単位カタカナ合字	U+330F	㌏	ガンマ	1→3	カタカナ	SQUARE GANMA
+3. 単位カタカナ合字	U+3310	㌐	ギガ	1→2	カタカナ	SQUARE GIGA
+3. 単位カタカナ合字	U+3311	㌑	ギニー	1→3	カタカナ	SQUARE GINII
+3. 単位カタカナ合字	U+3312	㌒	キュリー	1→4	カタカナ	SQUARE KYURII
+3. 単位カタカナ合字	U+3313	㌓	ギルダー	1→4	カタカナ	SQUARE GIRUDAA
+3. 単位カタカナ合字	U+3314	㌔	キロ	1→2	カタカナ	SQUARE KIRO
+3. 単位カタカナ合字	U+3315	㌕	キログラム	1→5	カタカナ	SQUARE KIROGURAMU
+3. 単位カタカナ合字	U+3316	㌖	キロメートル	1→6	カタカナ	SQUARE KIROMEETORU
+3. 単位カタカナ合字	U+3317	㌗	キロワット	1→5	カタカナ	SQUARE KIROWATTO
+3. 単位カタカナ合字	U+3318	㌘	グラム	1→3	カタカナ	SQUARE GURAMU
+3. 単位カタカナ合字	U+3319	㌙	グラムトン	1→5	カタカナ	SQUARE GURAMUTON
+3. 単位カタカナ合字	U+331A	㌚	クルゼイロ	1→5	カタカナ	SQUARE KURUZEIRO
+3. 単位カタカナ合字	U+331B	㌛	クローネ	1→4	カタカナ	SQUARE KUROONE
+3. 単位カタカナ合字	U+331C	㌜	ケース	1→3	カタカナ	SQUARE KEESU
+3. 単位カタカナ合字	U+331D	㌝	コルナ	1→3	カタカナ	SQUARE KORUNA
+3. 単位カタカナ合字	U+331E	㌞	コーポ	1→3	カタカナ	SQUARE KOOPO
+3. 単位カタカナ合字	U+331F	㌟	サイクル	1→4	カタカナ	SQUARE SAIKURU
+3. 単位カタカナ合字	U+3320	㌠	サンチーム	1→5	カタカナ	SQUARE SANTIIMU
+3. 単位カタカナ合字	U+3321	㌡	シリング	1→4	カタカナ	SQUARE SIRINGU
+3. 単位カタカナ合字	U+3322	㌢	センチ	1→3	カタカナ	SQUARE SENTI
+3. 単位カタカナ合字	U+3323	㌣	セント	1→3	カタカナ	SQUARE SENTO
+3. 単位カタカナ合字	U+3324	㌤	ダース	1→3	カタカナ	SQUARE DAASU
+3. 単位カタカナ合字	U+3325	㌥	デシ	1→2	カタカナ	SQUARE DESI
+3. 単位カタカナ合字	U+3326	㌦	ドル	1→2	カタカナ	SQUARE DORU
+3. 単位カタカナ合字	U+3327	㌧	トン	1→2	カタカナ	SQUARE TON
+3. 単位カタカナ合字	U+3328	㌨	ナノ	1→2	カタカナ	SQUARE NANO
+3. 単位カタカナ合字	U+3329	㌩	ノット	1→3	カタカナ	SQUARE NOTTO
+3. 単位カタカナ合字	U+332A	㌪	ハイツ	1→3	カタカナ	SQUARE HAITU
+3. 単位カタカナ合字	U+332B	㌫	パーセント	1→5	カタカナ	SQUARE PAASENTO
+3. 単位カタカナ合字	U+332C	㌬	パーツ	1→3	カタカナ	SQUARE PAATU
+3. 単位カタカナ合字	U+332D	㌭	バーレル	1→4	カタカナ	SQUARE BAARERU
+3. 単位カタカナ合字	U+332E	㌮	ピアストル	1→5	カタカナ	SQUARE PIASUTORU
+3. 単位カタカナ合字	U+332F	㌯	ピクル	1→3	カタカナ	SQUARE PIKURU
+3. 単位カタカナ合字	U+3330	㌰	ピコ	1→2	カタカナ	SQUARE PIKO
+3. 単位カタカナ合字	U+3331	㌱	ビル	1→2	カタカナ	SQUARE BIRU
+3. 単位カタカナ合字	U+3332	㌲	ファラッド	1→5	カタカナ	SQUARE HUARADDO
+3. 単位カタカナ合字	U+3333	㌳	フィート	1→4	カタカナ	SQUARE HUIITO
+3. 単位カタカナ合字	U+3334	㌴	ブッシェル	1→5	カタカナ	SQUARE BUSSYERU
+3. 単位カタカナ合字	U+3335	㌵	フラン	1→3	カタカナ	SQUARE HURAN
+3. 単位カタカナ合字	U+3336	㌶	ヘクタール	1→5	カタカナ	SQUARE HEKUTAARU
+3. 単位カタカナ合字	U+3337	㌷	ペソ	1→2	カタカナ	SQUARE PESO
+3. 単位カタカナ合字	U+3338	㌸	ペニヒ	1→3	カタカナ	SQUARE PENIHI
+3. 単位カタカナ合字	U+3339	㌹	ヘルツ	1→3	カタカナ	SQUARE HERUTU
+3. 単位カタカナ合字	U+333A	㌺	ペンス	1→3	カタカナ	SQUARE PENSU
+3. 単位カタカナ合字	U+333B	㌻	ページ	1→3	カタカナ	SQUARE PEEZI
+3. 単位カタカナ合字	U+333C	㌼	ベータ	1→3	カタカナ	SQUARE BEETA
+3. 単位カタカナ合字	U+333D	㌽	ポイント	1→4	カタカナ	SQUARE POINTO
+3. 単位カタカナ合字	U+333E	㌾	ボルト	1→3	カタカナ	SQUARE BORUTO
+3. 単位カタカナ合字	U+333F	㌿	ホン	1→2	カタカナ	SQUARE HON
+3. 単位カタカナ合字	U+3340	㍀	ポンド	1→3	カタカナ	SQUARE PONDO
+3. 単位カタカナ合字	U+3341	㍁	ホール	1→3	カタカナ	SQUARE HOORU
+3. 単位カタカナ合字	U+3342	㍂	ホーン	1→3	カタカナ	SQUARE HOON
+3. 単位カタカナ合字	U+3343	㍃	マイクロ	1→4	カタカナ	SQUARE MAIKURO
+3. 単位カタカナ合字	U+3344	㍄	マイル	1→3	カタカナ	SQUARE MAIRU
+3. 単位カタカナ合字	U+3345	㍅	マッハ	1→3	カタカナ	SQUARE MAHHA
+3. 単位カタカナ合字	U+3346	㍆	マルク	1→3	カタカナ	SQUARE MARUKU
+3. 単位カタカナ合字	U+3347	㍇	マンション	1→5	カタカナ	SQUARE MANSYON
+3. 単位カタカナ合字	U+3348	㍈	ミクロン	1→4	カタカナ	SQUARE MIKURON
+3. 単位カタカナ合字	U+3349	㍉	ミリ	1→2	カタカナ	SQUARE MIRI
+3. 単位カタカナ合字	U+334A	㍊	ミリバール	1→5	カタカナ	SQUARE MIRIBAARU
+3. 単位カタカナ合字	U+334B	㍋	メガ	1→2	カタカナ	SQUARE MEGA
+3. 単位カタカナ合字	U+334C	㍌	メガトン	1→4	カタカナ	SQUARE MEGATON
+3. 単位カタカナ合字	U+334D	㍍	メートル	1→4	カタカナ	SQUARE MEETORU
+3. 単位カタカナ合字	U+334E	㍎	ヤード	1→3	カタカナ	SQUARE YAADO
+3. 単位カタカナ合字	U+334F	㍏	ヤール	1→3	カタカナ	SQUARE YAARU
+3. 単位カタカナ合字	U+3350	㍐	ユアン	1→3	カタカナ	SQUARE YUAN
+3. 単位カタカナ合字	U+3351	㍑	リットル	1→4	カタカナ	SQUARE RITTORU
+3. 単位カタカナ合字	U+3352	㍒	リラ	1→2	カタカナ	SQUARE RIRA
+3. 単位カタカナ合字	U+3353	㍓	ルピー	1→3	カタカナ	SQUARE RUPII
+3. 単位カタカナ合字	U+3354	㍔	ルーブル	1→4	カタカナ	SQUARE RUUBURU
+3. 単位カタカナ合字	U+3355	㍕	レム	1→2	カタカナ	SQUARE REMU
+3. 単位カタカナ合字	U+3356	㍖	レントゲン	1→5	カタカナ	SQUARE RENTOGEN
+3. 単位カタカナ合字	U+3357	㍗	ワット	1→3	カタカナ	SQUARE WATTO
+4. 単位記号合字	U+3371	㍱	hPa	1→3	半角英字	SQUARE HPA
+4. 単位記号合字	U+3372	㍲	da	1→2	半角英字	SQUARE DA
+4. 単位記号合字	U+3373	㍳	AU	1→2	半角英字	SQUARE AU
+4. 単位記号合字	U+3374	㍴	bar	1→3	半角英字	SQUARE BAR
+4. 単位記号合字	U+3375	㍵	oV	1→2	半角英字	SQUARE OV
+4. 単位記号合字	U+3376	㍶	pc	1→2	半角英字	SQUARE PC
+4. 単位記号合字	U+3377	㍷	dm	1→2	半角英字	SQUARE DM
+4. 単位記号合字	U+3378	㍸	dm2	1→3	半角英字+半角数字	SQUARE DM SQUARED
+4. 単位記号合字	U+3379	㍹	dm3	1→3	半角英字+半角数字	SQUARE DM CUBED
+4. 単位記号合字	U+337A	㍺	IU	1→2	半角英字	SQUARE IU
+4. 単位記号合字	U+3380	㎀	pA	1→2	半角英字	SQUARE PA AMPS
+4. 単位記号合字	U+3381	㎁	nA	1→2	半角英字	SQUARE NA
+4. 単位記号合字	U+3382	㎂	μA	1→2	半角英字	SQUARE MU A
+4. 単位記号合字	U+3383	㎃	mA	1→2	半角英字	SQUARE MA
+4. 単位記号合字	U+3384	㎄	kA	1→2	半角英字	SQUARE KA
+4. 単位記号合字	U+3385	㎅	KB	1→2	半角英字	SQUARE KB
+4. 単位記号合字	U+3386	㎆	MB	1→2	半角英字	SQUARE MB
+4. 単位記号合字	U+3387	㎇	GB	1→2	半角英字	SQUARE GB
+4. 単位記号合字	U+3388	㎈	cal	1→3	半角英字	SQUARE CAL
+4. 単位記号合字	U+3389	㎉	kcal	1→4	半角英字	SQUARE KCAL
+4. 単位記号合字	U+338A	㎊	pF	1→2	半角英字	SQUARE PF
+4. 単位記号合字	U+338B	㎋	nF	1→2	半角英字	SQUARE NF
+4. 単位記号合字	U+338C	㎌	μF	1→2	半角英字	SQUARE MU F
+4. 単位記号合字	U+338D	㎍	μg	1→2	半角英字	SQUARE MU G
+4. 単位記号合字	U+338E	㎎	mg	1→2	半角英字	SQUARE MG
+4. 単位記号合字	U+338F	㎏	kg	1→2	半角英字	SQUARE KG
+4. 単位記号合字	U+3390	㎐	Hz	1→2	半角英字	SQUARE HZ
+4. 単位記号合字	U+3391	㎑	kHz	1→3	半角英字	SQUARE KHZ
+4. 単位記号合字	U+3392	㎒	MHz	1→3	半角英字	SQUARE MHZ
+4. 単位記号合字	U+3393	㎓	GHz	1→3	半角英字	SQUARE GHZ
+4. 単位記号合字	U+3394	㎔	THz	1→3	半角英字	SQUARE THZ
+4. 単位記号合字	U+3395	㎕	μl	1→2	半角英字	SQUARE MU L
+4. 単位記号合字	U+3396	㎖	ml	1→2	半角英字	SQUARE ML
+4. 単位記号合字	U+3397	㎗	dl	1→2	半角英字	SQUARE DL
+4. 単位記号合字	U+3398	㎘	kl	1→2	半角英字	SQUARE KL
+4. 単位記号合字	U+3399	㎙	fm	1→2	半角英字	SQUARE FM
+4. 単位記号合字	U+339A	㎚	nm	1→2	半角英字	SQUARE NM
+4. 単位記号合字	U+339B	㎛	μm	1→2	半角英字	SQUARE MU M
+4. 単位記号合字	U+339C	㎜	mm	1→2	半角英字	SQUARE MM
+4. 単位記号合字	U+339D	㎝	cm	1→2	半角英字	SQUARE CM
+4. 単位記号合字	U+339E	㎞	km	1→2	半角英字	SQUARE KM
+4. 単位記号合字	U+339F	㎟	mm2	1→3	半角英字+半角数字	SQUARE MM SQUARED
+4. 単位記号合字	U+33A0	㎠	cm2	1→3	半角英字+半角数字	SQUARE CM SQUARED
+4. 単位記号合字	U+33A1	㎡	m2	1→2	半角英字+半角数字	SQUARE M SQUARED
+4. 単位記号合字	U+33A2	㎢	km2	1→3	半角英字+半角数字	SQUARE KM SQUARED
+4. 単位記号合字	U+33A3	㎣	mm3	1→3	半角英字+半角数字	SQUARE MM CUBED
+4. 単位記号合字	U+33A4	㎤	cm3	1→3	半角英字+半角数字	SQUARE CM CUBED
+4. 単位記号合字	U+33A5	㎥	m3	1→2	半角英字+半角数字	SQUARE M CUBED
+4. 単位記号合字	U+33A6	㎦	km3	1→3	半角英字+半角数字	SQUARE KM CUBED
+4. 単位記号合字	U+33A7	㎧	m∕s	1→3	半角英字+記号	SQUARE M OVER S
+4. 単位記号合字	U+33A8	㎨	m∕s2	1→4	半角英字+半角数字+記号	SQUARE M OVER S SQUARED
+4. 単位記号合字	U+33A9	㎩	Pa	1→2	半角英字	SQUARE PA
+4. 単位記号合字	U+33AA	㎪	kPa	1→3	半角英字	SQUARE KPA
+4. 単位記号合字	U+33AB	㎫	MPa	1→3	半角英字	SQUARE MPA
+4. 単位記号合字	U+33AC	㎬	GPa	1→3	半角英字	SQUARE GPA
+4. 単位記号合字	U+33AD	㎭	rad	1→3	半角英字	SQUARE RAD
+4. 単位記号合字	U+33AE	㎮	rad∕s	1→5	半角英字+記号	SQUARE RAD OVER S
+4. 単位記号合字	U+33AF	㎯	rad∕s2	1→6	半角英字+半角数字+記号	SQUARE RAD OVER S SQUARED
+4. 単位記号合字	U+33B0	㎰	ps	1→2	半角英字	SQUARE PS
+4. 単位記号合字	U+33B1	㎱	ns	1→2	半角英字	SQUARE NS
+4. 単位記号合字	U+33B2	㎲	μs	1→2	半角英字	SQUARE MU S
+4. 単位記号合字	U+33B3	㎳	ms	1→2	半角英字	SQUARE MS
+4. 単位記号合字	U+33B4	㎴	pV	1→2	半角英字	SQUARE PV
+4. 単位記号合字	U+33B5	㎵	nV	1→2	半角英字	SQUARE NV
+4. 単位記号合字	U+33B6	㎶	μV	1→2	半角英字	SQUARE MU V
+4. 単位記号合字	U+33B7	㎷	mV	1→2	半角英字	SQUARE MV
+4. 単位記号合字	U+33B8	㎸	kV	1→2	半角英字	SQUARE KV
+4. 単位記号合字	U+33B9	㎹	MV	1→2	半角英字	SQUARE MV MEGA
+4. 単位記号合字	U+33BA	㎺	pW	1→2	半角英字	SQUARE PW
+4. 単位記号合字	U+33BB	㎻	nW	1→2	半角英字	SQUARE NW
+4. 単位記号合字	U+33BC	㎼	μW	1→2	半角英字	SQUARE MU W
+4. 単位記号合字	U+33BD	㎽	mW	1→2	半角英字	SQUARE MW
+4. 単位記号合字	U+33BE	㎾	kW	1→2	半角英字	SQUARE KW
+4. 単位記号合字	U+33BF	㎿	MW	1→2	半角英字	SQUARE MW MEGA
+4. 単位記号合字	U+33C0	㏀	kΩ	1→2	半角英字	SQUARE K OHM
+4. 単位記号合字	U+33C1	㏁	MΩ	1→2	半角英字	SQUARE M OHM
+4. 単位記号合字	U+33C2	㏂	a.m.	1→4	半角英字+記号	SQUARE AM
+4. 単位記号合字	U+33C3	㏃	Bq	1→2	半角英字	SQUARE BQ
+4. 単位記号合字	U+33C4	㏄	cc	1→2	半角英字	SQUARE CC
+4. 単位記号合字	U+33C5	㏅	cd	1→2	半角英字	SQUARE CD
+4. 単位記号合字	U+33C6	㏆	C∕kg	1→4	半角英字+記号	SQUARE C OVER KG
+4. 単位記号合字	U+33C7	㏇	Co.	1→3	半角英字+記号	SQUARE CO
+4. 単位記号合字	U+33C8	㏈	dB	1→2	半角英字	SQUARE DB
+4. 単位記号合字	U+33C9	㏉	Gy	1→2	半角英字	SQUARE GY
+4. 単位記号合字	U+33CA	㏊	ha	1→2	半角英字	SQUARE HA
+4. 単位記号合字	U+33CB	㏋	HP	1→2	半角英字	SQUARE HP
+4. 単位記号合字	U+33CC	㏌	in	1→2	半角英字	SQUARE IN
+4. 単位記号合字	U+33CD	㏍	KK	1→2	半角英字	SQUARE KK
+4. 単位記号合字	U+33CE	㏎	KM	1→2	半角英字	SQUARE KM CAPITAL
+4. 単位記号合字	U+33CF	㏏	kt	1→2	半角英字	SQUARE KT
+4. 単位記号合字	U+33D0	㏐	lm	1→2	半角英字	SQUARE LM
+4. 単位記号合字	U+33D1	㏑	ln	1→2	半角英字	SQUARE LN
+4. 単位記号合字	U+33D2	㏒	log	1→3	半角英字	SQUARE LOG
+4. 単位記号合字	U+33D3	㏓	lx	1→2	半角英字	SQUARE LX
+4. 単位記号合字	U+33D4	㏔	mb	1→2	半角英字	SQUARE MB SMALL
+4. 単位記号合字	U+33D5	㏕	mil	1→3	半角英字	SQUARE MIL
+4. 単位記号合字	U+33D6	㏖	mol	1→3	半角英字	SQUARE MOL
+4. 単位記号合字	U+33D7	㏗	PH	1→2	半角英字	SQUARE PH
+4. 単位記号合字	U+33D8	㏘	p.m.	1→4	半角英字+記号	SQUARE PM
+4. 単位記号合字	U+33D9	㏙	PPM	1→3	半角英字	SQUARE PPM
+4. 単位記号合字	U+33DA	㏚	PR	1→2	半角英字	SQUARE PR
+4. 単位記号合字	U+33DB	㏛	sr	1→2	半角英字	SQUARE SR
+4. 単位記号合字	U+33DC	㏜	Sv	1→2	半角英字	SQUARE SV
+4. 単位記号合字	U+33DD	㏝	Wb	1→2	半角英字	SQUARE WB
+4. 単位記号合字	U+33DE	㏞	V∕m	1→3	半角英字+記号	SQUARE V OVER M
+4. 単位記号合字	U+33DF	㏟	A∕m	1→3	半角英字+記号	SQUARE A OVER M
+5. 日付・時刻・月合字	U+32C0	㋀	1月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR JANUARY
+5. 日付・時刻・月合字	U+32C1	㋁	2月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR FEBRUARY
+5. 日付・時刻・月合字	U+32C2	㋂	3月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR MARCH
+5. 日付・時刻・月合字	U+32C3	㋃	4月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR APRIL
+5. 日付・時刻・月合字	U+32C4	㋄	5月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR MAY
+5. 日付・時刻・月合字	U+32C5	㋅	6月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR JUNE
+5. 日付・時刻・月合字	U+32C6	㋆	7月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR JULY
+5. 日付・時刻・月合字	U+32C7	㋇	8月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR AUGUST
+5. 日付・時刻・月合字	U+32C8	㋈	9月	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR SEPTEMBER
+5. 日付・時刻・月合字	U+32C9	㋉	10月	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR OCTOBER
+5. 日付・時刻・月合字	U+32CA	㋊	11月	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR NOVEMBER
+5. 日付・時刻・月合字	U+32CB	㋋	12月	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DECEMBER
+5. 日付・時刻・月合字	U+3358	㍘	0点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR ZERO
+5. 日付・時刻・月合字	U+3359	㍙	1点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR ONE
+5. 日付・時刻・月合字	U+335A	㍚	2点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR TWO
+5. 日付・時刻・月合字	U+335B	㍛	3点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR THREE
+5. 日付・時刻・月合字	U+335C	㍜	4点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR FOUR
+5. 日付・時刻・月合字	U+335D	㍝	5点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR FIVE
+5. 日付・時刻・月合字	U+335E	㍞	6点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR SIX
+5. 日付・時刻・月合字	U+335F	㍟	7点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR SEVEN
+5. 日付・時刻・月合字	U+3360	㍠	8点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR EIGHT
+5. 日付・時刻・月合字	U+3361	㍡	9点	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR NINE
+5. 日付・時刻・月合字	U+3362	㍢	10点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR TEN
+5. 日付・時刻・月合字	U+3363	㍣	11点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR ELEVEN
+5. 日付・時刻・月合字	U+3364	㍤	12点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR TWELVE
+5. 日付・時刻・月合字	U+3365	㍥	13点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR THIRTEEN
+5. 日付・時刻・月合字	U+3366	㍦	14点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR FOURTEEN
+5. 日付・時刻・月合字	U+3367	㍧	15点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR FIFTEEN
+5. 日付・時刻・月合字	U+3368	㍨	16点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR SIXTEEN
+5. 日付・時刻・月合字	U+3369	㍩	17点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR SEVENTEEN
+5. 日付・時刻・月合字	U+336A	㍪	18点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR EIGHTEEN
+5. 日付・時刻・月合字	U+336B	㍫	19点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR NINETEEN
+5. 日付・時刻・月合字	U+336C	㍬	20点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR TWENTY
+5. 日付・時刻・月合字	U+336D	㍭	21点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR TWENTY-ONE
+5. 日付・時刻・月合字	U+336E	㍮	22点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR TWENTY-TWO
+5. 日付・時刻・月合字	U+336F	㍯	23点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR TWENTY-THREE
+5. 日付・時刻・月合字	U+3370	㍰	24点	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR HOUR TWENTY-FOUR
+5. 日付・時刻・月合字	U+33E0	㏠	1日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY ONE
+5. 日付・時刻・月合字	U+33E1	㏡	2日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWO
+5. 日付・時刻・月合字	U+33E2	㏢	3日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY THREE
+5. 日付・時刻・月合字	U+33E3	㏣	4日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY FOUR
+5. 日付・時刻・月合字	U+33E4	㏤	5日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY FIVE
+5. 日付・時刻・月合字	U+33E5	㏥	6日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY SIX
+5. 日付・時刻・月合字	U+33E6	㏦	7日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY SEVEN
+5. 日付・時刻・月合字	U+33E7	㏧	8日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY EIGHT
+5. 日付・時刻・月合字	U+33E8	㏨	9日	1→2	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY NINE
+5. 日付・時刻・月合字	U+33E9	㏩	10日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TEN
+5. 日付・時刻・月合字	U+33EA	㏪	11日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY ELEVEN
+5. 日付・時刻・月合字	U+33EB	㏫	12日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWELVE
+5. 日付・時刻・月合字	U+33EC	㏬	13日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY THIRTEEN
+5. 日付・時刻・月合字	U+33ED	㏭	14日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY FOURTEEN
+5. 日付・時刻・月合字	U+33EE	㏮	15日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY FIFTEEN
+5. 日付・時刻・月合字	U+33EF	㏯	16日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY SIXTEEN
+5. 日付・時刻・月合字	U+33F0	㏰	17日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY SEVENTEEN
+5. 日付・時刻・月合字	U+33F1	㏱	18日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY EIGHTEEN
+5. 日付・時刻・月合字	U+33F2	㏲	19日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY NINETEEN
+5. 日付・時刻・月合字	U+33F3	㏳	20日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY
+5. 日付・時刻・月合字	U+33F4	㏴	21日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-ONE
+5. 日付・時刻・月合字	U+33F5	㏵	22日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-TWO
+5. 日付・時刻・月合字	U+33F6	㏶	23日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-THREE
+5. 日付・時刻・月合字	U+33F7	㏷	24日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-FOUR
+5. 日付・時刻・月合字	U+33F8	㏸	25日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-FIVE
+5. 日付・時刻・月合字	U+33F9	㏹	26日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-SIX
+5. 日付・時刻・月合字	U+33FA	㏺	27日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-SEVEN
+5. 日付・時刻・月合字	U+33FB	㏻	28日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-EIGHT
+5. 日付・時刻・月合字	U+33FC	㏼	29日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY TWENTY-NINE
+5. 日付・時刻・月合字	U+33FD	㏽	30日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY THIRTY
+5. 日付・時刻・月合字	U+33FE	㏾	31日	1→3	漢字+半角数字	IDEOGRAPHIC TELEGRAPH SYMBOL FOR DAY THIRTY-ONE
+6. 丸囲み・括弧付き英数字	U+2460	①	1	1→1	半角数字	CIRCLED DIGIT ONE
+6. 丸囲み・括弧付き英数字	U+2461	②	2	1→1	半角数字	CIRCLED DIGIT TWO
+6. 丸囲み・括弧付き英数字	U+2462	③	3	1→1	半角数字	CIRCLED DIGIT THREE
+6. 丸囲み・括弧付き英数字	U+2463	④	4	1→1	半角数字	CIRCLED DIGIT FOUR
+6. 丸囲み・括弧付き英数字	U+2464	⑤	5	1→1	半角数字	CIRCLED DIGIT FIVE
+6. 丸囲み・括弧付き英数字	U+2465	⑥	6	1→1	半角数字	CIRCLED DIGIT SIX
+6. 丸囲み・括弧付き英数字	U+2466	⑦	7	1→1	半角数字	CIRCLED DIGIT SEVEN
+6. 丸囲み・括弧付き英数字	U+2467	⑧	8	1→1	半角数字	CIRCLED DIGIT EIGHT
+6. 丸囲み・括弧付き英数字	U+2468	⑨	9	1→1	半角数字	CIRCLED DIGIT NINE
+6. 丸囲み・括弧付き英数字	U+2469	⑩	10	1→2	半角数字	CIRCLED NUMBER TEN
+6. 丸囲み・括弧付き英数字	U+246A	⑪	11	1→2	半角数字	CIRCLED NUMBER ELEVEN
+6. 丸囲み・括弧付き英数字	U+246B	⑫	12	1→2	半角数字	CIRCLED NUMBER TWELVE
+6. 丸囲み・括弧付き英数字	U+246C	⑬	13	1→2	半角数字	CIRCLED NUMBER THIRTEEN
+6. 丸囲み・括弧付き英数字	U+246D	⑭	14	1→2	半角数字	CIRCLED NUMBER FOURTEEN
+6. 丸囲み・括弧付き英数字	U+246E	⑮	15	1→2	半角数字	CIRCLED NUMBER FIFTEEN
+6. 丸囲み・括弧付き英数字	U+246F	⑯	16	1→2	半角数字	CIRCLED NUMBER SIXTEEN
+6. 丸囲み・括弧付き英数字	U+2470	⑰	17	1→2	半角数字	CIRCLED NUMBER SEVENTEEN
+6. 丸囲み・括弧付き英数字	U+2471	⑱	18	1→2	半角数字	CIRCLED NUMBER EIGHTEEN
+6. 丸囲み・括弧付き英数字	U+2472	⑲	19	1→2	半角数字	CIRCLED NUMBER NINETEEN
+6. 丸囲み・括弧付き英数字	U+2473	⑳	20	1→2	半角数字	CIRCLED NUMBER TWENTY
+6. 丸囲み・括弧付き英数字	U+2474	⑴	(1)	1→3	半角数字+記号	PARENTHESIZED DIGIT ONE
+6. 丸囲み・括弧付き英数字	U+2475	⑵	(2)	1→3	半角数字+記号	PARENTHESIZED DIGIT TWO
+6. 丸囲み・括弧付き英数字	U+2476	⑶	(3)	1→3	半角数字+記号	PARENTHESIZED DIGIT THREE
+6. 丸囲み・括弧付き英数字	U+2477	⑷	(4)	1→3	半角数字+記号	PARENTHESIZED DIGIT FOUR
+6. 丸囲み・括弧付き英数字	U+2478	⑸	(5)	1→3	半角数字+記号	PARENTHESIZED DIGIT FIVE
+6. 丸囲み・括弧付き英数字	U+2479	⑹	(6)	1→3	半角数字+記号	PARENTHESIZED DIGIT SIX
+6. 丸囲み・括弧付き英数字	U+247A	⑺	(7)	1→3	半角数字+記号	PARENTHESIZED DIGIT SEVEN
+6. 丸囲み・括弧付き英数字	U+247B	⑻	(8)	1→3	半角数字+記号	PARENTHESIZED DIGIT EIGHT
+6. 丸囲み・括弧付き英数字	U+247C	⑼	(9)	1→3	半角数字+記号	PARENTHESIZED DIGIT NINE
+6. 丸囲み・括弧付き英数字	U+247D	⑽	(10)	1→4	半角数字+記号	PARENTHESIZED NUMBER TEN
+6. 丸囲み・括弧付き英数字	U+247E	⑾	(11)	1→4	半角数字+記号	PARENTHESIZED NUMBER ELEVEN
+6. 丸囲み・括弧付き英数字	U+247F	⑿	(12)	1→4	半角数字+記号	PARENTHESIZED NUMBER TWELVE
+6. 丸囲み・括弧付き英数字	U+2480	⒀	(13)	1→4	半角数字+記号	PARENTHESIZED NUMBER THIRTEEN
+6. 丸囲み・括弧付き英数字	U+2481	⒁	(14)	1→4	半角数字+記号	PARENTHESIZED NUMBER FOURTEEN
+6. 丸囲み・括弧付き英数字	U+2482	⒂	(15)	1→4	半角数字+記号	PARENTHESIZED NUMBER FIFTEEN
+6. 丸囲み・括弧付き英数字	U+2483	⒃	(16)	1→4	半角数字+記号	PARENTHESIZED NUMBER SIXTEEN
+6. 丸囲み・括弧付き英数字	U+2484	⒄	(17)	1→4	半角数字+記号	PARENTHESIZED NUMBER SEVENTEEN
+6. 丸囲み・括弧付き英数字	U+2485	⒅	(18)	1→4	半角数字+記号	PARENTHESIZED NUMBER EIGHTEEN
+6. 丸囲み・括弧付き英数字	U+2486	⒆	(19)	1→4	半角数字+記号	PARENTHESIZED NUMBER NINETEEN
+6. 丸囲み・括弧付き英数字	U+2487	⒇	(20)	1→4	半角数字+記号	PARENTHESIZED NUMBER TWENTY
+6. 丸囲み・括弧付き英数字	U+2488	⒈	1.	1→2	半角数字+記号	DIGIT ONE FULL STOP
+6. 丸囲み・括弧付き英数字	U+2489	⒉	2.	1→2	半角数字+記号	DIGIT TWO FULL STOP
+6. 丸囲み・括弧付き英数字	U+248A	⒊	3.	1→2	半角数字+記号	DIGIT THREE FULL STOP
+6. 丸囲み・括弧付き英数字	U+248B	⒋	4.	1→2	半角数字+記号	DIGIT FOUR FULL STOP
+6. 丸囲み・括弧付き英数字	U+248C	⒌	5.	1→2	半角数字+記号	DIGIT FIVE FULL STOP
+6. 丸囲み・括弧付き英数字	U+248D	⒍	6.	1→2	半角数字+記号	DIGIT SIX FULL STOP
+6. 丸囲み・括弧付き英数字	U+248E	⒎	7.	1→2	半角数字+記号	DIGIT SEVEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+248F	⒏	8.	1→2	半角数字+記号	DIGIT EIGHT FULL STOP
+6. 丸囲み・括弧付き英数字	U+2490	⒐	9.	1→2	半角数字+記号	DIGIT NINE FULL STOP
+6. 丸囲み・括弧付き英数字	U+2491	⒑	10.	1→3	半角数字+記号	NUMBER TEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+2492	⒒	11.	1→3	半角数字+記号	NUMBER ELEVEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+2493	⒓	12.	1→3	半角数字+記号	NUMBER TWELVE FULL STOP
+6. 丸囲み・括弧付き英数字	U+2494	⒔	13.	1→3	半角数字+記号	NUMBER THIRTEEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+2495	⒕	14.	1→3	半角数字+記号	NUMBER FOURTEEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+2496	⒖	15.	1→3	半角数字+記号	NUMBER FIFTEEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+2497	⒗	16.	1→3	半角数字+記号	NUMBER SIXTEEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+2498	⒘	17.	1→3	半角数字+記号	NUMBER SEVENTEEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+2499	⒙	18.	1→3	半角数字+記号	NUMBER EIGHTEEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+249A	⒚	19.	1→3	半角数字+記号	NUMBER NINETEEN FULL STOP
+6. 丸囲み・括弧付き英数字	U+249B	⒛	20.	1→3	半角数字+記号	NUMBER TWENTY FULL STOP
+6. 丸囲み・括弧付き英数字	U+249C	⒜	(a)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER A
+6. 丸囲み・括弧付き英数字	U+249D	⒝	(b)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER B
+6. 丸囲み・括弧付き英数字	U+249E	⒞	(c)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER C
+6. 丸囲み・括弧付き英数字	U+249F	⒟	(d)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER D
+6. 丸囲み・括弧付き英数字	U+24A0	⒠	(e)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER E
+6. 丸囲み・括弧付き英数字	U+24A1	⒡	(f)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER F
+6. 丸囲み・括弧付き英数字	U+24A2	⒢	(g)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER G
+6. 丸囲み・括弧付き英数字	U+24A3	⒣	(h)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER H
+6. 丸囲み・括弧付き英数字	U+24A4	⒤	(i)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER I
+6. 丸囲み・括弧付き英数字	U+24A5	⒥	(j)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER J
+6. 丸囲み・括弧付き英数字	U+24A6	⒦	(k)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER K
+6. 丸囲み・括弧付き英数字	U+24A7	⒧	(l)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER L
+6. 丸囲み・括弧付き英数字	U+24A8	⒨	(m)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER M
+6. 丸囲み・括弧付き英数字	U+24A9	⒩	(n)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER N
+6. 丸囲み・括弧付き英数字	U+24AA	⒪	(o)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER O
+6. 丸囲み・括弧付き英数字	U+24AB	⒫	(p)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER P
+6. 丸囲み・括弧付き英数字	U+24AC	⒬	(q)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER Q
+6. 丸囲み・括弧付き英数字	U+24AD	⒭	(r)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER R
+6. 丸囲み・括弧付き英数字	U+24AE	⒮	(s)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER S
+6. 丸囲み・括弧付き英数字	U+24AF	⒯	(t)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER T
+6. 丸囲み・括弧付き英数字	U+24B0	⒰	(u)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER U
+6. 丸囲み・括弧付き英数字	U+24B1	⒱	(v)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER V
+6. 丸囲み・括弧付き英数字	U+24B2	⒲	(w)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER W
+6. 丸囲み・括弧付き英数字	U+24B3	⒳	(x)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER X
+6. 丸囲み・括弧付き英数字	U+24B4	⒴	(y)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER Y
+6. 丸囲み・括弧付き英数字	U+24B5	⒵	(z)	1→3	半角英字+記号	PARENTHESIZED LATIN SMALL LETTER Z
+6. 丸囲み・括弧付き英数字	U+24B6	Ⓐ	A	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER A
+6. 丸囲み・括弧付き英数字	U+24B7	Ⓑ	B	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER B
+6. 丸囲み・括弧付き英数字	U+24B8	Ⓒ	C	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER C
+6. 丸囲み・括弧付き英数字	U+24B9	Ⓓ	D	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER D
+6. 丸囲み・括弧付き英数字	U+24BA	Ⓔ	E	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER E
+6. 丸囲み・括弧付き英数字	U+24BB	Ⓕ	F	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER F
+6. 丸囲み・括弧付き英数字	U+24BC	Ⓖ	G	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER G
+6. 丸囲み・括弧付き英数字	U+24BD	Ⓗ	H	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER H
+6. 丸囲み・括弧付き英数字	U+24BE	Ⓘ	I	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER I
+6. 丸囲み・括弧付き英数字	U+24BF	Ⓙ	J	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER J
+6. 丸囲み・括弧付き英数字	U+24C0	Ⓚ	K	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER K
+6. 丸囲み・括弧付き英数字	U+24C1	Ⓛ	L	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER L
+6. 丸囲み・括弧付き英数字	U+24C2	Ⓜ	M	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER M
+6. 丸囲み・括弧付き英数字	U+24C3	Ⓝ	N	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER N
+6. 丸囲み・括弧付き英数字	U+24C4	Ⓞ	O	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER O
+6. 丸囲み・括弧付き英数字	U+24C5	Ⓟ	P	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER P
+6. 丸囲み・括弧付き英数字	U+24C6	Ⓠ	Q	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER Q
+6. 丸囲み・括弧付き英数字	U+24C7	Ⓡ	R	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER R
+6. 丸囲み・括弧付き英数字	U+24C8	Ⓢ	S	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER S
+6. 丸囲み・括弧付き英数字	U+24C9	Ⓣ	T	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER T
+6. 丸囲み・括弧付き英数字	U+24CA	Ⓤ	U	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER U
+6. 丸囲み・括弧付き英数字	U+24CB	Ⓥ	V	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER V
+6. 丸囲み・括弧付き英数字	U+24CC	Ⓦ	W	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER W
+6. 丸囲み・括弧付き英数字	U+24CD	Ⓧ	X	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER X
+6. 丸囲み・括弧付き英数字	U+24CE	Ⓨ	Y	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER Y
+6. 丸囲み・括弧付き英数字	U+24CF	Ⓩ	Z	1→1	半角英字	CIRCLED LATIN CAPITAL LETTER Z
+6. 丸囲み・括弧付き英数字	U+24D0	ⓐ	a	1→1	半角英字	CIRCLED LATIN SMALL LETTER A
+6. 丸囲み・括弧付き英数字	U+24D1	ⓑ	b	1→1	半角英字	CIRCLED LATIN SMALL LETTER B
+6. 丸囲み・括弧付き英数字	U+24D2	ⓒ	c	1→1	半角英字	CIRCLED LATIN SMALL LETTER C
+6. 丸囲み・括弧付き英数字	U+24D3	ⓓ	d	1→1	半角英字	CIRCLED LATIN SMALL LETTER D
+6. 丸囲み・括弧付き英数字	U+24D4	ⓔ	e	1→1	半角英字	CIRCLED LATIN SMALL LETTER E
+6. 丸囲み・括弧付き英数字	U+24D5	ⓕ	f	1→1	半角英字	CIRCLED LATIN SMALL LETTER F
+6. 丸囲み・括弧付き英数字	U+24D6	ⓖ	g	1→1	半角英字	CIRCLED LATIN SMALL LETTER G
+6. 丸囲み・括弧付き英数字	U+24D7	ⓗ	h	1→1	半角英字	CIRCLED LATIN SMALL LETTER H
+6. 丸囲み・括弧付き英数字	U+24D8	ⓘ	i	1→1	半角英字	CIRCLED LATIN SMALL LETTER I
+6. 丸囲み・括弧付き英数字	U+24D9	ⓙ	j	1→1	半角英字	CIRCLED LATIN SMALL LETTER J
+6. 丸囲み・括弧付き英数字	U+24DA	ⓚ	k	1→1	半角英字	CIRCLED LATIN SMALL LETTER K
+6. 丸囲み・括弧付き英数字	U+24DB	ⓛ	l	1→1	半角英字	CIRCLED LATIN SMALL LETTER L
+6. 丸囲み・括弧付き英数字	U+24DC	ⓜ	m	1→1	半角英字	CIRCLED LATIN SMALL LETTER M
+6. 丸囲み・括弧付き英数字	U+24DD	ⓝ	n	1→1	半角英字	CIRCLED LATIN SMALL LETTER N
+6. 丸囲み・括弧付き英数字	U+24DE	ⓞ	o	1→1	半角英字	CIRCLED LATIN SMALL LETTER O
+6. 丸囲み・括弧付き英数字	U+24DF	ⓟ	p	1→1	半角英字	CIRCLED LATIN SMALL LETTER P
+6. 丸囲み・括弧付き英数字	U+24E0	ⓠ	q	1→1	半角英字	CIRCLED LATIN SMALL LETTER Q
+6. 丸囲み・括弧付き英数字	U+24E1	ⓡ	r	1→1	半角英字	CIRCLED LATIN SMALL LETTER R
+6. 丸囲み・括弧付き英数字	U+24E2	ⓢ	s	1→1	半角英字	CIRCLED LATIN SMALL LETTER S
+6. 丸囲み・括弧付き英数字	U+24E3	ⓣ	t	1→1	半角英字	CIRCLED LATIN SMALL LETTER T
+6. 丸囲み・括弧付き英数字	U+24E4	ⓤ	u	1→1	半角英字	CIRCLED LATIN SMALL LETTER U
+6. 丸囲み・括弧付き英数字	U+24E5	ⓥ	v	1→1	半角英字	CIRCLED LATIN SMALL LETTER V
+6. 丸囲み・括弧付き英数字	U+24E6	ⓦ	w	1→1	半角英字	CIRCLED LATIN SMALL LETTER W
+6. 丸囲み・括弧付き英数字	U+24E7	ⓧ	x	1→1	半角英字	CIRCLED LATIN SMALL LETTER X
+6. 丸囲み・括弧付き英数字	U+24E8	ⓨ	y	1→1	半角英字	CIRCLED LATIN SMALL LETTER Y
+6. 丸囲み・括弧付き英数字	U+24E9	ⓩ	z	1→1	半角英字	CIRCLED LATIN SMALL LETTER Z
+6. 丸囲み・括弧付き英数字	U+24EA	⓪	0	1→1	半角数字	CIRCLED DIGIT ZERO
+6. 丸囲み・括弧付き英数字	U+3251	㉑	21	1→2	半角数字	CIRCLED NUMBER TWENTY ONE
+6. 丸囲み・括弧付き英数字	U+3252	㉒	22	1→2	半角数字	CIRCLED NUMBER TWENTY TWO
+6. 丸囲み・括弧付き英数字	U+3253	㉓	23	1→2	半角数字	CIRCLED NUMBER TWENTY THREE
+6. 丸囲み・括弧付き英数字	U+3254	㉔	24	1→2	半角数字	CIRCLED NUMBER TWENTY FOUR
+6. 丸囲み・括弧付き英数字	U+3255	㉕	25	1→2	半角数字	CIRCLED NUMBER TWENTY FIVE
+6. 丸囲み・括弧付き英数字	U+3256	㉖	26	1→2	半角数字	CIRCLED NUMBER TWENTY SIX
+6. 丸囲み・括弧付き英数字	U+3257	㉗	27	1→2	半角数字	CIRCLED NUMBER TWENTY SEVEN
+6. 丸囲み・括弧付き英数字	U+3258	㉘	28	1→2	半角数字	CIRCLED NUMBER TWENTY EIGHT
+6. 丸囲み・括弧付き英数字	U+3259	㉙	29	1→2	半角数字	CIRCLED NUMBER TWENTY NINE
+6. 丸囲み・括弧付き英数字	U+325A	㉚	30	1→2	半角数字	CIRCLED NUMBER THIRTY
+6. 丸囲み・括弧付き英数字	U+325B	㉛	31	1→2	半角数字	CIRCLED NUMBER THIRTY ONE
+6. 丸囲み・括弧付き英数字	U+325C	㉜	32	1→2	半角数字	CIRCLED NUMBER THIRTY TWO
+6. 丸囲み・括弧付き英数字	U+325D	㉝	33	1→2	半角数字	CIRCLED NUMBER THIRTY THREE
+6. 丸囲み・括弧付き英数字	U+325E	㉞	34	1→2	半角数字	CIRCLED NUMBER THIRTY FOUR
+6. 丸囲み・括弧付き英数字	U+325F	㉟	35	1→2	半角数字	CIRCLED NUMBER THIRTY FIVE
+6. 丸囲み・括弧付き英数字	U+32B1	㊱	36	1→2	半角数字	CIRCLED NUMBER THIRTY SIX
+6. 丸囲み・括弧付き英数字	U+32B2	㊲	37	1→2	半角数字	CIRCLED NUMBER THIRTY SEVEN
+6. 丸囲み・括弧付き英数字	U+32B3	㊳	38	1→2	半角数字	CIRCLED NUMBER THIRTY EIGHT
+6. 丸囲み・括弧付き英数字	U+32B4	㊴	39	1→2	半角数字	CIRCLED NUMBER THIRTY NINE
+6. 丸囲み・括弧付き英数字	U+32B5	㊵	40	1→2	半角数字	CIRCLED NUMBER FORTY
+6. 丸囲み・括弧付き英数字	U+32B6	㊶	41	1→2	半角数字	CIRCLED NUMBER FORTY ONE
+6. 丸囲み・括弧付き英数字	U+32B7	㊷	42	1→2	半角数字	CIRCLED NUMBER FORTY TWO
+6. 丸囲み・括弧付き英数字	U+32B8	㊸	43	1→2	半角数字	CIRCLED NUMBER FORTY THREE
+6. 丸囲み・括弧付き英数字	U+32B9	㊹	44	1→2	半角数字	CIRCLED NUMBER FORTY FOUR
+6. 丸囲み・括弧付き英数字	U+32BA	㊺	45	1→2	半角数字	CIRCLED NUMBER FORTY FIVE
+6. 丸囲み・括弧付き英数字	U+32BB	㊻	46	1→2	半角数字	CIRCLED NUMBER FORTY SIX
+6. 丸囲み・括弧付き英数字	U+32BC	㊼	47	1→2	半角数字	CIRCLED NUMBER FORTY SEVEN
+6. 丸囲み・括弧付き英数字	U+32BD	㊽	48	1→2	半角数字	CIRCLED NUMBER FORTY EIGHT
+6. 丸囲み・括弧付き英数字	U+32BE	㊾	49	1→2	半角数字	CIRCLED NUMBER FORTY NINE
+6. 丸囲み・括弧付き英数字	U+32BF	㊿	50	1→2	半角数字	CIRCLED NUMBER FIFTY
+7. 丸囲み・括弧付きカナ／漢字	U+3220	㈠	(一)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH ONE
+7. 丸囲み・括弧付きカナ／漢字	U+3221	㈡	(二)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH TWO
+7. 丸囲み・括弧付きカナ／漢字	U+3222	㈢	(三)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH THREE
+7. 丸囲み・括弧付きカナ／漢字	U+3223	㈣	(四)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH FOUR
+7. 丸囲み・括弧付きカナ／漢字	U+3224	㈤	(五)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH FIVE
+7. 丸囲み・括弧付きカナ／漢字	U+3225	㈥	(六)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH SIX
+7. 丸囲み・括弧付きカナ／漢字	U+3226	㈦	(七)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH SEVEN
+7. 丸囲み・括弧付きカナ／漢字	U+3227	㈧	(八)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH EIGHT
+7. 丸囲み・括弧付きカナ／漢字	U+3228	㈨	(九)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH NINE
+7. 丸囲み・括弧付きカナ／漢字	U+3229	㈩	(十)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH TEN
+7. 丸囲み・括弧付きカナ／漢字	U+322A	㈪	(月)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH MOON
+7. 丸囲み・括弧付きカナ／漢字	U+322B	㈫	(火)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH FIRE
+7. 丸囲み・括弧付きカナ／漢字	U+322C	㈬	(水)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH WATER
+7. 丸囲み・括弧付きカナ／漢字	U+322D	㈭	(木)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH WOOD
+7. 丸囲み・括弧付きカナ／漢字	U+322E	㈮	(金)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH METAL
+7. 丸囲み・括弧付きカナ／漢字	U+322F	㈯	(土)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH EARTH
+7. 丸囲み・括弧付きカナ／漢字	U+3230	㈰	(日)	1→3	漢字+記号	PARENTHESIZED IDEOGRAPH SUN
+7. 丸囲み・括弧付きカナ／漢字	U+3280	㊀	一	1→1	漢字	CIRCLED IDEOGRAPH ONE
+7. 丸囲み・括弧付きカナ／漢字	U+3281	㊁	二	1→1	漢字	CIRCLED IDEOGRAPH TWO
+7. 丸囲み・括弧付きカナ／漢字	U+3282	㊂	三	1→1	漢字	CIRCLED IDEOGRAPH THREE
+7. 丸囲み・括弧付きカナ／漢字	U+3283	㊃	四	1→1	漢字	CIRCLED IDEOGRAPH FOUR
+7. 丸囲み・括弧付きカナ／漢字	U+3284	㊄	五	1→1	漢字	CIRCLED IDEOGRAPH FIVE
+7. 丸囲み・括弧付きカナ／漢字	U+3285	㊅	六	1→1	漢字	CIRCLED IDEOGRAPH SIX
+7. 丸囲み・括弧付きカナ／漢字	U+3286	㊆	七	1→1	漢字	CIRCLED IDEOGRAPH SEVEN
+7. 丸囲み・括弧付きカナ／漢字	U+3287	㊇	八	1→1	漢字	CIRCLED IDEOGRAPH EIGHT
+7. 丸囲み・括弧付きカナ／漢字	U+3288	㊈	九	1→1	漢字	CIRCLED IDEOGRAPH NINE
+7. 丸囲み・括弧付きカナ／漢字	U+3289	㊉	十	1→1	漢字	CIRCLED IDEOGRAPH TEN
+7. 丸囲み・括弧付きカナ／漢字	U+328A	㊊	月	1→1	漢字	CIRCLED IDEOGRAPH MOON
+7. 丸囲み・括弧付きカナ／漢字	U+328B	㊋	火	1→1	漢字	CIRCLED IDEOGRAPH FIRE
+7. 丸囲み・括弧付きカナ／漢字	U+328C	㊌	水	1→1	漢字	CIRCLED IDEOGRAPH WATER
+7. 丸囲み・括弧付きカナ／漢字	U+328D	㊍	木	1→1	漢字	CIRCLED IDEOGRAPH WOOD
+7. 丸囲み・括弧付きカナ／漢字	U+328E	㊎	金	1→1	漢字	CIRCLED IDEOGRAPH METAL
+7. 丸囲み・括弧付きカナ／漢字	U+328F	㊏	土	1→1	漢字	CIRCLED IDEOGRAPH EARTH
+7. 丸囲み・括弧付きカナ／漢字	U+3290	㊐	日	1→1	漢字	CIRCLED IDEOGRAPH SUN
+7. 丸囲み・括弧付きカナ／漢字	U+3291	㊑	株	1→1	漢字	CIRCLED IDEOGRAPH STOCK
+7. 丸囲み・括弧付きカナ／漢字	U+3292	㊒	有	1→1	漢字	CIRCLED IDEOGRAPH HAVE
+7. 丸囲み・括弧付きカナ／漢字	U+3293	㊓	社	1→1	漢字	CIRCLED IDEOGRAPH SOCIETY
+7. 丸囲み・括弧付きカナ／漢字	U+3294	㊔	名	1→1	漢字	CIRCLED IDEOGRAPH NAME
+7. 丸囲み・括弧付きカナ／漢字	U+3295	㊕	特	1→1	漢字	CIRCLED IDEOGRAPH SPECIAL
+7. 丸囲み・括弧付きカナ／漢字	U+3296	㊖	財	1→1	漢字	CIRCLED IDEOGRAPH FINANCIAL
+7. 丸囲み・括弧付きカナ／漢字	U+3297	㊗	祝	1→1	漢字	CIRCLED IDEOGRAPH CONGRATULATION
+7. 丸囲み・括弧付きカナ／漢字	U+3298	㊘	労	1→1	漢字	CIRCLED IDEOGRAPH LABOR
+7. 丸囲み・括弧付きカナ／漢字	U+3299	㊙	秘	1→1	漢字	CIRCLED IDEOGRAPH SECRET
+7. 丸囲み・括弧付きカナ／漢字	U+329A	㊚	男	1→1	漢字	CIRCLED IDEOGRAPH MALE
+7. 丸囲み・括弧付きカナ／漢字	U+329B	㊛	女	1→1	漢字	CIRCLED IDEOGRAPH FEMALE
+7. 丸囲み・括弧付きカナ／漢字	U+329C	㊜	適	1→1	漢字	CIRCLED IDEOGRAPH SUITABLE
+7. 丸囲み・括弧付きカナ／漢字	U+329D	㊝	優	1→1	漢字	CIRCLED IDEOGRAPH EXCELLENT
+7. 丸囲み・括弧付きカナ／漢字	U+329E	㊞	印	1→1	漢字	CIRCLED IDEOGRAPH PRINT
+7. 丸囲み・括弧付きカナ／漢字	U+329F	㊟	注	1→1	漢字	CIRCLED IDEOGRAPH ATTENTION
+7. 丸囲み・括弧付きカナ／漢字	U+32A0	㊠	項	1→1	漢字	CIRCLED IDEOGRAPH ITEM
+7. 丸囲み・括弧付きカナ／漢字	U+32A1	㊡	休	1→1	漢字	CIRCLED IDEOGRAPH REST
+7. 丸囲み・括弧付きカナ／漢字	U+32A2	㊢	写	1→1	漢字	CIRCLED IDEOGRAPH COPY
+7. 丸囲み・括弧付きカナ／漢字	U+32A3	㊣	正	1→1	漢字	CIRCLED IDEOGRAPH CORRECT
+7. 丸囲み・括弧付きカナ／漢字	U+32A9	㊩	医	1→1	漢字	CIRCLED IDEOGRAPH MEDICINE
+7. 丸囲み・括弧付きカナ／漢字	U+32AA	㊪	宗	1→1	漢字	CIRCLED IDEOGRAPH RELIGION
+7. 丸囲み・括弧付きカナ／漢字	U+32AB	㊫	学	1→1	漢字	CIRCLED IDEOGRAPH STUDY
+7. 丸囲み・括弧付きカナ／漢字	U+32AC	㊬	監	1→1	漢字	CIRCLED IDEOGRAPH SUPERVISE
+7. 丸囲み・括弧付きカナ／漢字	U+32AD	㊭	企	1→1	漢字	CIRCLED IDEOGRAPH ENTERPRISE
+7. 丸囲み・括弧付きカナ／漢字	U+32AE	㊮	資	1→1	漢字	CIRCLED IDEOGRAPH RESOURCE
+7. 丸囲み・括弧付きカナ／漢字	U+32AF	㊯	協	1→1	漢字	CIRCLED IDEOGRAPH ALLIANCE
+7. 丸囲み・括弧付きカナ／漢字	U+32B0	㊰	夜	1→1	漢字	CIRCLED IDEOGRAPH NIGHT
+7. 丸囲み・括弧付きカナ／漢字	U+32D0	㋐	ア	1→1	カタカナ	CIRCLED KATAKANA A
+7. 丸囲み・括弧付きカナ／漢字	U+32D1	㋑	イ	1→1	カタカナ	CIRCLED KATAKANA I
+7. 丸囲み・括弧付きカナ／漢字	U+32D2	㋒	ウ	1→1	カタカナ	CIRCLED KATAKANA U
+7. 丸囲み・括弧付きカナ／漢字	U+32D3	㋓	エ	1→1	カタカナ	CIRCLED KATAKANA E
+7. 丸囲み・括弧付きカナ／漢字	U+32D4	㋔	オ	1→1	カタカナ	CIRCLED KATAKANA O
+7. 丸囲み・括弧付きカナ／漢字	U+32D5	㋕	カ	1→1	カタカナ	CIRCLED KATAKANA KA
+7. 丸囲み・括弧付きカナ／漢字	U+32D6	㋖	キ	1→1	カタカナ	CIRCLED KATAKANA KI
+7. 丸囲み・括弧付きカナ／漢字	U+32D7	㋗	ク	1→1	カタカナ	CIRCLED KATAKANA KU
+7. 丸囲み・括弧付きカナ／漢字	U+32D8	㋘	ケ	1→1	カタカナ	CIRCLED KATAKANA KE
+7. 丸囲み・括弧付きカナ／漢字	U+32D9	㋙	コ	1→1	カタカナ	CIRCLED KATAKANA KO
+7. 丸囲み・括弧付きカナ／漢字	U+32DA	㋚	サ	1→1	カタカナ	CIRCLED KATAKANA SA
+7. 丸囲み・括弧付きカナ／漢字	U+32DB	㋛	シ	1→1	カタカナ	CIRCLED KATAKANA SI
+7. 丸囲み・括弧付きカナ／漢字	U+32DC	㋜	ス	1→1	カタカナ	CIRCLED KATAKANA SU
+7. 丸囲み・括弧付きカナ／漢字	U+32DD	㋝	セ	1→1	カタカナ	CIRCLED KATAKANA SE
+7. 丸囲み・括弧付きカナ／漢字	U+32DE	㋞	ソ	1→1	カタカナ	CIRCLED KATAKANA SO
+7. 丸囲み・括弧付きカナ／漢字	U+32DF	㋟	タ	1→1	カタカナ	CIRCLED KATAKANA TA
+7. 丸囲み・括弧付きカナ／漢字	U+32E0	㋠	チ	1→1	カタカナ	CIRCLED KATAKANA TI
+7. 丸囲み・括弧付きカナ／漢字	U+32E1	㋡	ツ	1→1	カタカナ	CIRCLED KATAKANA TU
+7. 丸囲み・括弧付きカナ／漢字	U+32E2	㋢	テ	1→1	カタカナ	CIRCLED KATAKANA TE
+7. 丸囲み・括弧付きカナ／漢字	U+32E3	㋣	ト	1→1	カタカナ	CIRCLED KATAKANA TO
+7. 丸囲み・括弧付きカナ／漢字	U+32E4	㋤	ナ	1→1	カタカナ	CIRCLED KATAKANA NA
+7. 丸囲み・括弧付きカナ／漢字	U+32E5	㋥	ニ	1→1	カタカナ	CIRCLED KATAKANA NI
+7. 丸囲み・括弧付きカナ／漢字	U+32E6	㋦	ヌ	1→1	カタカナ	CIRCLED KATAKANA NU
+7. 丸囲み・括弧付きカナ／漢字	U+32E7	㋧	ネ	1→1	カタカナ	CIRCLED KATAKANA NE
+7. 丸囲み・括弧付きカナ／漢字	U+32E8	㋨	ノ	1→1	カタカナ	CIRCLED KATAKANA NO
+7. 丸囲み・括弧付きカナ／漢字	U+32E9	㋩	ハ	1→1	カタカナ	CIRCLED KATAKANA HA
+7. 丸囲み・括弧付きカナ／漢字	U+32EA	㋪	ヒ	1→1	カタカナ	CIRCLED KATAKANA HI
+7. 丸囲み・括弧付きカナ／漢字	U+32EB	㋫	フ	1→1	カタカナ	CIRCLED KATAKANA HU
+7. 丸囲み・括弧付きカナ／漢字	U+32EC	㋬	ヘ	1→1	カタカナ	CIRCLED KATAKANA HE
+7. 丸囲み・括弧付きカナ／漢字	U+32ED	㋭	ホ	1→1	カタカナ	CIRCLED KATAKANA HO
+7. 丸囲み・括弧付きカナ／漢字	U+32EE	㋮	マ	1→1	カタカナ	CIRCLED KATAKANA MA
+7. 丸囲み・括弧付きカナ／漢字	U+32EF	㋯	ミ	1→1	カタカナ	CIRCLED KATAKANA MI
+7. 丸囲み・括弧付きカナ／漢字	U+32F0	㋰	ム	1→1	カタカナ	CIRCLED KATAKANA MU
+7. 丸囲み・括弧付きカナ／漢字	U+32F1	㋱	メ	1→1	カタカナ	CIRCLED KATAKANA ME
+7. 丸囲み・括弧付きカナ／漢字	U+32F2	㋲	モ	1→1	カタカナ	CIRCLED KATAKANA MO
+7. 丸囲み・括弧付きカナ／漢字	U+32F3	㋳	ヤ	1→1	カタカナ	CIRCLED KATAKANA YA
+7. 丸囲み・括弧付きカナ／漢字	U+32F4	㋴	ユ	1→1	カタカナ	CIRCLED KATAKANA YU
+7. 丸囲み・括弧付きカナ／漢字	U+32F5	㋵	ヨ	1→1	カタカナ	CIRCLED KATAKANA YO
+7. 丸囲み・括弧付きカナ／漢字	U+32F6	㋶	ラ	1→1	カタカナ	CIRCLED KATAKANA RA
+7. 丸囲み・括弧付きカナ／漢字	U+32F7	㋷	リ	1→1	カタカナ	CIRCLED KATAKANA RI
+7. 丸囲み・括弧付きカナ／漢字	U+32F8	㋸	ル	1→1	カタカナ	CIRCLED KATAKANA RU
+7. 丸囲み・括弧付きカナ／漢字	U+32F9	㋹	レ	1→1	カタカナ	CIRCLED KATAKANA RE
+7. 丸囲み・括弧付きカナ／漢字	U+32FA	㋺	ロ	1→1	カタカナ	CIRCLED KATAKANA RO
+7. 丸囲み・括弧付きカナ／漢字	U+32FB	㋻	ワ	1→1	カタカナ	CIRCLED KATAKANA WA
+7. 丸囲み・括弧付きカナ／漢字	U+32FC	㋼	ヰ	1→1	カタカナ	CIRCLED KATAKANA WI
+7. 丸囲み・括弧付きカナ／漢字	U+32FD	㋽	ヱ	1→1	カタカナ	CIRCLED KATAKANA WE
+7. 丸囲み・括弧付きカナ／漢字	U+32FE	㋾	ヲ	1→1	カタカナ	CIRCLED KATAKANA WO
+8. ローマ数字	U+2160	Ⅰ	I	1→1	半角英字	ROMAN NUMERAL ONE
+8. ローマ数字	U+2161	Ⅱ	II	1→2	半角英字	ROMAN NUMERAL TWO
+8. ローマ数字	U+2162	Ⅲ	III	1→3	半角英字	ROMAN NUMERAL THREE
+8. ローマ数字	U+2163	Ⅳ	IV	1→2	半角英字	ROMAN NUMERAL FOUR
+8. ローマ数字	U+2164	Ⅴ	V	1→1	半角英字	ROMAN NUMERAL FIVE
+8. ローマ数字	U+2165	Ⅵ	VI	1→2	半角英字	ROMAN NUMERAL SIX
+8. ローマ数字	U+2166	Ⅶ	VII	1→3	半角英字	ROMAN NUMERAL SEVEN
+8. ローマ数字	U+2167	Ⅷ	VIII	1→4	半角英字	ROMAN NUMERAL EIGHT
+8. ローマ数字	U+2168	Ⅸ	IX	1→2	半角英字	ROMAN NUMERAL NINE
+8. ローマ数字	U+2169	Ⅹ	X	1→1	半角英字	ROMAN NUMERAL TEN
+8. ローマ数字	U+216A	Ⅺ	XI	1→2	半角英字	ROMAN NUMERAL ELEVEN
+8. ローマ数字	U+216B	Ⅻ	XII	1→3	半角英字	ROMAN NUMERAL TWELVE
+8. ローマ数字	U+216C	Ⅼ	L	1→1	半角英字	ROMAN NUMERAL FIFTY
+8. ローマ数字	U+216D	Ⅽ	C	1→1	半角英字	ROMAN NUMERAL ONE HUNDRED
+8. ローマ数字	U+216E	Ⅾ	D	1→1	半角英字	ROMAN NUMERAL FIVE HUNDRED
+8. ローマ数字	U+216F	Ⅿ	M	1→1	半角英字	ROMAN NUMERAL ONE THOUSAND
+8. ローマ数字	U+2170	ⅰ	i	1→1	半角英字	SMALL ROMAN NUMERAL ONE
+8. ローマ数字	U+2171	ⅱ	ii	1→2	半角英字	SMALL ROMAN NUMERAL TWO
+8. ローマ数字	U+2172	ⅲ	iii	1→3	半角英字	SMALL ROMAN NUMERAL THREE
+8. ローマ数字	U+2173	ⅳ	iv	1→2	半角英字	SMALL ROMAN NUMERAL FOUR
+8. ローマ数字	U+2174	ⅴ	v	1→1	半角英字	SMALL ROMAN NUMERAL FIVE
+8. ローマ数字	U+2175	ⅵ	vi	1→2	半角英字	SMALL ROMAN NUMERAL SIX
+8. ローマ数字	U+2176	ⅶ	vii	1→3	半角英字	SMALL ROMAN NUMERAL SEVEN
+8. ローマ数字	U+2177	ⅷ	viii	1→4	半角英字	SMALL ROMAN NUMERAL EIGHT
+8. ローマ数字	U+2178	ⅸ	ix	1→2	半角英字	SMALL ROMAN NUMERAL NINE
+8. ローマ数字	U+2179	ⅹ	x	1→1	半角英字	SMALL ROMAN NUMERAL TEN
+8. ローマ数字	U+217A	ⅺ	xi	1→2	半角英字	SMALL ROMAN NUMERAL ELEVEN
+8. ローマ数字	U+217B	ⅻ	xii	1→3	半角英字	SMALL ROMAN NUMERAL TWELVE
+8. ローマ数字	U+217C	ⅼ	l	1→1	半角英字	SMALL ROMAN NUMERAL FIFTY
+8. ローマ数字	U+217D	ⅽ	c	1→1	半角英字	SMALL ROMAN NUMERAL ONE HUNDRED
+8. ローマ数字	U+217E	ⅾ	d	1→1	半角英字	SMALL ROMAN NUMERAL FIVE HUNDRED
+8. ローマ数字	U+217F	ⅿ	m	1→1	半角英字	SMALL ROMAN NUMERAL ONE THOUSAND
+9. 欧文リガチャ	U+FB00	ﬀ	ff	1→2	半角英字	LATIN SMALL LIGATURE FF
+9. 欧文リガチャ	U+FB01	ﬁ	fi	1→2	半角英字	LATIN SMALL LIGATURE FI
+9. 欧文リガチャ	U+FB02	ﬂ	fl	1→2	半角英字	LATIN SMALL LIGATURE FL
+9. 欧文リガチャ	U+FB03	ﬃ	ffi	1→3	半角英字	LATIN SMALL LIGATURE FFI
+9. 欧文リガチャ	U+FB04	ﬄ	ffl	1→3	半角英字	LATIN SMALL LIGATURE FFL
+9. 欧文リガチャ	U+FB05	ﬅ	st	1→2	半角英字	LATIN SMALL LIGATURE LONG S T
+9. 欧文リガチャ	U+FB06	ﬆ	st	1→2	半角英字	LATIN SMALL LIGATURE ST
+10. 温度・特殊単位記号	U+2100	℀	a/c	1→3	半角英字+記号	ACCOUNT OF
+10. 温度・特殊単位記号	U+2101	℁	a/s	1→3	半角英字+記号	ADDRESSED TO THE SUBJECT
+10. 温度・特殊単位記号	U+2103	℃	°C	1→2	半角英字+記号	DEGREE CELSIUS
+10. 温度・特殊単位記号	U+2105	℅	c/o	1→3	半角英字+記号	CARE OF
+10. 温度・特殊単位記号	U+2109	℉	°F	1→2	半角英字+記号	DEGREE FAHRENHEIT

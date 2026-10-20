@@ -46,6 +46,8 @@ uv run --group llm python 06_export_bundle.py                                # �
 - `llm_core.py`：選び方の本体（torch と transformers だけで動く。05 と 07 が共有）。
 - `07_gpu_eval.py`：キットの中で、複数モデルを順に回して `results/summary.tsv` にまとめる。手順は `gpu_kit/README.md`。
 - `probe_context.tsv`：文脈で読み分ける確認用の文（期待値は注釈者が確認済み）。
+- `09_eval_context.py`：読み分けの評価データ `dataset/eval_context.tsv` の作成（`bootstrap`、一度だけ）と検査（`check`）。形式・種別・決め手・学習データとの関係は、このスクリプトの冒頭に書いてある。例文は `eval_context.tsv` に直接足し、足したら `check` を通す。
+- `10_encoder_train.py` / `encoder_core.py`：エンコーダ（BERT 系）を train で微調整し、漢字スロットの読みを辞書候補から選ばせて w7 と比べる（`--window N` で前後 N 文字だけに絞る切り分け）。GPU キットに同梱。`11_encoder_check.py` は学習前の整合性検査（位置・復号・辞書）。
 
 ## 指標
 

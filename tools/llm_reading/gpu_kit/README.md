@@ -83,3 +83,46 @@ LLM に、1文字ごとの読みの候補から漢字の読みを選ばせて、
 | `--dtype float32` | 手元の CPU の結果と厳密に比べたいとき |
 | `--purge-cache` | モデルごとに Hugging Face のキャッシュを消す（ディスク節約） |
 | `--force` | 済んだモデルも回し直す |
+
+## エンコーダの読み推定（10_encoder_train.py）
+
+日本語エンコーダ（既定は `tohoku-nlp/bert-base-japanese-char-v3`、文字単位・Apache 2.0）を train の全行で微調整し、漢字スロットの読みを辞書候補から選ばせて、w7 と比べる。LLM の評価（上の `07_gpu_eval.py`）とは別の実験で、同じキット・同じ VM で回せる。
+学習データの割合（train 先頭 N 行）× シードで回し、dev の漢字スロット一致率・w7 の自信度ゲート・文脈（probe と `eval_context`）を測る。
+
+| ファイル | 内容 |
+|---|---|
+| `10_encoder_train.py` | 学習と評価の実行 |
+| `encoder_core.py` | ラベル表・辞書絞り込み・トークン化・分類ヘッド・学習ループ |
+| `bundle/train_full.jsonl` `dev_full.jsonl` `eval_context.jsonl` | 学習用の全行・dev 全行（w7 つき）・読み分けの評価データ |
+
+```sh
+uv sync
+uv run python 10_encoder_train.py --smoke                          # 極小モデル・数十行で動作確認（1分未満）
+tmux new -s momo-enc
+uv run python 10_encoder_train.py --fracs 25,50,75,100 --seeds 0,1,2   # 本番（8 エポック固定）
+```
+
+- 精度は GPU に合わせて自動で選ぶ（bf16 が使えれば bf16、T4 のように使えなければ fp16 の混合精度）。
+- 済んだ回（`results_encoder/<モデル>/f<割合>_s<シード>/result.json`）は飛ばすので、Spot VM が止められても同じコマンドで続きから回せる。`--force` で回し直す。
+- 集計は `results_encoder/<モデル>/summary.tsv`（回ごと）と `summary_agg.tsv`（割合ごとの平均±標準偏差）。`--aggregate-only` で集計だけやり直せる。
+- 結果の持ち帰り（手元のリポジトリ直下で）:
+
+  ```sh
+  gcloud compute scp --recurse momo-llm:~/gpu_kit/results_encoder tools/llm_reading/results_encoder --zone=<ゾーン>
+  ```
+
+| オプション | 意味 |
+|---|---|
+| `--model NAME` | 微調整するモデル（文字単位の語彙 `vocab.txt` を持つもの） |
+| `--fracs` / `--seeds` | 学習データの割合（%）とシード（既定 25,50,75,100 と 0,1,2） |
+| `--epochs N` / `--lr X` / `--batch-size N` | 既定 8 / 5e-5 / 32 |
+| `--limit-train N` `--limit-dev N` `--limit-eval N` | 予備実験用に件数を絞る |
+
+### 窓を絞った切り分け（`--window N`）
+
+エンコーダの勝因が「行全体の文脈」かを確かめるため、スロットごとに前後 N 文字だけを見せて学習・評価する（w7 の window=7 は前後 3 文字）。結果は `results_encoder/<モデル>__win<N>/` に分かれる。
+1 スロットが 1 件の短い入力になるので、バッチは行ではなくスロット単位。行全体の学習と1ステップあたりのスロット数を合わせるため `--batch-size 256` を使う。
+
+```sh
+for w in 3 8 16; do uv run python 10_encoder_train.py --window $w --batch-size 256 --fracs 100 --seeds 0,1,2; done
+```

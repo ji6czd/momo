@@ -11,15 +11,20 @@
                  LLM の「文脈あり 対 なし」の比較には使える（LLM はこのデータを見ていない）
 - probe.jsonl    確認用の文（probe_context.tsv）: 文脈とその読み（w7）、注目する語のスロット、期待値
 - single_character_dic.tsv  train だけから作った辞書
+- train_full.jsonl   エンコーダの学習用: train の全行（スロットと正解）
+- dev_full.jsonl     エンコーダの評価用: dev の全行（正解・w7 の読みと自信度）
+- eval_context.jsonl 読み分けの評価データ dataset/eval_context.tsv の各行（w7 の読みつき）
 - meta.json
 
-キットの中身はこれら（bundle/）と、llm_core.py・07_gpu_eval.py・gpu_kit/ の pyproject.toml と README.md。
+キットの中身はこれら（bundle/）と、llm_core.py・07_gpu_eval.py・encoder_core.py・
+10_encoder_train.py・gpu_kit/ の pyproject.toml と README.md。
 
     uv run --group llm python 06_export_bundle.py
 
 出力: work/gpu_kit/（展開済み）と work/gpu_kit.zip。w7 は work/frac_100/（train だけで学習）。
 """
 
+import importlib
 import json
 import os
 import shutil
@@ -126,40 +131,97 @@ def export_context(w7, golds) -> list[dict]:
     return out
 
 
-def export_probe(w7, path: str) -> list[dict]:
+def find_nth(text: str, word: str, occ: int = 1) -> int:
+    """text の中で word が occ 番目に現れる位置。"""
+    pos = -1
+    for _ in range(occ):
+        pos = text.find(word, pos + 1)
+        if pos < 0:
+            raise ValueError(f"{word!r} が {occ} 回現れない: {text!r}")
+    return pos
+
+
+def export_word_rows(w7, items: list[dict]) -> list[dict]:
+    """語の読みを問う行（id・context・text・word・expected・occ と、そのほかの列）に、
+    スロットと w7 の読み・自信度、語に当たるスロットの番号（word_idx）を添える。"""
     out = []
+    for it in items:
+        text, context = it["text"], it["context"]
+        sent = GoldSentence("", text, slots_for_text(text))
+        p = align_prediction(sent, w7.predict(text))
+        ctx_ruby = ""
+        if context:
+            cs = GoldSentence("", context, slots_for_text(context))
+            ctx_ruby = ruby(
+                cs.slots, align_prediction(cs, w7.predict(context)).readings
+            )
+        start = find_nth(text, it["word"], it.get("occ", 1))
+        out.append(
+            {
+                **it,
+                "context_ruby": ctx_ruby,
+                "slots": slot_rows(sent.slots),
+                "w7": p.readings,
+                "conf": [round(c, 4) for c in p.confidences],
+                "word_idx": [
+                    i
+                    for i, s in enumerate(sent.slots)
+                    if start <= s.start < start + len(it["word"])
+                ],
+            }
+        )
+    return out
+
+
+def export_probe(w7, path: str) -> list[dict]:
+    items = []
     with open(path, encoding="utf-8") as f:
         for line in f:
             if not line.strip() or line.startswith("#"):
                 continue
             pid, context, text, word, expected = line.rstrip("\n").split("\t")[:5]
-            sent = GoldSentence("", text, slots_for_text(text))
-            p = align_prediction(sent, w7.predict(text))
-            ctx_ruby = ""
-            if context:
-                cs = GoldSentence("", context, slots_for_text(context))
-                ctx_ruby = ruby(
-                    cs.slots, align_prediction(cs, w7.predict(context)).readings
-                )
-            start = text.find(word)
-            out.append(
+            items.append(
                 {
                     "id": pid,
                     "context": context,
-                    "context_ruby": ctx_ruby,
                     "text": text,
-                    "slots": slot_rows(sent.slots),
-                    "w7": p.readings,
-                    "conf": [round(c, 4) for c in p.confidences],
                     "word": word,
-                    "word_idx": [
-                        i
-                        for i, s in enumerate(sent.slots)
-                        if start <= s.start < start + len(word)
-                    ],
                     "expected": expected,
                 }
             )
+    return export_word_rows(w7, items)
+
+
+def export_eval_context(w7) -> list[dict]:
+    """dataset/eval_context.tsv の各行。"""
+    rows = importlib.import_module("09_eval_context").load_rows()
+    items = [
+        {
+            "id": r["id"],
+            "context": r["context"],
+            "text": r["text"],
+            "word": r["word"],
+            "occ": int(r["occ"] or 1),
+            "expected": r["expected"],
+            "kind": r["kind"],
+            "cue": r["cue"],
+            "split": r["split"],
+        }
+        for r in rows
+    ]
+    return export_word_rows(w7, items)
+
+
+def export_full(golds, w7=None) -> list[dict]:
+    """エンコーダ用に、行ごとのスロットと正解を書き出す（w7 を渡せば読みと自信度も添える）。"""
+    out = []
+    for n, g in enumerate(golds):
+        row = {"id": n, "text": g.text, "slots": slot_rows(g.slots)}
+        if w7 is not None:
+            p = align_prediction(g, w7.predict(g.text))
+            row["w7"] = p.readings
+            row["conf"] = [round(c, 4) for c in p.confidences]
+        out.append(row)
     return out
 
 
@@ -196,6 +258,14 @@ def main() -> None:
     write_jsonl(os.path.join(bundle, "context.jsonl"), context)
     write_jsonl(os.path.join(bundle, "context_train.jsonl"), context_train)
     write_jsonl(os.path.join(bundle, "probe.jsonl"), probe)
+    train_full = export_full(
+        parse_gold(line, n) for n, line in enumerate(read_raw_lines(TRAIN_RAW), 1)
+    )
+    dev_full = export_full(dev, w7)
+    eval_context = export_eval_context(w7)
+    write_jsonl(os.path.join(bundle, "train_full.jsonl"), train_full)
+    write_jsonl(os.path.join(bundle, "dev_full.jsonl"), dev_full)
+    write_jsonl(os.path.join(bundle, "eval_context.jsonl"), eval_context)
     shutil.copy(os.path.join(FRAC100, "single_character_dic.tsv"), bundle)
     meta = {
         "created": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -206,13 +276,21 @@ def main() -> None:
             "context": len(context),
             "context_train": len(context_train),
             "probe": len(probe),
+            "train_full": len(train_full),
+            "dev_full": len(dev_full),
+            "eval_context": len(eval_context),
         },
         "note": "probe の expected は注釈者が確認済み（2026-10-20）",
     }
     with open(os.path.join(bundle, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    for name in ("llm_core.py", "07_gpu_eval.py"):
+    for name in (
+        "llm_core.py",
+        "07_gpu_eval.py",
+        "encoder_core.py",
+        "10_encoder_train.py",
+    ):
         shutil.copy(os.path.join(SCRIPT_DIR, name), KIT)
     for name in ("pyproject.toml", "README.md"):
         shutil.copy(os.path.join(SCRIPT_DIR, "gpu_kit", name), KIT)

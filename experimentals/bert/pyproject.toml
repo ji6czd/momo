@@ -1,0 +1,22 @@
+[project]
+name = "bert"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "KIRIAKE Masanori", email = "seiken@rd01.net" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "fugashi>=1.5.2",
+    "torch>=2.14.1",
+    "transformers>=5.20.2",
+    "unidic-lite>=1.0.8",
+]
+
+[project.scripts]
+bert = "bert:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"

@@ -14,6 +14,7 @@ step7_head = "bert.step7_head:main"
 step8_predict = "bert.step8_predict:main"
 step9_finetune = "bert.step9_finetune:main"
 step10_infer = "bert.step10_infer:main"
+step11_audit = "bert.step11_audit:main"
 
 
 [build-system]

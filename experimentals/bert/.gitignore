@@ -11,3 +11,4 @@ wheels/
 
 # 実験の出力（文字ベクトルなど）
 work/
+finetuned.zip

@@ -9,13 +9,17 @@ BERT 本体は公開重みのまま固定し、漢字スロットの文字ベク
 読みの分類器だけを学習するので、設定を変えた実験を数分で繰り返せる。
 
 ```bash
-uv run python -m bert.step6_extract                  # 文字ベクトルの抽出（CPU で約5分）
-uv run python -m bert.step7_head --vectors L1_w0     # 分類器の学習と w7 との比較
+uv run step6_extract                                 # 文字ベクトルの抽出（CPU で約5分）
+uv run step7_head --vectors L1_w0                    # 分類器の学習と w7 との比較
 ```
 
 - `step6_extract` の主な指定: `--layers N`（最後の N 層の平均）、`--window N`（スロットごとに前後 N 文字だけ見せる）
 - `step7_head` の主な指定: `--hidden N`（1隠れ層）、`--epochs`、`--seeds`
 - 出力は `work/`（git 管理外）
+
+`pyproject.toml` の `[project.scripts]` に登録してあるので、`uv run <名前>` で呼べる
+（`make_kit`、`step6_extract`、`step7_head`、`step8_predict`、`step9_finetune`、`step10_infer`）。
+GPU での微調整と保存、手元での推論は `step9_finetune`、`step10_infer`（`make_kit` でクラウドへ持ち込む）。
 
 ## 比較の物差し
 

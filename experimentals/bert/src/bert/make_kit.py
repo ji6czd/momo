@@ -11,13 +11,17 @@ import zipfile
 from .common import BUNDLE, ENCODER_CORE_DIR, PKG_ROOT, WORK
 
 PYPROJECT = """[project]
-name = "bert-kit"
+name = "bert"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = ["torch", "transformers", "numpy"]
 
-[tool.uv]
-package = false
+[project.scripts]
+step9_finetune = "bert.step9_finetune:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
 """
 
 STEPS = """
@@ -25,9 +29,9 @@ STEPS = """
   unzip bert_kit.zip -d bert_kit && cd bert_kit
   curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.local/bin/env
   uv sync
-  PYTHONPATH=src uv run python -m bert.step9_finetune --smoke            # 動作確認
-  PYTHONPATH=src uv run python -m bert.step9_finetune                    # train で学習・dev で評価
-  PYTHONPATH=src uv run python -m bert.step9_finetune --all-data --name full
+  uv run step9_finetune --smoke            # 動作確認
+  uv run step9_finetune                    # train で学習・dev で評価
+  uv run step9_finetune --all-data --name full
 手元へ: work/finetuned/<名前>/ を experimentals/bert/work/finetuned/ に置く"""
 
 

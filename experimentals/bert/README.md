@@ -3,6 +3,38 @@
 `tohoku-nlp/bert-base-japanese-char-v3` を、Momo の読み推定に使えるかを調べる実験場。
 検証の知見は [docs/bert-char-v3-findings.md](docs/bert-char-v3-findings.md)。
 
+`tools/llm_reading` には依存しない（エンコーダ本体の [src/bert/encoder_core.py](src/bert/encoder_core.py) は
+そこから引き取ったもの）。必要なのは `momo-py`（データの展開）と `momors-py`（dev に w7 を添えるときだけ）。
+
+## データ
+
+```bash
+uv run export_data                       # dataset/basic_raw.tsv から work/data/ を作り直す
+uv run export_data --w7 <train だけで学習した basic_data_7.mbm>   # dev に w7 の読みを添える
+```
+
+- 原文のハッシュで train と dev に分ける（dev は約 1 割。足した文も同じ規則で振り分けるので、既存の dev は変わらない）。
+- 出力: `work/data/{train,dev}_full.jsonl`（行ごとの原文とスロット）、`{train,dev}_raw.tsv`、`meta.json`。
+- `basic_raw.tsv` を更新したら、その都度 `export_data` を実行する（`make_kit` は自動で実行する）。
+- モデルの保存先 `work/finetuned/` に入っているモデルは、学習したときのデータのラベル表を持つ。
+  データを変えたあと、`step8_predict` と `step11_audit` は現在のデータとラベル表が合うモデルだけを読める
+  （`step10_infer` は保存済みのラベル表を使うので、古いモデルも動く）。
+
+### w7 との比較に使う、train だけの w7
+
+dev の w7 比較（`step7_head` ほか）には、train だけで学習した w7 が要る（全データで学習した w7 は dev を学習済みで、比較にならない）。
+
+```bash
+cd ../../momo-py
+d=../experimentals/bert/work/w7_train && mkdir -p $d && cp ../experimentals/bert/work/data/train_raw.tsv $d/basic_raw.tsv
+uv run trainer createdata --raw $d/basic_raw.tsv
+uv run makedic $d/basic_data.tsv $d/single_character_dic.tsv
+uv run trainer train --tsv $d/basic_data.tsv --window 7 --jobs 16 --boundary-n-estimators 200
+cd ../experimentals/bert && uv run export_data --w7 work/w7_train/basic_data_7.mbm
+```
+
+（人名辞書を使うときは `--name-dict` を付ける。手順は `tools/llm_reading/02_learning_curve.py` と同じ。）
+
 ## 実験の流れ（本体固定のベクトル + 軽い分類器）
 
 BERT 本体は公開重みのまま固定し、漢字スロットの文字ベクトルを一度だけ取り出して保存する。
@@ -10,31 +42,26 @@ BERT 本体は公開重みのまま固定し、漢字スロットの文字ベク
 
 ```bash
 uv run step6_extract                                 # 文字ベクトルの抽出（CPU で約5分）
-uv run step7_head --vectors L1_w0                    # 分類器の学習と w7 との比較
+uv run step7_head --vectors L1_w0                    # 分類器の学習（dev に w7 があれば比較も出る）
 ```
 
 - `step6_extract` の主な指定: `--layers N`（最後の N 層の平均）、`--window N`（スロットごとに前後 N 文字だけ見せる）
-- `step7_head` の主な指定: `--hidden N`（1隠れ層）、`--epochs`、`--seeds`
+- `step7_head` の主な指定: `--hidden N`（1隠れ層）、`--epochs`、`--seeds`、`--save 名前`
+- `step8_predict --head 名前 "文"`: 保存した分類器で漢字の読みを表示
 - 出力は `work/`（git 管理外）
 
-`pyproject.toml` の `[project.scripts]` に登録してあるので、`uv run <名前>` で呼べる
-（`make_kit`、`step6_extract`、`step7_head`、`step8_predict`、`step9_finetune`、`step10_infer`）。
-GPU での微調整と保存、手元での推論は `step9_finetune`、`step10_infer`（`make_kit` でクラウドへ持ち込む）。
+## 微調整（GPU）と保存、手元での使用
 
-## 比較の物差し
+```bash
+uv run make_kit                          # データを作り直し、クラウド用 work/bert_kit.zip を作る
+# クラウドで: uv run step9_finetune [--all-data --name full]
+uv run step10_infer --name train "文"     # 保存したモデルで読みを表示（手元の CPU）
+uv run step11_audit                      # 全データで学習したモデルと注釈の食い違い一覧
+```
 
-分割・ラベル表・辞書候補・漢字スロットの定義は `tools/llm_reading` と共有する
-（[src/bert/common.py](src/bert/common.py) が `encoder_core` を取り込む）。
-データは `tools/llm_reading/06_export_bundle.py` が書き出す `work/gpu_kit/bundle/` を読むので、
-先にそちらを実行しておく。
+`pyproject.toml` の `[project.scripts]` に登録してあるので、`uv run <名前>` で呼べる。
 
-dev 923 行の漢字スロット一致率で、w7（95.4%）と微調整（97.68%）を基準に見る。
+## 物差し
 
-## ファイル
-
-| ファイル | 内容 |
-|---|---|
-| `src/bert/step2_tokenize.py` 〜 `step5_benchmark.py` | 最初の検証（トークナイザ・文字ベクトル・速度） |
-| `src/bert/common.py` | データの場所と `encoder_core` の再利用 |
-| `src/bert/step6_extract.py` | 漢字スロットの文字ベクトルを抽出して保存 |
-| `src/bert/step7_head.py` | 保存したベクトルで分類器を学習し、w7 と比較 |
+dev の漢字スロット一致率。旧データ（dev 923 行）での記録は w7 95.4%、本体固定の分類器 96.9%、
+微調整 97.7%。データを足したので、新しい dev では取り直す（w7 も train だけで学習し直したもの）。

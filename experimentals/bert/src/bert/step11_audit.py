@@ -27,7 +27,7 @@ import torch
 from transformers import BertConfig, BertModel
 
 from .common import (
-    BUNDLE,
+    DATA,
     DEFAULT_MODEL,
     WORK,
     Candidates,
@@ -92,8 +92,8 @@ def main() -> None:
             "注意: このモデルは dev を学習していない。dev の行の食い違いは未学習のため、点検には full を使う"
         )
 
-    recs = load_jsonl(str(BUNDLE / "train_full.jsonl")) + load_jsonl(
-        str(BUNDLE / "dev_full.jsonl")
+    recs = load_jsonl(str(DATA / "train_full.jsonl")) + load_jsonl(
+        str(DATA / "dev_full.jsonl")
     )
     labels = Labels(recs)
     assert labels.names == json.loads(

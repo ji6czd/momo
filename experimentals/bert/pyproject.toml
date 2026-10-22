@@ -4,10 +4,17 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]
-requires-python = ">=3.14"
-dependencies = ["numpy>=2.5.4", "torch>=2.14.1", "transformers>=5.20.2"]
+requires-python = ">=3.13"
+dependencies = [
+    "momo-py",
+    "momors-py",
+    "numpy>=2.5.4",
+    "torch>=2.14.1",
+    "transformers>=5.20.2",
+]
 
 [project.scripts]
+export_data = "bert.export_data:main"
 make_kit = "bert.make_kit:main"
 step6_extract = "bert.step6_extract:main"
 step7_head = "bert.step7_head:main"
@@ -16,6 +23,10 @@ step9_finetune = "bert.step9_finetune:main"
 step10_infer = "bert.step10_infer:main"
 step11_audit = "bert.step11_audit:main"
 
+
+[tool.uv.sources]
+momo-py = { path = "../../momo-py", editable = true }
+momors-py = { path = "../../momors/crates/momors-pyo3/dist/momors_py-0.11.0-cp313-abi3-win_amd64.whl" }
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]

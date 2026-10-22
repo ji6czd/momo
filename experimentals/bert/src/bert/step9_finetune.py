@@ -26,7 +26,7 @@ import time
 import torch
 
 from .common import (
-    BUNDLE,
+    DATA,
     DEFAULT_MODEL,
     WORK,
     Candidates,
@@ -64,8 +64,8 @@ def main() -> None:
     ap.add_argument("--smoke", action="store_true", help="極小モデルで数十行だけ通す")
     args = ap.parse_args()
 
-    train_recs = load_jsonl(str(BUNDLE / "train_full.jsonl"))
-    dev_recs = load_jsonl(str(BUNDLE / "dev_full.jsonl"))
+    train_recs = load_jsonl(str(DATA / "train_full.jsonl"))
+    dev_recs = load_jsonl(str(DATA / "dev_full.jsonl"))
     if args.smoke:
         args.model, args.epochs = "tiny", 1
         train_recs, dev_recs = train_recs[:100], dev_recs[:30]

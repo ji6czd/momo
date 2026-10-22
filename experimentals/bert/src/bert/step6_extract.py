@@ -24,7 +24,7 @@ import torch
 from transformers import BertModel
 
 from .common import (
-    BUNDLE,
+    DATA,
     DEFAULT_MODEL,
     WORK,
     Candidates,
@@ -94,8 +94,8 @@ def main() -> None:
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 
-    train = load_jsonl(str(BUNDLE / "train_full.jsonl"))
-    dev = load_jsonl(str(BUNDLE / "dev_full.jsonl"))
+    train = load_jsonl(str(DATA / "train_full.jsonl"))
+    dev = load_jsonl(str(DATA / "dev_full.jsonl"))
     if args.limit:
         train, dev = train[: args.limit], dev[: args.limit]
     verify_records(train + dev)

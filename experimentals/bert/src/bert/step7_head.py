@@ -2,7 +2,7 @@
 
 分類器は、ベクトルから読みのラベルへの線形層（--hidden を付ければ1隠れ層）。微調整の実験と同じく、
 その文字の辞書候補だけに絞った softmax で選ぶ。評価は dev の漢字スロット一致率で、同じスロットでの
-w7 の読み（bundle に入っている）と並べる。
+w7 の読み（export_data --w7 で dev に添えたもの。無ければ w7 の欄は出さない）と並べる。
 
     uv run python -m bert.step7_head --vectors L1_w0
     uv run python -m bert.step7_head --vectors L4_w0 --hidden 512 --epochs 40
@@ -20,7 +20,7 @@ import torch
 from torch import nn
 
 from .common import (
-    BUNDLE,
+    DATA,
     WORK,
     Candidates,
     Labels,
@@ -62,8 +62,8 @@ def main() -> None:
     ap.add_argument("--save", help="最後のシードの分類器を work/heads/<名前>.pt に保存する")
     args = ap.parse_args()
 
-    train = load_jsonl(str(BUNDLE / "train_full.jsonl"))
-    dev = load_jsonl(str(BUNDLE / "dev_full.jsonl"))
+    train = load_jsonl(str(DATA / "train_full.jsonl"))
+    dev = load_jsonl(str(DATA / "dev_full.jsonl"))
     labels = Labels(train)
     cands = Candidates(train, labels)
 
@@ -85,8 +85,12 @@ def main() -> None:
     xt, gt_t, rows_t = xt[keep], gt_t[keep], rows_t[keep]
 
     dev_gold = [dev[r].slots[s].gold for r, s in zip(rd, sd)]
-    w7 = [dev[r].w7[s] for r, s in zip(rd, sd)]
-    w7_ok = np.array([a == b for a, b in zip(dev_gold, w7)])
+    has_w7 = all(hasattr(r, "w7") for r in dev)
+    w7_ok = (
+        np.array([a == dev[r].w7[s] for a, r, s in zip(dev_gold, rd, sd)])
+        if has_w7
+        else np.ones(len(dev_gold), dtype=bool)
+    )
     multi = np.array(
         [cands.n_cands.get(dev[r].slots[s].surface, 0) >= 2 for r, s in zip(rd, sd)]
     )
@@ -94,7 +98,10 @@ def main() -> None:
         f"train {len(xt)} スロット / dev {len(xd)} スロット（候補2つ以上 {multi.sum()}）"
         f" / ラベル {len(labels)} / 次元 {xt.shape[1]}"
     )
-    print(f"w7 一致率: {w7_ok.mean():.4f}（候補2つ以上 {w7_ok[multi].mean():.4f}）")
+    if has_w7:
+        print(f"w7 一致率: {w7_ok.mean():.4f}（候補2つ以上 {w7_ok[multi].mean():.4f}）")
+    else:
+        print("w7 の読みが無い（export_data --w7 で添える）。w7 との比較は出さない")
 
     accs, accs_multi, both_wrong, only_head = [], [], [], []
     for seed in (int(s) for s in args.seeds.split(",")):
@@ -143,17 +150,23 @@ def main() -> None:
         accs_multi.append(ok[multi].mean())
         both_wrong.append(int((~ok & ~w7_ok).sum()))
         only_head.append(int((~ok & w7_ok).sum()))
+        vs_w7 = (
+            f" w7と同じ誤り {both_wrong[-1]}・分類器だけの誤り {only_head[-1]}"
+            f"・w7だけの誤り {int((~w7_ok & ok).sum())}"
+            if has_w7
+            else ""
+        )
         print(
             f"  seed {seed}: 一致率 {ok.mean():.4f}（候補2つ以上 {ok[multi].mean():.4f}）"
-            f" w7と同じ誤り {both_wrong[-1]}・分類器だけの誤り {only_head[-1]}"
-            f"・w7だけの誤り {int((~w7_ok & ok).sum())}（{time.time() - t0:.0f} 秒）"
+            f"{vs_w7}（{time.time() - t0:.0f} 秒）"
         )
 
     m = lambda v: f"{np.mean(v):.4f}±{np.std(v):.4f}"  # noqa: E731
     print(
         f"\n分類器（{args.vectors}, hidden={args.hidden}）: {m(accs)}（候補2つ以上 {m(accs_multi)}）"
     )
-    print(f"w7: {w7_ok.mean():.4f}   微調整: 0.9768（記録値）")
+    w7_text = f"w7: {w7_ok.mean():.4f}   " if has_w7 else ""
+    print(f"{w7_text}微調整: 0.9768（旧データでの記録値）")
 
 
 if __name__ == "__main__":

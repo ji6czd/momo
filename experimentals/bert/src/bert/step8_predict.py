@@ -13,7 +13,7 @@ import unicodedata
 import torch
 
 from .common import (
-    BUNDLE,
+    DATA,
     DEFAULT_MODEL,
     WORK,
     Candidates,
@@ -40,7 +40,7 @@ def main() -> None:
     args = ap.parse_args()
 
     ck = torch.load(WORK / "heads" / f"{args.head}.pt")
-    train = load_jsonl(str(BUNDLE / "train_full.jsonl"))
+    train = load_jsonl(str(DATA / "train_full.jsonl"))
     labels = Labels(train)
     assert labels.names == ck["labels"], "ラベル表が学習時と違う"
     cands = Candidates(train, labels)

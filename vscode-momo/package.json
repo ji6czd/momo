@@ -40,6 +40,10 @@
       {
         "command": "momo-translator.to-segmented",
         "title": "Translate to segmented kana"
+      },
+      {
+        "command": "momo-translator.reload-model",
+        "title": "Reload model"
       }
     ]
   },

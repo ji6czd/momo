@@ -10,15 +10,20 @@ import {
 let predictor: Predictor | undefined;
 let translator: BrailleTranslator | undefined;
 
+// 設定のモデルパス。空のときは同梱モデル
+function resolveModelPath(context: vscode.ExtensionContext): string {
+  const configured = vscode.workspace
+    .getConfiguration("momo-translator")
+    .get<string>("modelPath", "")
+    .trim();
+  return (
+    configured || path.join(context.extensionPath, "resources", "model.mbm")
+  );
+}
+
 function getPredictor(context: vscode.ExtensionContext): Predictor {
   if (!predictor) {
-    const configured = vscode.workspace
-      .getConfiguration("momo-translator")
-      .get<string>("modelPath", "")
-      .trim();
-    const modelPath =
-      configured ||
-      path.join(context.extensionPath, "resources", "model.mbm");
+    const modelPath = resolveModelPath(context);
     if (!fs.existsSync(modelPath)) {
       throw new Error(`モデルファイルが見つかりません: ${modelPath}`);
     }
@@ -151,6 +156,23 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  // ファイルを差し替えたときなど、ウィンドウを再読み込みせずにモデルを読み直す
+  const disposableReload = vscode.commands.registerCommand(
+    "momo-translator.reload-model",
+    () => {
+      predictor?.free();
+      predictor = undefined;
+      try {
+        getPredictor(context);
+        vscode.window.showInformationMessage(
+          `モデルを読み込みました: ${resolveModelPath(context)}`,
+        );
+      } catch (err) {
+        vscode.window.showErrorMessage(String(err));
+      }
+    },
+  );
+
   // モデルパスが変わったら次回の変換で読み込み直す
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -161,6 +183,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
+  context.subscriptions.push(disposableReload);
   context.subscriptions.push(disposableKana);
   context.subscriptions.push(disposableBraille);
   context.subscriptions.push(disposableSegmented);

@@ -17,6 +17,17 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Momo Translator",
+      "properties": {
+        "momo-translator.modelPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "読みモデル（`.mbm` ファイル）のフルパス。空のときは拡張機能に同梱のモデルを使用します。"
+        }
+      }
+    },
     "commands": [
       {
         "command": "momo-translator.to-kana",

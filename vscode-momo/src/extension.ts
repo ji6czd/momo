@@ -12,11 +12,16 @@ let translator: BrailleTranslator | undefined;
 
 function getPredictor(context: vscode.ExtensionContext): Predictor {
   if (!predictor) {
-    const modelPath = path.join(
-      context.extensionPath,
-      "resources",
-      "model.mbm",
-    );
+    const configured = vscode.workspace
+      .getConfiguration("momo-translator")
+      .get<string>("modelPath", "")
+      .trim();
+    const modelPath =
+      configured ||
+      path.join(context.extensionPath, "resources", "model.mbm");
+    if (!fs.existsSync(modelPath)) {
+      throw new Error(`モデルファイルが見つかりません: ${modelPath}`);
+    }
     const modelBytes = fs.readFileSync(modelPath);
     predictor = new Predictor(new Uint8Array(modelBytes));
   }
@@ -144,6 +149,16 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage(String(err));
       }
     },
+  );
+
+  // モデルパスが変わったら次回の変換で読み込み直す
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("momo-translator.modelPath")) {
+        predictor?.free();
+        predictor = undefined;
+      }
+    }),
   );
 
   context.subscriptions.push(disposableKana);

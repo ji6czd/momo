@@ -70,12 +70,12 @@ top_page = f"""
         <label for="source">点訳したい文章を入力してね：</label><br>
         <input type="text" id="source" name="source" required><br>
         <input type="radio" id="small" name="model" value="small">
-        <label for="small">Small (約12MB)</label><br>
+        <label for="small">Small (約3.2MB)</label><br>
         <input type="radio" id="medium" name="model" value="medium">
-        <label for="medium">Medium (約24MB)</label><br>
+        <label for="medium">Medium (約7.0MB)</label><br>
         <input type="radio" id="large" name="model" value="large" checked>
-        <label for="large">Large (約37MB)</label><br>
-        <input type="submit" value="LR機械学習点訳">
+        <label for="large">Large (約9.8MB)</label><br>
+        <input type="submit" value="点訳">
     </form>
     </p>
     <p>{version_info}</p>

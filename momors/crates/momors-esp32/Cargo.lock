@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "momors-esp32"
-version = "1.0.0"
+version = "0.11.1"
 dependencies = [
  "embuild",
  "esp-idf-sys",

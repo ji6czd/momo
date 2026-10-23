@@ -23,7 +23,7 @@ bench-tools = ["momors-core/diagnostics"]
 
 [profile.release]
 opt-level = 3
-debug = true       # シンボルはフラッシュサイズに影響しない（ELF にのみ残る）
+debug = true  # シンボルはフラッシュサイズに影響しない（ELF にのみ残る）
 
 [profile.dev]
 debug = true
@@ -34,7 +34,7 @@ momors-core = { path = "../momors-core" }
 momors-braille = { path = "../momors-braille" }
 # esp-idf-svc / esp-idf-hal は ESP-IDF v5.5 のバインディングと版が合わず（esp-idf-hal 0.46.2 が
 # spi_transaction_t を不透明型として受け取る）、必要なのは生 API だけなので esp-idf-sys を直接使う。
-esp-idf-sys = { version = "0.37.2", features = ["binstart"] }
+esp-idf-sys = { version = "0.38.1", features = ["binstart"] }
 
 [build-dependencies]
 embuild = "0.33"

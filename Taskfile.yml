@@ -204,9 +204,10 @@ tasks:
       STAGE: "{{.ROOT_DIR}}/dist/sdk/cpp"
       OUT: "{{.ROOT_DIR}}/dist/momo-sdk-cpp-{{.VERSION}}.zip"
     deps: [sdk:cpp]
+    dir: "{{.STAGE}}"
     cmds:
       - rm -f "{{.OUT}}"
-      - powershell -NoProfile -Command "Compress-Archive -Path '{{.STAGE}}/*' -DestinationPath '{{.OUT}}'"
+      - python -m zipfile -c "{{.OUT}}" *
 
   sdk:csharp:
     desc: Build C# NuGet package and stage to dist/sdk/csharp/
@@ -235,9 +236,10 @@ tasks:
       STAGE: "{{.ROOT_DIR}}/dist/sdk/csharp"
       OUT: "{{.ROOT_DIR}}/dist/momo-sdk-csharp-{{.VERSION}}.zip"
     deps: [sdk:csharp]
+    dir: "{{.STAGE}}"
     cmds:
       - rm -f "{{.OUT}}"
-      - powershell -NoProfile -Command "Compress-Archive -Path '{{.STAGE}}/*' -DestinationPath '{{.OUT}}'"
+      - python -m zipfile -c "{{.OUT}}" *
 
   sdk:wasm:
     desc: Build WebAssembly SDK (browser target) and stage to dist/sdk/wasm/
@@ -266,9 +268,10 @@ tasks:
       STAGE: "{{.ROOT_DIR}}/dist/sdk/wasm"
       OUT: "{{.ROOT_DIR}}/dist/momo-sdk-wasm-{{.VERSION}}.zip"
     deps: [sdk:wasm]
+    dir: "{{.STAGE}}"
     cmds:
       - rm -f "{{.OUT}}"
-      - powershell -NoProfile -Command "Compress-Archive -Path '{{.STAGE}}/*' -DestinationPath '{{.OUT}}'"
+      - python -m zipfile -c "{{.OUT}}" *
 
   sdk:android:
     desc: Build Android SDK (Kotlin bindings + jniLibs for arm64-v8a / x86_64) to dist/sdk/android/ (requires cargo-ndk and Android NDK)
@@ -307,6 +310,32 @@ tasks:
       - cp "{{.DATA}}/basic_data_5.mbm" "{{.OUT}}/resources/"
       - cp "{{.DATA}}/basic_data_7.mbm" "{{.OUT}}/resources/"
 
+  sdk:zip:android:
+    desc: Create Android SDK ZIP archive to dist/
+    vars:
+      VERSION:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+      STAGE: "{{.ROOT_DIR}}/dist/sdk/android"
+      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-android-{{.VERSION}}.zip"
+    deps: [sdk:android]
+    dir: "{{.STAGE}}"
+    cmds:
+      - rm -f "{{.OUT}}"
+      - python -m zipfile -c "{{.OUT}}" *
+
+  sdk:zip:ios:
+    desc: Create iOS SDK ZIP archive to dist/
+    vars:
+      VERSION:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+      STAGE: "{{.ROOT_DIR}}/dist/sdk/ios"
+      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-ios-{{.VERSION}}.zip"
+    deps: [sdk:ios]
+    dir: "{{.STAGE}}"
+    cmds:
+      - rm -f "{{.OUT}}"
+      - python -m zipfile -c "{{.OUT}}" *
+
   sdk:clean:
     desc: Clean SDK artifacts
     cmds:
@@ -314,6 +343,8 @@ tasks:
       - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-cpp-"*.zip
       - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-csharp-"*.zip
       - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-wasm-"*.zip
+      - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-android-"*.zip
+      - rm -f "{{.ROOT_DIR}}/dist/momo-sdk-ios-"*.zip
 
   clean:
     desc: Clean all build artifacts

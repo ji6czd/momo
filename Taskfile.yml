@@ -270,6 +270,41 @@ tasks:
       - rm -f "{{.OUT}}"
       - powershell -NoProfile -Command "Compress-Archive -Path '{{.STAGE}}/*' -DestinationPath '{{.OUT}}'"
 
+  sdk:android:
+    desc: Build Android SDK (Kotlin bindings + jniLibs for arm64-v8a / x86_64) to dist/sdk/android/ (requires cargo-ndk and Android NDK)
+    vars:
+      OUT: "{{.ROOT_DIR}}/dist/sdk/android"
+      DATA: "{{.ROOT_DIR}}/dataset"
+    sources:
+      - momors/crates/momors-mobile/src/**/*.rs
+      - momors/crates/momors-core/src/**/*.rs
+      - momors/crates/momors-braille/src/**/*.rs
+    generates:
+      - "{{.OUT}}/jniLibs/arm64-v8a/libmomors_mobile.so"
+    cmds:
+      - rm -rf "{{.OUT}}"
+      - mkdir -p "{{.OUT}}/assets"
+      - cd momors && cargo ndk -t arm64-v8a -t x86_64 -o "{{.OUT}}/jniLibs" build --release -p momors-mobile
+      - cd momors && cargo build -p momors-mobile && cargo run -q -p momors-mobile --bin uniffi-bindgen -- generate --library target/debug/momors_mobile.dll --language kotlin --out-dir "{{.OUT}}/kotlin"
+      - cp "{{.DATA}}/basic_data_4.mbm" "{{.OUT}}/assets/"
+      - cp "{{.DATA}}/basic_data_5.mbm" "{{.OUT}}/assets/"
+
+  sdk:ios:
+    desc: Build iOS XCFramework (Swift bindings) to dist/sdk/ios/ (macOS + Xcode only)
+    vars:
+      OUT: "{{.ROOT_DIR}}/dist/sdk/ios"
+      DATA: "{{.ROOT_DIR}}/dataset"
+    cmds:
+      - rm -rf "{{.OUT}}"
+      - mkdir -p "{{.OUT}}/swift" "{{.OUT}}/headers" "{{.OUT}}/resources"
+      - cd momors && cargo build --release -p momors-mobile --target aarch64-apple-ios && cargo build --release -p momors-mobile --target aarch64-apple-ios-sim
+      - cd momors && cargo build -p momors-mobile && cargo run -q -p momors-mobile --bin uniffi-bindgen -- generate --library target/debug/libmomors_mobile.dylib --language swift --out-dir "{{.OUT}}/swift"
+      - cp "{{.OUT}}/swift/momors_mobileFFI.h" "{{.OUT}}/headers/"
+      - cp "{{.OUT}}/swift/momors_mobileFFI.modulemap" "{{.OUT}}/headers/module.modulemap"
+      - xcodebuild -create-xcframework -library momors/target/aarch64-apple-ios/release/libmomors_mobile.a -headers "{{.OUT}}/headers" -library momors/target/aarch64-apple-ios-sim/release/libmomors_mobile.a -headers "{{.OUT}}/headers" -output "{{.OUT}}/MomorsMobile.xcframework"
+      - cp "{{.DATA}}/basic_data_4.mbm" "{{.OUT}}/resources/"
+      - cp "{{.DATA}}/basic_data_5.mbm" "{{.OUT}}/resources/"
+
   sdk:clean:
     desc: Clean SDK artifacts
     cmds:

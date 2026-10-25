@@ -4,7 +4,7 @@ Momo の Android / iOS バインディング。[UniFFI](https://mozilla.github.i
 API は momors-wasm / momors-pyo3 と同じ形（`Predictor` / `BrailleTranslator` / `BrailleBackTranslator`）。
 
 モデル（`.mbm`）はバイト列で渡せるので、Android の assets や iOS の bundle から読んだ内容をそのまま使える。
-目安として `basic_data_4.mbm` は約 3.3MB。w4 / w5 の同梱を推奨する（w7 の実機でのメモリ・ロード時間は未測定）。
+配布物には w4 / w5 / w7 の3モデルを同梱する。使う側がサイズと精度で選ぶ（`basic_data_4.mbm` は約 3.3MB。実機でのメモリ・ロード時間は未測定）。
 
 ## 使い方
 

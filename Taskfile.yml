@@ -288,6 +288,7 @@ tasks:
       - cd momors && cargo build -p momors-mobile && cargo run -q -p momors-mobile --bin uniffi-bindgen -- generate --library target/debug/momors_mobile.dll --language kotlin --out-dir "{{.OUT}}/kotlin"
       - cp "{{.DATA}}/basic_data_4.mbm" "{{.OUT}}/assets/"
       - cp "{{.DATA}}/basic_data_5.mbm" "{{.OUT}}/assets/"
+      - cp "{{.DATA}}/basic_data_7.mbm" "{{.OUT}}/assets/"
 
   sdk:ios:
     desc: Build iOS XCFramework (Swift bindings) to dist/sdk/ios/ (macOS + Xcode only)
@@ -304,6 +305,7 @@ tasks:
       - xcodebuild -create-xcframework -library momors/target/aarch64-apple-ios/release/libmomors_mobile.a -headers "{{.OUT}}/headers" -library momors/target/aarch64-apple-ios-sim/release/libmomors_mobile.a -headers "{{.OUT}}/headers" -output "{{.OUT}}/MomorsMobile.xcframework"
       - cp "{{.DATA}}/basic_data_4.mbm" "{{.OUT}}/resources/"
       - cp "{{.DATA}}/basic_data_5.mbm" "{{.OUT}}/resources/"
+      - cp "{{.DATA}}/basic_data_7.mbm" "{{.OUT}}/resources/"
 
   sdk:clean:
     desc: Clean SDK artifacts

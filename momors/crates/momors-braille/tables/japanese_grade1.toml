@@ -416,6 +416,18 @@ classes = ["stop", "pause", "open", "close", "inline"]
 "→" = { braille = "⠒⠒⠕", class = "inline" }
 "←" = { braille = "⠪⠒⠒", class = "inline" }
 
+# ローマ数字
+"Ⅰ" = "⠠⠊"
+"Ⅱ" = "⠠⠊⠊"
+"Ⅲ" = "⠠⠊⠊⠊"
+"Ⅳ" = "⠠⠊⠧"
+"Ⅴ" = "⠠⠧"
+"Ⅵ" = "⠠⠧⠊"
+"Ⅶ" = "⠠⠧⠊⠊"
+"Ⅷ" = "⠠⠧⠊⠊⠊"
+"Ⅸ" = "⠠⠊⠭"
+"Ⅹ" = "⠠⠭"
+
 [table.punct.latin]
 # Spaces
 " " = "⠀"                                # 語境界スペース（ASCII 分岐で参照）

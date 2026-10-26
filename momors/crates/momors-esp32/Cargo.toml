@@ -1,7 +1,7 @@
 [package]
 name = "momors-esp32"
 description = "ESP32-P4 (ESP-IDF) firmware: serial-console REPL for the momors Japanese Braille engine."
-version = "0.11.1"
+version = "0.11.2"
 edition = "2024"
 license = "BSD-3-Clause"
 authors = ["KIRIAKE Masanori <seiken@rd01.net>"]

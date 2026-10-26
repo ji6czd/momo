@@ -1967,6 +1967,15 @@ fn extract_aside_spans(text: &str) -> (Removed, Vec<AsideSpan>) {
     while i < chars.len() {
         let (b, c) = chars[i];
         if let Some((Role::Open, Treatment::Aside)) = bracket::lookup(c) {
+            // 付く相手（ホスト）の無い括弧は注釈ではなくタグ・見出し番号などの
+            // 本文の一部として本文に残す（`bracket::lacks_host` 参照）。
+            // 対応する閉じ括弧は、開きしか見ないこのループでは単独括弧のまま
+            // 本文に残り、Inline括弧と同じくトークン化される。
+            let prev = i.checked_sub(1).map(|k| chars[k].1);
+            if bracket::lacks_host(prev) {
+                i += 1;
+                continue;
+            }
             // 対応する閉じを探す（同種の Aside 括弧の入れ子を数える）
             let mut depth = 0usize;
             let mut close_at: Option<usize> = None;
@@ -2691,6 +2700,29 @@ mod tests {
     }
 
     #[test]
+    fn extract_aside_skips_brackets_without_host() {
+        // 文頭・空白の直後・読点の直後の括弧は注釈ではないので本文に残す
+        for text in [
+            "（一）点字",
+            "未読 （東京都）防災",
+            "この問題は、（１）の状況",
+        ] {
+            let (outer, spans) = extract_aside_spans(text);
+            assert_eq!(outer.text, text);
+            assert!(spans.is_empty(), "{text}");
+        }
+    }
+
+    #[test]
+    fn extract_aside_without_host_still_finds_nested_with_host() {
+        // 外側がホスト無しで本文に残っても、内側がホスト付きなら span にする
+        let text = "（東京都（旧）の）";
+        let (outer, spans) = extract_aside_spans(text);
+        assert_eq!(outer.text, "（東京都の）");
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
     fn extract_aside_multiple_spans() {
         let (outer, spans) = extract_aside_spans("a（b）c（d）e");
         assert_eq!(outer.text, "ace");
@@ -2765,11 +2797,12 @@ mod tests {
 
     #[test]
     fn splice_keeps_source_space() {
-        // 原文の空白は「内容」なので消さない
-        let text = "a （b）";
+        // 原文の空白は「内容」なので消さない（span の直前の空白は注釈の対象外に
+        // なるので、span の直後の空白で確認する）
+        let text = "a（b） c";
         let (outer, spans) = extract_aside_spans(text);
-        assert_eq!(outer.text, "a ");
-        let mut r = make_result(&outer.text, "a ", &[0, 1]);
+        assert_eq!(outer.text, "a c");
+        let mut r = make_result(&outer.text, "a c", &[0, 1, 2]);
         remap_result_to_source(&mut r, text, &outer.byte_map);
         let sp = &spans[0];
         let atom = Atom {
@@ -2788,17 +2821,17 @@ mod tests {
             decs: vec![DecisionSource::Bypass; 7],
         };
         splice_atoms(&mut r, text, vec![atom]);
-        assert_eq!(r.kana_text, "a （b）");
+        assert_eq!(r.kana_text, "a（b） c");
     }
 
     #[test]
     fn splice_keeps_non_ascii_source_whitespace() {
         // 空白判定は char_type 基準なので 0x20 以外の原文空白も保存される
         for ws in ['\u{3000}', '\u{00A0}', '\t'] {
-            let text: String = format!("a{ws}（b）");
+            let text: String = format!("a（b）{ws}c");
             let (outer, spans) = extract_aside_spans(&text);
-            assert_eq!(outer.text, format!("a{ws}"));
-            let mut r = make_result(&outer.text, &format!("a{ws}"), &[0, 1]);
+            assert_eq!(outer.text, format!("a{ws}c"));
+            let mut r = make_result(&outer.text, &format!("a{ws}c"), &[0, 1, 1 + ws.len_utf8()]);
             remap_result_to_source(&mut r, &text, &outer.byte_map);
             let sp = &spans[0];
             let atom = Atom {

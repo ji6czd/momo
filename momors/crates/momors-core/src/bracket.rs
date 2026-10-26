@@ -77,6 +77,26 @@ pub(crate) fn lookup(c: char) -> Option<(Role, Treatment)> {
     })
 }
 
+/// 開き括弧の直前の文字 `prev`（先頭なら `None`）から見て、括弧に付く相手
+/// （ホスト）が無いか。
+///
+/// 注釈（[`Aside`]）は直前の語に付いて初めて「除いても文が成り立つ傍注」に
+/// なる。文頭・空白の直後・読点の直後の括弧は付く相手が無く、見出し番号
+/// `（一）点字をめぐる旅`、画面読み上げ出力の項目 `未読 （東京都）防災情報`、
+/// 構成要素 `この問題は、（１）の状況` のように本文の一部として働く。記号種
+/// だけでは見分けられないため、直前の文字で判定する。該当すれば Aside
+/// 扱いにせず本文に残す（引用系と同じくトークン化して実文字のまま推論する）。
+///
+/// momo-train/src/momo_train/bracket.py の `lacks_host` と同じ規則に保つこと。
+///
+/// [`Aside`]: Treatment::Aside
+pub(crate) fn lacks_host(prev: Option<char>) -> bool {
+    match prev {
+        None => true,
+        Some(c) => c.is_whitespace() || matches!(c, '、' | '，'),
+    }
+}
+
 /// `open` と `close` が同じ括弧ペアか。
 pub(crate) fn is_pair(open: char, close: char) -> bool {
     matches!(
@@ -147,6 +167,23 @@ mod tests {
         assert!(is_pair('「', '」'));
         assert!(!is_pair('（', '」'));
         assert!(!is_pair('「', '）'));
+    }
+
+    #[test]
+    fn host_is_missing_at_start_after_space_or_comma() {
+        assert!(lacks_host(None));
+        assert!(lacks_host(Some(' ')));
+        assert!(lacks_host(Some('\u{3000}')));
+        assert!(lacks_host(Some('、')));
+        assert!(lacks_host(Some('，')));
+    }
+
+    #[test]
+    fn host_exists_after_word_characters() {
+        assert!(!lacks_host(Some('聞')));
+        assert!(!lacks_host(Some('L')));
+        assert!(!lacks_host(Some('）')));
+        assert!(!lacks_host(Some('。')));
     }
 
     #[test]

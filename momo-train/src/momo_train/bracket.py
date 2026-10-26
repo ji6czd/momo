@@ -108,6 +108,30 @@ Row = List[str]
 Sentence = List[Row]
 
 
+def lacks_host(rows: Sentence, i: int) -> bool:
+    """`rows[i]`（開き括弧）に付く相手（ホスト）が無いか。
+
+    文頭・空白の直後・読点の直後の括弧は、直前の語に付く注釈ではなく、見出し
+    番号（`（一）点字をめぐる旅`）・画面読み上げ出力の項目（`未読 （東京都）…`）・
+    構成要素（`この問題は、（１）の状況`）として本文の一部で働く。該当すれば
+    Aside 扱いにせず、本文に残してINLINE括弧と同じく扱う。
+
+    原文の空白は学習データの行にならない（process_line_to_tsv が読み飛ばす）
+    ので、直前の行との原文位置（OrigIdx）の飛びで検出する。
+
+    momors-core/src/bracket.rs の `lacks_host` と同じ規則に保つこと。
+    """
+    if i == 0:
+        return True
+    prev = rows[i - 1]
+    if prev[0][-1:] in ("、", "，"):
+        return True
+    try:
+        return int(rows[i][3]) - (int(prev[3]) + len(prev[0])) > 0
+    except (IndexError, ValueError):
+        return False
+
+
 def _has_space(label: str) -> bool:
     return MORA_SPLIT in label
 
@@ -254,6 +278,10 @@ def tokenize_for_training(rows: Sentence) -> Tuple[Sentence, List[Sentence]]:
       （strip/spliceでは外さない）ため、開き・閉じの行自身が持つ`+S`を
       そのまま学習に使えばよく、直前行への移設は不要（旧strip_for_training
       時代の名残）。
+    - ホストの無い ASIDE 括弧（文頭・空白の直後・読点の直後、`lacks_host`）:
+      注釈ではなくタグ・見出し番号・構成要素なので、INLINE括弧と同じ扱い
+      （その場でトークン置換、`+S`は自分の行に残す）。対応する閉じ括弧も
+      同様に INLINE_CLOSE_TOKEN になる。
     - ASIDE括弧: 開き括弧の行だけを`ASIDE_TOKEN`＋`LABEL_CONTEXT_ONLY`に
       置換し、閉じ括弧の行と中身は本文から除く。中身は独立した副文として
       返す（Rust側predict_with_bracketsの再帰独立推論に対応）。中身は
@@ -277,7 +305,11 @@ def tokenize_for_training(rows: Sentence) -> Tuple[Sentence, List[Sentence]]:
 
         role, treatment = info
 
-        if treatment == Treatment.INLINE:
+        # ホストの無い開き括弧は Aside にせず Inline 扱い（lacks_host参照）。
+        # 対応する閉じ括弧は下の Aside 分岐に入る前に単独の Close として
+        # ここへ来るので、同じく Inline のトークンにする（Rust側は開きしか
+        # 見ないため、閉じは単独括弧として本文に残る）。
+        if treatment == Treatment.INLINE or role == Role.CLOSE or lacks_host(rows, i):
             token = INLINE_OPEN_TOKEN if role == Role.OPEN else INLINE_CLOSE_TOKEN
             out_rows.append(_with_char_and_label(row, token, row[1]))
             i += 1

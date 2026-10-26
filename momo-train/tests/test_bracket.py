@@ -4,6 +4,7 @@ bracket.py の単体テスト
   - strip_for_training()
   - tokenize_for_training()
 """
+
 from momo_train.bracket import (
     ASIDE_TOKEN,
     INLINE_CLOSE_TOKEN,
@@ -196,7 +197,13 @@ class TestTokenizeForTraining:
             _row("C", "シー"),
         ]
         main, subs = tokenize_for_training(rows)
-        assert [r[0] for r in main] == ["A", INLINE_OPEN_TOKEN, "B", INLINE_CLOSE_TOKEN, "C"]
+        assert [r[0] for r in main] == [
+            "A",
+            INLINE_OPEN_TOKEN,
+            "B",
+            INLINE_CLOSE_TOKEN,
+            "C",
+        ]
         assert subs == []
         # プレースホルダ行のラベルは元の"_"のまま（LABEL_CONTEXT_ONLYにはしない）
         assert main[1][1] == "_"
@@ -221,7 +228,13 @@ class TestTokenizeForTraining:
             _row("C", "シー"),
         ]
         main, _ = tokenize_for_training(rows)
-        assert [r[0] for r in main] == ["A", INLINE_OPEN_TOKEN, "B", INLINE_CLOSE_TOKEN, "C"]
+        assert [r[0] for r in main] == [
+            "A",
+            INLINE_OPEN_TOKEN,
+            "B",
+            INLINE_CLOSE_TOKEN,
+            "C",
+        ]
         # +Sは移設されず、閉じ括弧トークン自身の行に残る
         assert main[2][1] == "ビー"
         assert main[3][1] == "_+S"
@@ -269,6 +282,76 @@ class TestTokenizeForTraining:
         assert len(subs) == 2
         assert [r[0] for r in subs[0]] == ["B", ASIDE_TOKEN]
         assert [r[0] for r in subs[1]] == ["C"]
+
+    def test_leading_aside_is_inline_and_keeps_close_space(self, capsys):
+        # 文頭の括弧は付く相手が無いので Aside にしない。閉じ括弧の+Sは
+        # 自分の行に残り、移設不能の警告も出ない。
+        rows = [
+            _row("（", "_", ctype="SYMBOL_OPEN", idx=0),
+            _row("一", "1", idx=1),
+            _row("）", "_+S", ctype="SYMBOL_CLOSE", idx=2),
+            _row("点", "テン", idx=3),
+        ]
+        main, subs = tokenize_for_training(rows)
+        assert [r[0] for r in main] == [
+            INLINE_OPEN_TOKEN,
+            "一",
+            INLINE_CLOSE_TOKEN,
+            "点",
+        ]
+        assert main[2][1] == "_+S"
+        assert subs == []
+        assert capsys.readouterr().out == ""
+
+    def test_aside_after_source_space_is_inline(self):
+        # 原文の空白は行にならない。OrigIdx の飛び（3→5）で検出する。
+        rows = [
+            _row("読", "ドク", idx=2),
+            _row("（", "_", ctype="SYMBOL_OPEN", idx=4),
+            _row("B", "ビー", idx=5),
+            _row("）", "_", ctype="SYMBOL_CLOSE", idx=6),
+            _row("C", "シー", idx=7),
+        ]
+        main, subs = tokenize_for_training(rows)
+        assert [r[0] for r in main] == [
+            "読",
+            INLINE_OPEN_TOKEN,
+            "B",
+            INLINE_CLOSE_TOKEN,
+            "C",
+        ]
+        assert subs == []
+
+    def test_aside_after_comma_is_inline(self):
+        rows = [
+            _row("、", "_", ctype="SYMBOL", idx=0),
+            _row("（", "_", ctype="SYMBOL_OPEN", idx=1),
+            _row("１", "1", idx=2),
+            _row("）", "_", ctype="SYMBOL_CLOSE", idx=3),
+            _row("の", "ノ", idx=4),
+        ]
+        main, subs = tokenize_for_training(rows)
+        assert [r[0] for r in main] == [
+            "、",
+            INLINE_OPEN_TOKEN,
+            "１",
+            INLINE_CLOSE_TOKEN,
+            "の",
+        ]
+        assert subs == []
+
+    def test_aside_with_host_still_aside(self):
+        # 直前が語の文字で原文位置も連続していれば、従来どおり Aside。
+        rows = [
+            _row("A", "エー", idx=0),
+            _row("（", "_", ctype="SYMBOL_OPEN", idx=1),
+            _row("B", "ビー", idx=2),
+            _row("）", "_", ctype="SYMBOL_CLOSE", idx=3),
+            _row("C", "シー", idx=4),
+        ]
+        main, subs = tokenize_for_training(rows)
+        assert [r[0] for r in main] == ["A", ASIDE_TOKEN, "C"]
+        assert len(subs) == 1
 
     def test_unmatched_open_bracket_passthrough_with_warning(self, capsys):
         rows = [

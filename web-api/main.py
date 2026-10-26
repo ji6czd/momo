@@ -12,6 +12,13 @@ app = Flask(__name__)
 
 version_info = f"Momo version {version('momors_py')}"
 
+# 各ページ末尾のフッター。Copyright の表記は仮。
+footer = f"""<div class="footer">
+        <p>{version_info}</p>
+        <p><a href="https://momo.seiken-lab.com">Momo Project Page</a></p>
+        <p>Copyright &copy; 2026 Momo Project Team &lt;seiken@rd01.net&gt;</p>
+    </div>"""
+
 # セマフォで同時実行を1に制限する。
 # Cloud Run の concurrency 設定に関係なく、コード側で強制する。
 # これにより「現在のモデルを1つだけキャッシュ・切り替え時は解放」が安全に動作する。
@@ -54,6 +61,24 @@ _braille_font_face = f"""<style>
 }}
 </style>"""
 
+
+def make_form(source: str = "") -> str:
+    """
+    点訳フォームのHTMLを作る。source は入力欄の初期値（escape 済みの文字列）。
+    """
+    return f"""<form action="/predict" method="get">
+        <label for="source">点訳したい文章を入力してね：</label><br>
+        <input type="text" id="source" value="{source}" name="source" required><br>
+        <input type="radio" id="small" name="model" value="small">
+        <label for="small">Small (約3.2MB)</label><br>
+        <input type="radio" id="medium" name="model" value="medium">
+        <label for="medium">Medium (約7.0MB)</label><br>
+        <input type="radio" id="large" name="model" value="large" checked>
+        <label for="large">Large (約9.8MB)</label><br>
+        <input type="submit" value="点訳">
+    </form>"""
+
+
 top_page = f"""
 <!DOCTYPE html>
 <html lang="ja">
@@ -66,19 +91,9 @@ top_page = f"""
     <h1>自動点訳システムMomo</h1>
     <p>AI点訳だよ！まだまだお勉強中だけど、よろしくね！</p>
     <p>
-    <form action="/predict" method="get">
-        <label for="source">点訳したい文章を入力してね：</label><br>
-        <input type="text" id="source" name="source" required><br>
-        <input type="radio" id="small" name="model" value="small">
-        <label for="small">Small (約3.2MB)</label><br>
-        <input type="radio" id="medium" name="model" value="medium">
-        <label for="medium">Medium (約7.0MB)</label><br>
-        <input type="radio" id="large" name="model" value="large" checked>
-        <label for="large">Large (約9.8MB)</label><br>
-        <input type="submit" value="点訳">
-    </form>
+    {make_form()}
     </p>
-    <p>{version_info}</p>
+    {footer}
 </body>
 </html>
 """
@@ -98,19 +113,9 @@ predict_page = """<!DOCTYPE html>
     <p>点字: <span style="font-size: 28px; font-family: 'SixBraille HLF', monospace; letter-spacing: 2px;">{braille_result}</span></p>
     <p>{confidences_table}</p>
     <p>
-    <form action="/predict" method="get">
-        <label for="source">点訳したい文章を入力してね：</label><br>
-        <input type="text" id="source" value="{source}" name="source" required><br>
-        <input type="radio" id="small" name="model" value="small">
-        <label for="small">Small (約8.7MB)</label><br>
-        <input type="radio" id="medium" name="model" value="medium">
-        <label for="medium">Medium (約14MB)</label><br>
-        <input type="radio" id="large" name="model" value="large" checked>
-        <label for="large">Large (約21MB)</label><br>
-        <input type="submit" value="LR機械学習点訳">
-    </form>
+    {form}
     </p>
-    <p>{version_info}</p>
+    {footer}
 </body></html>
 """
 
@@ -160,11 +165,12 @@ def predict() -> str:
 
     return predict_page.format(
         braille_font_face=_braille_font_face,
+        form=make_form(escape(source)),
         source=escape(source),
         result=res.kana,
         confidences_table=make_characters_table(res),
         braille_result=braille,
-        version_info=version_info,
+        footer=footer,
     )
 
 

@@ -13,6 +13,10 @@ vars:
       dir="${ESP_TARGET_DIR:-{{.ROOT_DIR}}/momors/target}"
       if command -v cygpath >/dev/null 2>&1; then cygpath -m "$dir"; else echo "$dir"; fi
 
+  # SDK zip 名に埋め込むプラットフォーム名（OS/ARCH は Task 組み込み = Go の GOOS/GOARCH）。
+  # 例: windows-amd64 / linux-amd64 / linux-arm64 / macos-arm64
+  PLATFORM: '{{if eq OS "darwin"}}macos{{else}}{{OS}}{{end}}-{{ARCH}}'
+
 tasks:
   default:
     desc: Build all components (rust + python + wasm in parallel, then vscode)
@@ -187,8 +191,14 @@ tasks:
       - mkdir -p "{{.OUT}}/include" "{{.OUT}}/lib" "{{.OUT}}/bin" "{{.OUT}}/data" "{{.OUT}}/examples"
       - cp "{{.HDR}}/momo.h"                                "{{.OUT}}/include/"
       - cp "{{.HDR}}/momo_raii.hpp"                         "{{.OUT}}/include/"
-      - cp "{{.RELEASE}}/momors_ffi.dll"                    "{{.OUT}}/bin/"
-      - cp "{{.RELEASE}}/momors_ffi.dll.lib"                "{{.OUT}}/lib/"
+      - cmd: cp "{{.RELEASE}}/momors_ffi.dll"               "{{.OUT}}/bin/"
+        platforms: [windows]
+      - cmd: cp "{{.RELEASE}}/momors_ffi.dll.lib"           "{{.OUT}}/lib/"
+        platforms: [windows]
+      - cmd: cp "{{.RELEASE}}/libmomors_ffi.so"             "{{.OUT}}/lib/"
+        platforms: [linux]
+      - cmd: cp "{{.RELEASE}}/libmomors_ffi.dylib"          "{{.OUT}}/lib/"
+        platforms: [darwin]
       - cp "{{.DATA}}/basic_data_4.mbm"                     "{{.OUT}}/data/"
       - cp "{{.DATA}}/basic_data_5.mbm"                     "{{.OUT}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"                     "{{.OUT}}/data/"
@@ -202,7 +212,7 @@ tasks:
       VERSION:
         sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
       STAGE: "{{.ROOT_DIR}}/dist/sdk/cpp"
-      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-cpp-{{.VERSION}}.zip"
+      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-cpp-{{.VERSION}}-{{.PLATFORM}}.zip"
     deps: [sdk:cpp]
     dir: "{{.STAGE}}"
     cmds:
@@ -222,7 +232,12 @@ tasks:
       - rm -rf "{{.OUT}}"
       - mkdir -p "{{.OUT}}/bin" "{{.OUT}}/data"
       - dotnet pack "{{.ROOT_DIR}}/momo-ffi-cs" -c Release -p:Version={{.VERSION}} --nologo -o "{{.OUT}}"
-      - cp "{{.RELEASE}}/momors_ffi.dll"                    "{{.OUT}}/bin/"
+      - cmd: cp "{{.RELEASE}}/momors_ffi.dll"               "{{.OUT}}/bin/"
+        platforms: [windows]
+      - cmd: cp "{{.RELEASE}}/libmomors_ffi.so"             "{{.OUT}}/bin/"
+        platforms: [linux]
+      - cmd: cp "{{.RELEASE}}/libmomors_ffi.dylib"          "{{.OUT}}/bin/"
+        platforms: [darwin]
       - cp "{{.DATA}}/basic_data_4.mbm"                     "{{.OUT}}/data/"
       - cp "{{.DATA}}/basic_data_5.mbm"                     "{{.OUT}}/data/"
       - cp "{{.DATA}}/basic_data_7.mbm"                     "{{.OUT}}/data/"
@@ -234,7 +249,7 @@ tasks:
       VERSION:
         sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
       STAGE: "{{.ROOT_DIR}}/dist/sdk/csharp"
-      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-csharp-{{.VERSION}}.zip"
+      OUT: "{{.ROOT_DIR}}/dist/momo-sdk-csharp-{{.VERSION}}-{{.PLATFORM}}.zip"
     deps: [sdk:csharp]
     dir: "{{.STAGE}}"
     cmds:

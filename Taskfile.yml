@@ -217,7 +217,7 @@ tasks:
     dir: "{{.STAGE}}"
     cmds:
       - rm -f "{{.OUT}}"
-      - python -m zipfile -c "{{.OUT}}" *
+      - uv run --no-project python -m zipfile -c "{{.OUT}}" *
 
   sdk:csharp:
     desc: Build C# NuGet package and stage to dist/sdk/csharp/
@@ -254,7 +254,7 @@ tasks:
     dir: "{{.STAGE}}"
     cmds:
       - rm -f "{{.OUT}}"
-      - python -m zipfile -c "{{.OUT}}" *
+      - uv run --no-project python -m zipfile -c "{{.OUT}}" *
 
   sdk:wasm:
     desc: Build WebAssembly SDK (browser target) and stage to dist/sdk/wasm/
@@ -286,7 +286,7 @@ tasks:
     dir: "{{.STAGE}}"
     cmds:
       - rm -f "{{.OUT}}"
-      - python -m zipfile -c "{{.OUT}}" *
+      - uv run --no-project python -m zipfile -c "{{.OUT}}" *
 
   sdk:android:
     desc: Build Android SDK (Kotlin bindings + jniLibs for arm64-v8a / x86_64) to dist/sdk/android/ (requires cargo-ndk and Android NDK)
@@ -336,7 +336,7 @@ tasks:
     dir: "{{.STAGE}}"
     cmds:
       - rm -f "{{.OUT}}"
-      - python -m zipfile -c "{{.OUT}}" *
+      - uv run --no-project python -m zipfile -c "{{.OUT}}" *
 
   sdk:zip:ios:
     desc: Create iOS SDK ZIP archive to dist/
@@ -349,7 +349,7 @@ tasks:
     dir: "{{.STAGE}}"
     cmds:
       - rm -f "{{.OUT}}"
-      - python -m zipfile -c "{{.OUT}}" *
+      - uv run --no-project python -m zipfile -c "{{.OUT}}" *
 
   sdk:clean:
     desc: Clean SDK artifacts

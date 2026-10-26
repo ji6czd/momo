@@ -153,6 +153,15 @@ jobs:
       - name: Build Python (pyo3) wheel
         run: task dist:pyo3
 
+      - name: Build Windows C++ SDK
+        run: task sdk:zip:cpp
+
+      - name: Build Windows csharp SDK
+        run: task sdk:zip:csharp
+
+      - name: Build Wasm SDK
+        run: task sdk:zip:wasm
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -161,8 +170,9 @@ jobs:
             dist/*.msi
             dist/*.vsix
             dist/*.whl
+            dist/*.zip
 
-  # macOS用のビルド。pyo3のみ作成する。
+  # macOS用のビルド。pyo3と C++ SDK も作る。
   macos:
     needs: [train]
     runs-on: macos-latest
@@ -197,11 +207,16 @@ jobs:
       - name: Build Python (pyo3) wheel
         run: task dist:pyo3
 
+      - name: Build macOS C++ SDK
+        run: task sdk:zip:cpp
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-dist
-          path: dist/*.whl
+          path: |
+            dist/*.whl
+            dist/*.zip
 
   # PyPI配布用のmanylinux wheelを作成する。CIランナー(ubuntu-latest)の
   # glibcにそのままリンクするとPyPI配布に不向きなため、PyO3公式の
@@ -217,6 +232,11 @@ jobs:
         with:
           name: trained-model
           path: dataset
+
+      # SDK(task sdk:zip:cpp)をホスト上で cargo ビルドするために必要。
+      # wheel の方は maturin-action のコンテナ内で別途ビルドされる。
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v9.0.0
@@ -238,11 +258,16 @@ jobs:
           args: --release --out dist --manifest-path momors/crates/momors-pyo3/Cargo.toml
           manylinux: auto
 
+      - name: Build Linux C++ SDK
+        run: task sdk:zip:cpp
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-dist
-          path: dist/*.whl
+          path: |
+            dist/*.whl
+            dist/*.zip
 
   release:
     needs: [train, windows, macos, linux]
@@ -276,6 +301,7 @@ jobs:
             dist/*.msi
             dist/*.vsix
             dist/*.whl
+            dist/*.zip
 
   # PyPI公開はrelease/*タグの時だけ行う(test/*での動作確認時に誤って
   # 本番PyPIへ公開してしまうのを避けるため)。PyPI側で事前にこの

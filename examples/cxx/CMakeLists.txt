@@ -31,10 +31,18 @@ endif()
 
 target_include_directories(${APP_NAME} PRIVATE "${_MOMO_INCLUDE}")
 target_link_directories(${APP_NAME} PRIVATE "${_MOMO_LIB}")
-target_link_libraries(${APP_NAME} PRIVATE momors_ffi.dll.lib)
 
-# DLL をビルド出力ディレクトリへコピーする
-add_custom_command(TARGET ${APP_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-        "${_MOMO_BIN}/momors_ffi.dll"
-        $<TARGET_FILE_DIR:${APP_NAME}>)
+if(WIN32)
+    target_link_libraries(${APP_NAME} PRIVATE momors_ffi.dll.lib)
+
+    # DLL をビルド出力ディレクトリへコピーする
+    add_custom_command(TARGET ${APP_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${_MOMO_BIN}/momors_ffi.dll"
+            $<TARGET_FILE_DIR:${APP_NAME}>)
+else()
+    # Linux: libmomors_ffi.so / macOS: libmomors_ffi.dylib（SDK では lib/ に同梱）。
+    # 実行時に見つかるよう、ビルド時の rpath に配置ディレクトリを入れる。
+    target_link_libraries(${APP_NAME} PRIVATE momors_ffi)
+    set_target_properties(${APP_NAME} PROPERTIES BUILD_RPATH "${_MOMO_LIB}")
+endif()

@@ -2,7 +2,7 @@
 
 各回は work/frac_XXX/ に train の先頭 N 行を basic_raw.tsv として置き、本番の
 `task train` と同じ手順（createdata → makedic → train --window 7
---boundary-n-estimators 200）を momo-py の環境（uv run --project momo-py）で回す。
+--boundary-n-estimators 200）を momo-train の環境（uv run --project momo-train）で回す。
 学習済みの回は飛ばす（--force で学び直す）。評価は momors_py で dev を推論する。
 
     uv run python 02_learning_curve.py [--fracs 25,50,75,100] [--jobs 16] [--force] [--eval-only]
@@ -20,7 +20,7 @@ import momors_py
 
 from _common import (
     DATASET,
-    MOMO_PY,
+    MOMO_TRAIN,
     TRAIN_RAW,
     WORK,
     load_dev,
@@ -67,7 +67,7 @@ def train_fraction(frac: int, train_lines: list[str], jobs: int, force: bool) ->
         f.write("".join(line + "\n" for line in train_lines[:n]))
     print(f"[{frac}%] {n} 行で学習", flush=True)
 
-    uv = ["uv", "run", "--project", MOMO_PY]
+    uv = ["uv", "run", "--project", MOMO_TRAIN]
     t0 = time.time()
     run([*uv, "trainer", "createdata", "--raw", raw])
     run([*uv, "makedic", data, os.path.join(d, "single_character_dic.tsv")])

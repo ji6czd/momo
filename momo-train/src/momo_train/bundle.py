@@ -27,7 +27,7 @@ class LRModelBundle:
       "sgd"  (既定) : vectorizer_boundary (DictVectorizer) + model_boundary (SGDClassifier)
                        線形モデル。exporter が .mbm/.mbmf に量子化して書き出せる。
       "gbdt"        : model_boundary (LGBMClassifier) + boundary_cat_names/boundary_cat_vocabs
-                       （momo_py.categorical の列名・語彙表）によるカテゴリカル特徴量。
+                       （momo_train.categorical の列名・語彙表）によるカテゴリカル特徴量。
                        exporter が木のアンサンブルを .mbm/.mbmf の境界モデルセクション
                        （version 0x06、algo_tag=0x01）に書き出す。
     """

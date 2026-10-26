@@ -38,19 +38,19 @@ tasks:
 
   python:
     desc: Build Python package
-    dir: momo-py
+    dir: momo-train
     cmds:
       - task
 
   python:test:
     desc: Run Python tests
-    dir: momo-py
+    dir: momo-train
     cmds:
       - task test
 
   python:clean:
     desc: Clean Python build artifacts
-    dir: momo-py
+    dir: momo-train
     cmds:
       - task clean
 
@@ -362,7 +362,7 @@ tasks:
 
   train:
     desc: Train model
-    dir: momo-py
+    dir: momo-train
     cmds:
       - task train
 
@@ -471,8 +471,8 @@ tasks:
     deps: [python]
     cmds:
       - mkdir -p "{{.OUT}}"
-      - cp momo-py/dist/*.whl "{{.OUT}}/"
-      - cp momo-py/dist/*.tar.gz "{{.OUT}}/"
+      - cp momo-train/dist/*.whl "{{.OUT}}/"
+      - cp momo-train/dist/*.tar.gz "{{.OUT}}/"
 
   dist:vscode:
     desc: Build VSCode extension and copy to dist/
@@ -519,7 +519,7 @@ tasks:
         }
         bumptoml momors/Cargo.toml
         bumptoml momors/crates/momors-esp32/Cargo.toml
-        bumptoml momo-py/pyproject.toml
+        bumptoml momo-train/pyproject.toml
         bumptoml momors/crates/momors-pyo3/pyproject.toml
         node -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('vscode-momo/package.json','utf8'));p.version='$V';fs.writeFileSync('vscode-momo/package.json',JSON.stringify(p,null,2)+'\n')"
         sed "s|<Version>[^<]*</Version>|<Version>$V</Version>|" momo-editor/MomoEditor.csproj > momo-editor/MomoEditor.csproj.tmp && mv momo-editor/MomoEditor.csproj.tmp momo-editor/MomoEditor.csproj
@@ -541,11 +541,11 @@ tasks:
             FAIL=1
           fi
         }
-        V_MOMO_PY="$(grep '^version' momo-py/pyproject.toml | sed 's/version = "\(.*\)"/\1/')"
+        V_MOMO_TRAIN="$(grep '^version' momo-train/pyproject.toml | sed 's/version = "\(.*\)"/\1/')"
         V_PYO3="$(grep '^version' momors/crates/momors-pyo3/pyproject.toml | sed 's/version = "\(.*\)"/\1/')"
         V_JSON="$(node -e "process.stdout.write(require('./vscode-momo/package.json').version)")"
         V_CSPROJ="$(grep '<Version>' momo-editor/MomoEditor.csproj | sed 's|.*<Version>||' | sed 's|</Version>.*||')"
-        check "momo-py/pyproject.toml" "$V_MOMO_PY"
+        check "momo-train/pyproject.toml" "$V_MOMO_TRAIN"
         check "momors-pyo3/pyproject.toml" "$V_PYO3"
         check "vscode-momo/package.json" "$V_JSON"
         check "momo-editor/MomoEditor.csproj" "$V_CSPROJ"

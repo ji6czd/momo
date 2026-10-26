@@ -4,7 +4,7 @@ from importlib import resources
 
 
 def _load_single_char_dic() -> dict:
-    data = (resources.files("momo_py") / "single_character_dic.json").read_bytes()
+    data = (resources.files("momo_train") / "single_character_dic.json").read_bytes()
     return json.loads(data.decode("utf-8"))
 
 

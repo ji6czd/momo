@@ -9,7 +9,7 @@ LLM をファインチューンして読み推定に使う前に、手元だけ�
 
 ## 準備
 
-uv プロジェクト。`momo-py`（正解の展開に `process_line_to_tsv` を使う）と `momors-py`
+uv プロジェクト。`momo-train`（正解の展開に `process_line_to_tsv` を使う）と `momors-py`
 （`../../momors/crates/momors-pyo3/dist/` の wheel。推論と `kana_to_source` に使う）が入る。
 Rust 側を変えたら、wheel を作り直してから lock を更新する。
 

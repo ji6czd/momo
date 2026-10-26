@@ -1,7 +1,7 @@
 """エンコーダ（BERT 系）に、漢字スロットの読みを候補から選ばせる本体（torch と transformers だけで動く）。
 
 tools/llm_reading/encoder_core.py（微調整の初回実験）を、experimentals/bert に引き取ったもの。
-step6〜11 と、クラウドのキット（step9_finetune）が使う。momo_py・momors_py には依存しないので、
+step6〜11 と、クラウドのキット（step9_finetune）が使う。momo_train・momors_py には依存しないので、
 クラウドの Linux でもそのまま動く。データは export_data.py が書き出した JSONL。
 
 課題の形:

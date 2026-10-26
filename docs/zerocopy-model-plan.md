@@ -315,7 +315,7 @@ loader を書き換える前に **「フラッシュ読みは PSRAM の何倍遅
 | 列コードは列単位で 0..n-1 の全単射か | YES（採番し直せる） |
 | CSC の列あたり最大 nnz | 1,595（= n_classes、u16 に収まる） |
 
-`cat_column` が型の関数であるのは構造的な性質。`momo_py/categorical.py` の
+`cat_column` が型の関数であるのは構造的な性質。`momo_train/categorical.py` の
 `fit_categorical()` が「特徴量名ごとに 1 列」を作り、特徴量名が `FeatureType` と
 1 対 1 に対応するため。**唯一の例外**は `char_s` 列で、`CharSelf`(0x90) と
 `CharSelfCompound2`(0xA6) の 2 タイプが共有する（Python 側でどちらも `char_s=...`
@@ -377,7 +377,7 @@ PC では語彙引きが 21〜25% を占めており、そこが 3 分の 1 に�
 ### 検証
 
 - 実コーパス 351,728 文字のかな・分かち・点字が **6 スナップショットすべてバイト一致**
-- momors-core 257 テスト・momo-py の exporter テスト通過
+- momors-core 257 テスト・momo-train の exporter テスト通過
 - 点訳回帰テストの不一致は既知の 4 件のみ（新規なし）
 
 ### 残っている案
@@ -439,7 +439,7 @@ v0x09 のあと、ファイルの内訳は「ソート済みの配列」がほ�
 
 - 実コーパス 351,728 文字のかな・分かち・点字が **6 スナップショットすべてバイト一致**
   （固定幅で書いた v0x0A ファイルでも一致）
-- momors-core 262 テスト・momo-py の exporter テスト 20 件通過
+- momors-core 262 テスト・momo-train の exporter テスト 20 件通過
 - PC (w7) のプロセス起動〜1 行処理: 70ms → 95ms。varint 復号のぶん増えるが、
   フラッシュから読む量が半分になる P4 では相殺されうる。**P4 実機はモデルを
   焼き直して `:stat` / `:bench` で測ること（未計測）**。

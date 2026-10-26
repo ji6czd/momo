@@ -1,7 +1,7 @@
 //! 文字種判定モジュール。
 //!
 //! C++ 版の `char_type.hpp` + `utf8.cpp` の `get_char_type` 部分に相当。
-//! Python 版 `momopy/src/momo_py/utils.py` の `get_char_type()` と
+//! Python 版 `momo-train/src/momo_train/utils.py` の `get_char_type()` と
 //! 挙動を一致させることを目的とする。
 //!
 //! 記号テーブルは `char_type_table.rs` に分離されており、

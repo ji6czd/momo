@@ -1,6 +1,6 @@
 //! 人名辞書（gazetteer）の照合とフラグ計算。
 //!
-//! Python 版 `momo_py/name_dict.py` の `build_name_index` /
+//! Python 版 `momo_train/name_dict.py` の `build_name_index` /
 //! `compute_name_flags` に対応する。`.mbm` (version 0x03) 末尾の
 //! 人名辞書テーブルから構築され、推論時に各ユニットへ B/I/O フラグを
 //! 付与して `NameFlag*` 特徴量の入力にする。

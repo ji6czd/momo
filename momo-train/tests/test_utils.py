@@ -3,7 +3,7 @@ utils.py の単体テスト
   - normalize_one_to_one()
   - normalize_input()
 """
-from momo_py.utils import normalize_one_to_one, normalize_input
+from momo_train.utils import normalize_one_to_one, normalize_input
 
 
 class TestNormalizeOneToOne:

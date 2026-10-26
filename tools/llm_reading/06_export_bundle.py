@@ -1,6 +1,6 @@
 """GPU キット: クラウドへ持ち込むデータを書き出し、キットを zip にまとめる（手元で実行）。
 
-クラウドの Linux では momo_py と momors_py（Windows 版の wheel しかない）を使わずに済むよう、
+クラウドの Linux では momo_train と momors_py（Windows 版の wheel しかない）を使わずに済むよう、
 評価に要るものを手元で JSONL に書き出す。
 
 - fewshot.jsonl  LLM に見せる手本（train の短い文、正解スロットつき）

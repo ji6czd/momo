@@ -5,8 +5,8 @@ trainer.py の単体テスト
   - KUTOUTEN 定数
 """
 import pytest
-from momo_py.bracket import ASIDE_TOKEN, INLINE_CLOSE_TOKEN, INLINE_OPEN_TOKEN, LABEL_CONTEXT_ONLY
-from momo_py.trainer import (
+from momo_train.bracket import ASIDE_TOKEN, INLINE_CLOSE_TOKEN, INLINE_OPEN_TOKEN, LABEL_CONTEXT_ONLY
+from momo_train.trainer import (
     KUTOUTEN,
     _check_japanese_reading,
     _check_non_ascii_identity,

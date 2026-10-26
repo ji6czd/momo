@@ -2,7 +2,7 @@
 """
 gen_char_type_rs.py
 ===================
-Python 側の get_char_type()（momo-py/src/momo_py/utils.py）を真実の源として、
+Python 側の get_char_type()（momo-train/src/momo_train/utils.py）を真実の源として、
 Rust 用の記号文字種テーブル `crates/momors-core/src/char_type/table.rs` を
 生成する。
 
@@ -12,8 +12,8 @@ utils.py の記号セットや判定ロジックを変更したら、このス�
 再実行するだけでよい。
 
 注意: テーブル内容は実行する Python の unicodedata（Unicodeバージョン）に
-依存する。Python/Rust の挙動一致のため、momo-py が使うのと同じ Python で
-実行すること（例: `cd momo-py && uv run python ../momors/tools/gen_char_type_rs.py`）。
+依存する。Python/Rust の挙動一致のため、momo-train が使うのと同じ Python で
+実行すること（例: `cd momo-train && uv run python ../momors/tools/gen_char_type_rs.py`）。
 """
 
 import importlib.util
@@ -21,21 +21,21 @@ import unicodedata
 from pathlib import Path
 
 # ----------------------------------------------------------------------
-# 真実の源: momo_py/src/momo_py/utils.py の get_char_type() を直接読み込む。
-# momo_py パッケージとして import すると __init__.py 経由で numpy/sklearn
+# 真実の源: momo_train/src/momo_train/utils.py の get_char_type() を直接読み込む。
+# momo_train パッケージとして import すると __init__.py 経由で numpy/sklearn
 # を引き込むため、utils.py 単体（標準ライブラリのみに依存）をロードする。
 # ----------------------------------------------------------------------
 _UTILS_PATH = (
     Path(__file__).resolve().parent.parent.parent
-    / "momo-py"
+    / "momo-train"
     / "src"
-    / "momo_py"
+    / "momo_train"
     / "utils.py"
 )
 
 
 def _load_utils():
-    spec = importlib.util.spec_from_file_location("_momo_py_utils", _UTILS_PATH)
+    spec = importlib.util.spec_from_file_location("_momo_train_utils", _UTILS_PATH)
     assert spec is not None and spec.loader is not None, _UTILS_PATH
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -96,7 +96,7 @@ with open(OUT_PATH, "w", encoding="utf-8", newline="\n") as f:
     f.write(f"""\
 // AUTO-GENERATED — DO NOT EDIT MANUALLY
 // Source : tools/gen_char_type_rs.py
-// Truth  : momo-py/src/momo_py/utils.py (get_char_type)
+// Truth  : momo-train/src/momo_train/utils.py (get_char_type)
 // Unicode    : {unicode_version} (実行時 Python の unicodedata)
 // Codepoints : BMP (U+0000–U+FFFF), SYMBOL 系のみ
 // Entry count: {len(entries)}

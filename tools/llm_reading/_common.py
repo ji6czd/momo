@@ -2,8 +2,8 @@
 
     from _common import *
 
-- ROOT / DATASET / MOMO_PY / WORK / SPLIT_DIR  パス
-- parse_gold()       basic_raw.tsv の1行 → スロット列（momo_py の process_line_to_tsv を再利用）
+- ROOT / DATASET / MOMO_TRAIN / WORK / SPLIT_DIR  パス
+- parse_gold()       basic_raw.tsv の1行 → スロット列（momo_train の process_line_to_tsv を再利用）
 - align_prediction() momors_py の予測を、正解と同じスロットに割り付ける
 - score()            スロット一致率・マスあけ F1 などの指標
 
@@ -21,14 +21,14 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from momo_py.features import LABEL_CONTINUE, LABEL_SKIP, get_units
-from momo_py.name_dict import parse_name_marks
-from momo_py.trainer import process_line_to_tsv
+from momo_train.features import LABEL_CONTINUE, LABEL_SKIP, get_units
+from momo_train.name_dict import parse_name_marks
+from momo_train.trainer import process_line_to_tsv
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 DATASET = os.path.join(ROOT, "dataset")
-MOMO_PY = os.path.join(ROOT, "momo-py")
+MOMO_TRAIN = os.path.join(ROOT, "momo-train")
 WORK = os.path.join(SCRIPT_DIR, "work")
 SPLIT_DIR = os.path.join(WORK, "split")
 

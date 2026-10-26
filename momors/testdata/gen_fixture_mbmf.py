@@ -10,7 +10,7 @@ float_loader のテスト用 `.mbmf` ファイルを生成する。
 差し替える。これにより `MomoModel`（`.mbm`）と `FloatMomoModel`（`.mbmf`）が
 同一フィクスチャに対して厳密に同じスコアを出すことをテストで断言できる。
 
-バイナリフォーマットは `momo_py/exporter.py` の `export_float()` と同じ
+バイナリフォーマットは `momo_train/exporter.py` の `export_float()` と同じ
 （`momors-core/src/float_loader.rs` のドキュメントコメントも参照）。
 """
 

@@ -1,5 +1,5 @@
 [project]
-name = "momo-py"
+name = "momo-train"
 version = "0.11.1"
 description = "Training tool for the MOMO Japanese-to-Braille ML models (reading/boundary models and .mbm export)."
 readme = "README.md"
@@ -13,9 +13,9 @@ dependencies = ["scikit-learn", "joblib", "numpy", "scipy", "lightgbm>=4.7.0"]
 requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 [project.scripts]
-trainer = "momo_py.cli:main"
-lookup = "momo_py.lookup:main"
-makedic = "momo_py.makedic:main"
+trainer = "momo_train.cli:main"
+lookup = "momo_train.lookup:main"
+makedic = "momo_train.makedic:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -6,7 +6,7 @@ features.py の単体テスト
 """
 
 import pytest
-from momo_py.features import (
+from momo_train.features import (
     get_char_type,
     get_units,
     compute_source_features,
@@ -150,7 +150,7 @@ class TestGetUnits:
 # ------------------------------------------------------------------ #
 class TestComputeSourceFeatures:
     def _make_seq(self, text: str) -> list[SourceEntry]:
-        from momo_py.features import get_char_type
+        from momo_train.features import get_char_type
 
         return [(c, i, get_char_type(c)) for i, c in enumerate(text)]
 

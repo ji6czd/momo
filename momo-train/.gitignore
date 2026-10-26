@@ -11,7 +11,7 @@ wheels/
 # Others
 .vscode
 # build binaries
-src/momo_py/resources/
+src/momo_train/resources/
 # Utilities
 utilities/
 

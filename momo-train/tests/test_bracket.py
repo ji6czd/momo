@@ -4,7 +4,7 @@ bracket.py の単体テスト
   - strip_for_training()
   - tokenize_for_training()
 """
-from momo_py.bracket import (
+from momo_train.bracket import (
     ASIDE_TOKEN,
     INLINE_CLOSE_TOKEN,
     INLINE_OPEN_TOKEN,

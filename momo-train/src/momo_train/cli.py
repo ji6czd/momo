@@ -9,10 +9,10 @@ def main():
     parser = argparse.ArgumentParser(prog="trainer", description="Momo Py: 学習ツール")
     subparsers = parser.add_subparsers(dest="command")
     parser.add_argument(
-        "-v", "--version", action="version", version=f"Momo {version('momo-py')}"
+        "-v", "--version", action="version", version=f"Momo {version('momo-train')}"
     )
 
-    # momo-py は学習ツール。推論（predict）と診断（trace / label）は Rust 版
+    # momo-train は学習ツール。推論（predict）と診断（trace / label）は Rust 版
     # （`momo` コマンドと `momo-inspect`）へ移行した。ここには学習系の
     # createdata / train のみを置く。
 

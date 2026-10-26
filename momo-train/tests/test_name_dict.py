@@ -7,7 +7,7 @@ name_dict.py の単体テスト
   - load_name_dict()
 """
 import pytest
-from momo_py.name_dict import (
+from momo_train.name_dict import (
     parse_name_marks,
     name_flag_for_unit,
     extract_names,
@@ -17,7 +17,7 @@ from momo_py.name_dict import (
     load_name_dict,
     parse_name_dict_text,
 )
-from momo_py.features import get_units
+from momo_train.features import get_units
 
 
 # ------------------------------------------------------------------ #

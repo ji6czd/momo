@@ -9,7 +9,7 @@
 //! 展開で原文とバイト位置がずれるため、[`normalize_input`] は正規化後の
 //! 各バイト位置に対応する原文バイト位置のマップを返す。
 //!
-//! Python 版 `momo_py.utils.normalize_compat_ideographs()` /
+//! Python 版 `momo_train.utils.normalize_compat_ideographs()` /
 //! `normalize_input()` と挙動を一致させる。
 //! 変換テーブルは `tools/gen_normalize_table.py` で Python から自動生成される。
 

@@ -69,7 +69,7 @@ pub(crate) struct TypeSection {
     /// このタイプの GBDT カテゴリカル列。`NO_CAT_COLUMN` なら列なし。
     ///
     /// 列がタイプごとに 1 個に決まるのは偶然ではない。exporter 側
-    /// (`momo_py/categorical.py` の `fit_categorical`) が「特徴量名ごとに 1 列」を作り、
+    /// (`momo_train/categorical.py` の `fit_categorical`) が「特徴量名ごとに 1 列」を作り、
     /// 特徴量名は `FeatureType` と 1 対 1 に対応するため。
     cat_column: u32,
     /// 先頭エントリのカテゴリカルコード。`cat_code = cat_code_base + 添字`。

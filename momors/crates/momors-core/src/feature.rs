@@ -1,7 +1,7 @@
 //! 特徴量の型定義モジュール。
 //!
 //! C++ 版の `feature_type.hpp` と `model.hpp` の `FeatureKey` 部分に対応。
-//! Python 版 `momo_py/exporter.py` の `FT` クラスとも同じ値を共有する。
+//! Python 版 `momo_train/exporter.py` の `FT` クラスとも同じ値を共有する。
 //!
 //! ## バイナリエンコーディング
 //!
@@ -318,10 +318,10 @@ impl FeatureKey {
 // 人間可読な特徴量名 ⇄ FeatureKey
 // ============================================================
 //
-// 診断（explain / label スキャナ）用に、Python 版 `momo_py/features.py` の
+// 診断（explain / label スキャナ）用に、Python 版 `momo_train/features.py` の
 // 特徴量名（`char_s=金` / `type_trans_p1_s=KANJI->KANJI` / `kanji_run=5+` 等）と
 // FeatureKey を相互変換する。ペイロード符号化（run_len の "5+"→5、name の B/I→1/2、
-// CharSelf の複合ユニット 1〜3 文字の振り分け）は `momo_py/exporter.py` の
+// CharSelf の複合ユニット 1〜3 文字の振り分け）は `momo_train/exporter.py` の
 // `parse_feature_key` と厳密に一致させること（vocab_find が一致しなくなる）。
 
 /// run_len ペイロード（u8）を表示キーへ。5 以上は "5+"（Python の run_key と同じ）。
@@ -516,7 +516,7 @@ impl FeatureKey {
     /// 人間可読な特徴量名（[`Display`](std::fmt::Display) と同じ文字列）を
     /// FeatureKey へ解析する。未知・不正な名前は `None`。
     ///
-    /// `momo_py/exporter.py` の `parse_feature_key` と符号化を一致させる。
+    /// `momo_train/exporter.py` の `parse_feature_key` と符号化を一致させる。
     pub fn parse_name(s: &str) -> Option<Self> {
         use FeatureType::*;
 

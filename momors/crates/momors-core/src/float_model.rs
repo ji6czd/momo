@@ -2,7 +2,7 @@
 //!
 //! [`crate::model::MomoModel`] とほぼ同じフィールド構成だが、読みモデル重み・
 //! 境界モデル重みが int8 量子化されておらず、`f32` のまま保持する（scale も持たない）。
-//! `momo_py.exporter.export_float()` が書き出す `.mbmf` を [`crate::float_loader`]
+//! `momo_train.exporter.export_float()` が書き出す `.mbmf` を [`crate::float_loader`]
 //! で読み込んで構築する。
 //!
 //! `.mbm`（量子化済み）と `.mbmf`（量子化前）を見比べることで、量子化による

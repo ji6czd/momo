@@ -29,7 +29,7 @@ name = "bert"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "momo-py" },
+    { name = "momo-train" },
     { name = "momors-py" },
     { name = "numpy" },
     { name = "torch" },
@@ -38,7 +38,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "momo-py", editable = "../../momo-py" },
+    { name = "momo-train", editable = "../../momo-train" },
     { name = "momors-py", path = "../../momors/crates/momors-pyo3/dist/momors_py-0.11.0-cp313-abi3-win_amd64.whl" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "torch", specifier = ">=2.14.1" },
@@ -429,9 +429,9 @@ wheels = [
 ]
 
 [[package]]
-name = "momo-py"
-version = "0.11.0"
-source = { editable = "../../momo-py" }
+name = "momo-train"
+version = "0.11.1"
+source = { editable = "../../momo-train" }
 dependencies = [
     { name = "joblib" },
     { name = "lightgbm" },

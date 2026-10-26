@@ -59,7 +59,7 @@ import sys
 import unicodedata
 
 from _common import DATASET, RAW_PATH, parse_gold, read_raw_numbered
-from momo_py.name_dict import parse_name_marks
+from momo_train.name_dict import parse_name_marks
 
 EVAL_PATH = os.path.join(DATASET, "eval_context.tsv")
 COLUMNS = [

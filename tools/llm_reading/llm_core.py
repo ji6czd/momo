@@ -1,7 +1,7 @@
 """LLM に、文字ごとの候補から漢字の読みを選ばせる本体（torch と transformers だけで動く）。
 
 05_llm_select.py（手元の実験）と 07_gpu_eval.py（クラウドの GPU で複数モデルを回す）が使う。
-momo_py・momors_py には依存しない（クラウドの Linux でもそのまま動かすため）。スロットは
+momo_train・momors_py には依存しない（クラウドの Linux でもそのまま動かすため）。スロットは
 surface / gold / ctype / start / end を持つものなら何でもよい（_common.Slot か、ここの BSlot）。
 
 生成はさせない。候補は1文字ごとの読みなので、どれを選んでも書き換えや欠落は構造的に
@@ -30,7 +30,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 BEAM = 8  # ruby: 漢字ランの読みを1文字ずつ伸ばすときに残す本数
 LOOKAHEAD = 3  # 漢字ランの後ろに含めて採点する文字数（送り仮名・助詞）
 MAX_COMBOS = 120  # yomi: 漢字ラン1つあたりに採点する組み合わせの上限
-LABEL_CONTINUE = "---"  # momo_py.features と同じ
+LABEL_CONTINUE = "---"  # momo_train.features と同じ
 LABEL_SKIP = "_"
 KANJI_TYPES = frozenset({"KANJI", "JAPANESE_NUMERIC"})
 

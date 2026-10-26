@@ -1,6 +1,6 @@
 """basic_raw.tsv の1行を、学習データと同じ行（スロット）に展開する。
 
-momo_py の process_line_to_tsv を使う。tools/llm_reading/_common.py の parse_gold と同じ規則で、
+momo_train の process_line_to_tsv を使う。tools/llm_reading/_common.py の parse_gold と同じ規則で、
 スロットは学習データの1行に当たる。漢字は1文字ずつ、拗音は「きょ」で1つ、[今日] の「日」は
 読みが空の継続スロット。スロットの位置は推論に渡す原文（{…} と [...] の記法を除いたもの）の位置。
 """
@@ -12,9 +12,9 @@ import io
 import re
 from dataclasses import dataclass
 
-from momo_py.features import LABEL_CONTINUE, LABEL_SKIP
-from momo_py.name_dict import parse_name_marks
-from momo_py.trainer import process_line_to_tsv
+from momo_train.features import LABEL_CONTINUE, LABEL_SKIP
+from momo_train.name_dict import parse_name_marks
+from momo_train.trainer import process_line_to_tsv
 
 _GROUP_RE = re.compile(r"\[(.*?)\]")  # get_units() と同じ [...] 記法
 

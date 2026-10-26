@@ -1,6 +1,6 @@
 """エンコーダ（BERT 系）に、漢字スロットの読みを候補から選ばせる本体（torch と transformers だけで動く）。
 
-10_encoder_train.py（学習と評価）が使う。llm_core.py と同じく momo_py・momors_py には依存せず、
+10_encoder_train.py（学習と評価）が使う。llm_core.py と同じく momo_train・momors_py には依存せず、
 クラウドの Linux でも手元でもそのまま動く。データは 06_export_bundle.py が書き出した JSONL。
 
 課題の形:

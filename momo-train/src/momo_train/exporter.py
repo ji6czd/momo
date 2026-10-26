@@ -41,7 +41,7 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
     cat_code   = セクションの cat_code_base + セクション内の添字
     cat_column = セクションが 1 個だけ持つ
 
-  cat_column が feature_type ごとに 1 個に決まるのは、momo_py.categorical の
+  cat_column が feature_type ごとに 1 個に決まるのは、momo_train.categorical の
   fit_categorical() が「特徴量名ごとに 1 列」を作り、特徴量名が FeatureType と
   1 対 1 に対応するため。唯一 char_s 列だけは CharSelf(0x90) と
   CharSelfCompound2(0xA6) の 2 タイプが共有するが、コードは列内で通し番号なので
@@ -79,7 +79,7 @@ exporter.py  ―  momo モデルを C++ 推論エンジン向けバイナリ (.m
     intercept    : float32 × 2         （クラス0, クラス1）
 
   --- algo_tag == 0x01 (木。.mbm/.mbmf で完全に同一バイト列、量子化しない) ---
-    n_cat_columns : uint32   カテゴリカル列数（momo_py.categorical の列数）
+    n_cat_columns : uint32   カテゴリカル列数（momo_train.categorical の列数）
     （version 0x07 で cat_vocab を統合語彙テーブルに移動。境界セクションは列数と木だけ。
       カテゴリカル (column, code) は統合語彙の各エントリ末尾が持つ。前提として
       カテゴリカルキーは読み語彙の部分集合であること。exporter が突合して保証する）
@@ -838,7 +838,7 @@ def _load_bundle(zip_path: str) -> Tuple[Any, list, str]:
                 from importlib import resources
 
                 single_char_text = (
-                    resources.files("momo_py")
+                    resources.files("momo_train")
                     / f"resources/{SINGLE_CHAR_DICT_FILENAME}"
                 ).read_text(encoding="utf-8")
                 print(
@@ -1151,7 +1151,7 @@ def _plan_vocab_layout(vocab: dict, cat_by_id: dict | None) -> VocabLayout:
             raise ValueError(
                 f"特徴量タイプ 0x{ft:02X} に複数のカテゴリカル列 "
                 f"({cur['cat_column']} と {column}) が対応しています。"
-                "momo_py.categorical は特徴量名ごとに 1 列を作る前提です。"
+                "momo_train.categorical は特徴量名ごとに 1 列を作る前提です。"
             )
 
         if cur["keys"] and packed <= cur["keys"][-1]:

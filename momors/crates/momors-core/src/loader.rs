@@ -113,7 +113,7 @@
 //! - `cat_code` = `cat_code_base` + セクション内の添字
 //!   （exporter が列ごとにキー順で採番し直し、GBDT の `cats` を書き換える）
 //! - `cat_column` = セクションが 1 個だけ持つ
-//!   （`momo_py.categorical` が特徴量名ごとに 1 列を作り、特徴量名は `FeatureType` と
+//!   （`momo_train.categorical` が特徴量名ごとに 1 列を作り、特徴量名は `FeatureType` と
 //!     1 対 1 に対応するため。詳細は [`crate::vocab`]）
 //!
 //! 結果、1 エントリは詰めたキー 8B だけになり、ファイルは 45〜50% 小さくなった

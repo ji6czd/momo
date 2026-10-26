@@ -620,7 +620,7 @@ def train(
             - LinearSVC: 精度優先。メモリが (クラス数×特徴量次元)×float64 必要
             - SGDClassifier: メモリ節約。大規模データで LinearSVC がOOMになる場合に使用
         境界モデル  : boundary_algo で切り替え
-            - "gbdt" (既定) : LGBMClassifier + カテゴリカル特徴量（momo_py.categorical）。
+            - "gbdt" (既定) : LGBMClassifier + カテゴリカル特徴量（momo_train.categorical）。
                               線形モデルが表現しづらい「複数文字の組み合わせ」条件付き境界
                               判定で精度が上回ることを実験・実データ両方で確認済み
                               （utilities/gbdt_boundary_experiment.py、recall_audit.py の
@@ -888,7 +888,7 @@ def train(
             print(f"📖 単一文字辞書を同梱: {single_dict_candidate}")
         else:
             single_dict_text = (
-                il_resources.files("momo_py") / f"resources/{SINGLE_CHAR_DICT_FILENAME}"
+                il_resources.files("momo_train") / f"resources/{SINGLE_CHAR_DICT_FILENAME}"
             ).read_text(encoding="utf-8")
             print("📖 単一文字辞書を同梱: パッケージ内蔵リソース")
         zf.writestr(SINGLE_CHAR_DICT_FILENAME, single_dict_text)

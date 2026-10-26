@@ -293,7 +293,7 @@ name = "llm-reading"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "momo-py" },
+    { name = "momo-train" },
     { name = "momors-py" },
 ]
 
@@ -307,7 +307,7 @@ llm = [
 
 [package.metadata]
 requires-dist = [
-    { name = "momo-py", editable = "../../momo-py" },
+    { name = "momo-train", editable = "../../momo-train" },
     { name = "momors-py", path = "../../momors/crates/momors-pyo3/dist/momors_py-0.11.0-cp313-abi3-win_amd64.whl" },
 ]
 
@@ -439,9 +439,9 @@ wheels = [
 ]
 
 [[package]]
-name = "momo-py"
-version = "0.11.0"
-source = { editable = "../../momo-py" }
+name = "momo-train"
+version = "0.11.1"
+source = { editable = "../../momo-train" }
 dependencies = [
     { name = "joblib" },
     { name = "lightgbm" },

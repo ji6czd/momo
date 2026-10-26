@@ -1,6 +1,6 @@
 //! `.mbmf` モデルファイル読み込み（量子化前 float32 サイドカー）。
 //!
-//! Python 側 `momo_py/exporter.py` の `export_float()` が書き出すバイナリを
+//! Python 側 `momo_train/exporter.py` の `export_float()` が書き出すバイナリを
 //! ストリーミング読み込みして [`FloatMomoModel`] を構築する。`.mbm`
 //! (`loader.rs`) とセクション構成はほぼ同一で、語彙テーブル・読みラベル
 //! テーブル・人名辞書テーブル・単一文字辞書テーブルは完全に同一のバイト列

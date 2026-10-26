@@ -39,6 +39,6 @@ loader のテストで使用するモデルファイル。
 
 実モデル (`basic_data.mbm` 等) を置きたい場合は、サイズが大きいので
 `.gitignore` に追加することを推奨。同様に `basic_data.mbmf`
-（`momo_py.exporter.export_float()` が書き出す量子化前サイドカー、
+（`momo_train.exporter.export_float()` が書き出す量子化前サイドカー、
 `.mbm` の学習ツール `momopy train` を実行すると自動生成される）も
 サイズが大きいため `.gitignore` に追加することを推奨。

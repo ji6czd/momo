@@ -5,7 +5,7 @@ gen_fixture_mbm.py
 loader のテスト用 `.mbm` ファイルを生成する。
 
 scikit-learn は使わず、ハードコードされた小さなモデルを `.mbm` バイナリで
-書き出す。バイナリフォーマットは `momopy/src/momo_py/exporter.py` と同じ。
+書き出す。バイナリフォーマットは `momo-train/src/momo_train/exporter.py` と同じ。
 
 生成されるモデル:
   - 3 クラス: ["カ", "キ", "ク"]
@@ -146,7 +146,7 @@ def is_uint8_payload(ft: int) -> bool:
 
 def encode_varints(values) -> bytes:
     """非負整数列を LEB128 varint（7bit/byte、下位先行、MSB = 継続）で連結する
-    （momo_py.exporter の `_encode_varints` と同じ規約）。"""
+    （momo_train.exporter の `_encode_varints` と同じ規約）。"""
     buf = bytearray()
     for v in values:
         assert v >= 0
@@ -179,14 +179,14 @@ def build_header(flags: int = 0x00) -> bytes:
 def _vocab_sort_key(entry: tuple) -> tuple:
     """VOCAB の1行を、Rust `FeatureKey` の `Ord` と同じフィールド優先順位
     `(feature_type, u8val, ct[0..3], cp[0..3])` で比較できる正準タプルに落とす
-    （momo_py.exporter の `_vocab_row_sort_key` と同じ考え方）。
+    （momo_train.exporter の `_vocab_row_sort_key` と同じ考え方）。
     """
     ft, ct_vals, cp_vals, u8_val, _fid = entry
     return (ft, u8_val if u8_val is not None else 0, tuple(ct_vals), tuple(cp_vals))
 
 
 def pack_key(ft: int, ct_vals: list, cp_vals: list, u8_val: int | None) -> int:
-    """キーのペイロードを uint64 に詰める（momo_py.exporter の `_pack_vocab_key`、
+    """キーのペイロードを uint64 に詰める（momo_train.exporter の `_pack_vocab_key`、
     Rust の `vocab.rs::pack_key` と同じ規則）。"""
     m = char32_count(ft)
     if m:

@@ -1,7 +1,7 @@
 //! [`crate::prediction::Predictor`] が扱う「重みの持ち方」を抽象化するトレイト。
 //!
 //! `.mbm`（量子化済み int8 + クラスごと scale）を読み込む [`crate::model::MomoModel`]
-//! と、`.mbmf`（量子化前の float32、`momo_py.exporter.export_float()` が書き出す
+//! と、`.mbmf`（量子化前の float32、`momo_train.exporter.export_float()` が書き出す
 //! サイドカーファイル）を読み込む [`crate::float_model::FloatMomoModel`] の両方が
 //! このトレイトを実装する。
 //!

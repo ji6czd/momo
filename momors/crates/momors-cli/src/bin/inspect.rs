@@ -1,6 +1,6 @@
 //! `momo-inspect` — momo の読みモデルを覗くための診断ツール。
 //!
-//! momo-py が学習専用ツールへ縮退した方針（`momo-compare-quant` 参照）に伴い、
+//! momo-train が学習専用ツールへ縮退した方針（`momo-compare-quant` 参照）に伴い、
 //! Python CLI にあった診断系サブコマンド（`predict --trace` / `label`）を Rust へ移す。
 //!
 //! - `trace` : 標準入力の各行を推論し、原文文字ごとに「かな・決定根拠・自信度・

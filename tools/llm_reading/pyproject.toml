@@ -8,7 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "momo-py",
+    "momo-train",
     "momors-py",
 ]
 
@@ -22,5 +22,5 @@ llm = [
 ]
 
 [tool.uv.sources]
-momo-py = { path = "../../momo-py", editable = true }
+momo-train = { path = "../../momo-train", editable = true }
 momors-py = { path = "../../momors/crates/momors-pyo3/dist/momors_py-0.11.0-cp313-abi3-win_amd64.whl" }

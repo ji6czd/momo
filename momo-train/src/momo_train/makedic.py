@@ -9,7 +9,7 @@ import re
 import sys
 from collections import Counter, defaultdict
 from typing import DefaultDict
-from momo_py.features import CharType
+from momo_train.features import CharType
 from .utils import get_basic_char_category
 
 

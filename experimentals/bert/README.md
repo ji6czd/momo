@@ -4,7 +4,7 @@
 検証の知見は [docs/bert-char-v3-findings.md](docs/bert-char-v3-findings.md)。
 
 `tools/llm_reading` には依存しない（エンコーダ本体の [src/bert/encoder_core.py](src/bert/encoder_core.py) は
-そこから引き取ったもの）。必要なのは `momo-py`（データの展開）と `momors-py`（dev に w7 を添えるときだけ）。
+そこから引き取ったもの）。必要なのは `momo-train`（データの展開）と `momors-py`（dev に w7 を添えるときだけ）。
 
 ## データ
 
@@ -25,7 +25,7 @@ uv run export_data --w7 <train だけで学習した basic_data_7.mbm>   # dev �
 dev の w7 比較（`step7_head` ほか）には、train だけで学習した w7 が要る（全データで学習した w7 は dev を学習済みで、比較にならない）。
 
 ```bash
-cd ../../momo-py
+cd ../../momo-train
 d=../experimentals/bert/work/w7_train && mkdir -p $d && cp ../experimentals/bert/work/data/train_raw.tsv $d/basic_raw.tsv
 uv run trainer createdata --raw $d/basic_raw.tsv
 uv run makedic $d/basic_data.tsv $d/single_character_dic.tsv

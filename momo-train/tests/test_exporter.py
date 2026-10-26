@@ -16,7 +16,7 @@ from scipy.sparse import csr_matrix
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import SGDClassifier
 
-from momo_py.exporter import (
+from momo_train.exporter import (
     FT,
     char32_count,
     chartype_count,
@@ -26,7 +26,7 @@ from momo_py.exporter import (
     parse_feature_key,
     resolve_read_feature_keys,
 )
-from momo_py.bundle import LRModelBundle
+from momo_train.bundle import LRModelBundle
 
 
 # ------------------------------------------------------------------ #
@@ -329,7 +329,7 @@ class TestExportFloat:
 # 統合語彙テーブル（version 0x08）: キー順ソート・feature_id明示・
 # カテゴリカルの埋め込みと cat⊆読み 強制
 # ------------------------------------------------------------------ #
-from momo_py.exporter import (  # noqa: E402
+from momo_train.exporter import (  # noqa: E402
     NO_CAT_COLUMN,
     _build_cat_by_feature_id,
     _build_vocab_bytes,
@@ -419,7 +419,7 @@ class TestUnifiedVocab:
 # ------------------------------------------------------------------ #
 # 差分 + varint レイアウト（version 0x0A、flags bit1）
 # ------------------------------------------------------------------ #
-from momo_py.exporter import (  # noqa: E402
+from momo_train.exporter import (  # noqa: E402
     FLAG_DELTA_VARINT,
     _encode_delta_varints,
     _encode_varints,

@@ -107,7 +107,7 @@ pub(crate) fn is_pair(open: char, close: char) -> bool {
 /// 側には対応する実文字が無い（Aside の中身は独立した副文として本文から
 /// 完全に抜かれる）。
 ///
-/// momo-py/src/momo_py/bracket.py と同じコードポイントを使うこと。
+/// momo-train/src/momo_train/bracket.py と同じコードポイントを使うこと。
 /// ずれるとモデルの語彙（char_s等の特徴量キー）がPython/Rustで食い違う。
 pub(crate) const INLINE_OPEN_TOKEN: char = '\u{E000}';
 pub(crate) const INLINE_CLOSE_TOKEN: char = '\u{E001}';
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn identity_tokens_match_python_bracket_py() {
-        // momo-py/src/momo_py/bracket.py の INLINE_OPEN_TOKEN/INLINE_CLOSE_TOKEN/
+        // momo-train/src/momo_train/bracket.py の INLINE_OPEN_TOKEN/INLINE_CLOSE_TOKEN/
         // ASIDE_TOKEN と同じコードポイントであること（ずれるとモデルの語彙が
         // Python/Rustで食い違う）。
         assert_eq!(INLINE_OPEN_TOKEN as u32, 0xE000);

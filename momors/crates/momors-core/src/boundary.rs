@@ -7,7 +7,7 @@
 //! ため、両方式をここに集約する）。
 //!
 //! `.mbm`/`.mbmf` の境界モデルセクションは `algo_tag` プレフィックス付き
-//! （`momo_py.exporter` version 0x06）:
+//! （`momo_train.exporter` version 0x06）:
 //!   - `0x00` = 線形（`.mbm` は int8 量子化、`.mbmf` は float32 のまま）
 //!   - `0x01` = 木のアンサンブル（`.mbm`/`.mbmf` で完全に同一バイト列、量子化しない）
 //!
@@ -38,7 +38,7 @@ use crate::loader::{
 use crate::{Error, Result};
 
 /// カテゴリカル境界列数の妥当性上限（スコア計算時の固定長スタック配列のサイズ）。
-/// 現状の列数（momo_py.categorical、window=7で38列）に対して十分な余裕を持たせる。
+/// 現状の列数（momo_train.categorical、window=7で38列）に対して十分な余裕を持たせる。
 /// これを超える列数のモデルファイルは `CorruptModel` として拒否する。
 pub(crate) const MAX_BOUNDARY_CAT_COLUMNS: usize = 64;
 

@@ -29,33 +29,6 @@ wheels = [
 ]
 
 [[package]]
-name = "bert"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "momo-train" },
-    { name = "momors-py" },
-    { name = "numpy" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "onnxscript" },
-    { name = "torch" },
-    { name = "transformers" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "momo-train", editable = "../../momo-train" },
-    { name = "momors-py", path = "work/wheels/momors_py-0.11.2-cp313-abi3-win_amd64.whl" },
-    { name = "numpy", specifier = ">=2.5.4" },
-    { name = "onnx", specifier = ">=1.23.2" },
-    { name = "onnxruntime", specifier = ">=1.31.1" },
-    { name = "onnxscript", specifier = ">=0.7.2" },
-    { name = "torch", specifier = ">=2.14.1" },
-    { name = "transformers", specifier = ">=5.20.2" },
-]
-
-[[package]]
 name = "click"
 version = "8.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -483,9 +456,36 @@ wheels = [
 ]
 
 [[package]]
+name = "momo-bert-train"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "momo-train" },
+    { name = "momors-py" },
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "onnxscript" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "momo-train", editable = "../momo-train" },
+    { name = "momors-py", path = "work/wheels/momors_py-0.11.2-cp313-abi3-win_amd64.whl" },
+    { name = "numpy", specifier = ">=2.5.4" },
+    { name = "onnx", specifier = ">=1.23.2" },
+    { name = "onnxruntime", specifier = ">=1.31.1" },
+    { name = "onnxscript", specifier = ">=0.7.2" },
+    { name = "torch", specifier = ">=2.14.1" },
+    { name = "transformers", specifier = ">=5.20.2" },
+]
+
+[[package]]
 name = "momo-train"
 version = "0.11.2"
-source = { editable = "../../momo-train" }
+source = { editable = "../momo-train" }
 dependencies = [
     { name = "joblib" },
     { name = "lightgbm" },

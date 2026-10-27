@@ -1,6 +1,6 @@
 //! BERT の文字語彙（`vocab.txt`）。1 文字 = 1 トークン。
 //!
-//! 規則は `experimentals/bert/src/bert/encoder_core.py` の `CharVocab.token_id` と同じ:
+//! 規則は `momo-bert-train/src/momo_bert_train/encoder_core.py` の `CharVocab.token_id` と同じ:
 //! 語彙にあればその id、無ければ NFKC で 1 文字になり語彙にあればその id、
 //! どちらでもなければ `[UNK]`。
 

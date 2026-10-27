@@ -4,16 +4,16 @@ tools/llm_reading の 10_encoder_train.py と同じ手順（8エポック・lr 5
 辞書候補に絞った softmax で選ぶ）で学習し、結果を1つのディレクトリに保存する。保存したものは
 step10_infer.py が手元の CPU で読み込める。
 
-    uv run python -m bert.step9_finetune --smoke                  # 動作確認（極小モデル・数十行）
-    uv run python -m bert.step9_finetune                          # train で学習し、dev で評価して保存
-    uv run python -m bert.step9_finetune --all-data --name full   # train+dev の全データで学習して保存
+    uv run python -m momo_bert_train.step9_finetune --smoke                  # 動作確認（極小モデル・数十行）
+    uv run python -m momo_bert_train.step9_finetune                          # train で学習し、dev で評価して保存
+    uv run python -m momo_bert_train.step9_finetune --all-data --name full   # train+dev の全データで学習して保存
 
 出力: work/finetuned/<名前>/
   model.pt      ReadingModel の重み（float32）
   encoder.json  BERT 本体の構成（学習済みの重みを取り直さずに読み込める）
   labels.json   読みのラベル表
   cands.json    文字 → 読み候補（ラベル番号）の辞書
-  meta.json     学習の設定と dev の一致率
+  meta.json     学習の設定と dev の一致率、学習データの meta（basic_raw.tsv のハッシュ）
 
 --all-data では dev も学習に使うので、meta の dev 一致率は学習済みの文での値（評価にならない）。
 """
@@ -141,6 +141,10 @@ def main() -> None:
         "dev_is_heldout": not args.all_data,
         "seconds": round(time.time() - t0),
     }
+    # どの basic_raw.tsv から作ったかを残す（export_data が書いた meta。古いキットには無い）
+    data_meta = DATA / "meta.json"
+    if data_meta.exists():
+        meta["data"] = json.loads(data_meta.read_text(encoding="utf-8"))
     (out_dir / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )

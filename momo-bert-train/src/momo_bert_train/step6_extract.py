@@ -4,10 +4,10 @@ train_full と dev_full の全行を1行ずつ（行全体を文脈として）�
 位置の隠れ状態を取る。保存したベクトルで読みの分類器だけを学習する（step7_head.py）ので、
 BERT を回すのはここで1回きり。
 
-    uv run python -m bert.step6_extract                 # 最終層
-    uv run python -m bert.step6_extract --layers 4      # 最後の4層の平均
-    uv run python -m bert.step6_extract --window 3      # スロットごとに前後3文字だけ見せる
-    uv run python -m bert.step6_extract --limit 200     # 動作確認
+    uv run python -m momo_bert_train.step6_extract                 # 最終層
+    uv run python -m momo_bert_train.step6_extract --layers 4      # 最後の4層の平均
+    uv run python -m momo_bert_train.step6_extract --window 3      # スロットごとに前後3文字だけ見せる
+    uv run python -m momo_bert_train.step6_extract --limit 200     # 動作確認
 
 出力: work/vectors/<タグ>/{train,dev}.npz
   x        (N, 768) float16  文字ベクトル

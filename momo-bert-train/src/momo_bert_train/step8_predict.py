@@ -1,7 +1,7 @@
 """保存した分類器で、任意の文の漢字の読みを予測して表示する（step7_head --save の続き）。
 
-    uv run python -m bert.step7_head --vectors L4_w0 --hidden 1024 --seeds 0 --save L4_h1024
-    uv run python -m bert.step8_predict --head L4_h1024 "今日のテレビで、「今日の中東情勢」という番組が放送されていた。"
+    uv run python -m momo_bert_train.step7_head --vectors L4_w0 --hidden 1024 --seeds 0 --save L4_h1024
+    uv run python -m momo_bert_train.step8_predict --head L4_h1024 "今日のテレビで、「今日の中東情勢」という番組が放送されていた。"
 
 文を1行として丸ごと BERT に通す（step6 の行全体の入力と同じ）。対象は漢字・漢数字。各文字について、
 辞書候補に絞った上位3つの読みと確率を出す。継続（その前の文字と一続きの読み）は `---`。

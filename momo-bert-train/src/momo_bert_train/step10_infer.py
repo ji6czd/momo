@@ -1,6 +1,6 @@
 """step9_finetune で保存した微調整モデルを、手元の CPU で読み込んで読みを予測する。
 
-    uv run python -m bert.step10_infer --name train "今日のテレビで、「今日の中東情勢」という番組が放送されていた。"
+    uv run python -m momo_bert_train.step10_infer --name train "今日のテレビで、「今日の中東情勢」という番組が放送されていた。"
 
 BERT 本体の重みは保存済みのモデルから読むので、学習済みの重みを取り直さない（語彙の取得だけ要る）。
 文を1行として丸ごと通し、各漢字・漢数字の読みを辞書候補に絞った上位 N 個の確率つきで表示する。

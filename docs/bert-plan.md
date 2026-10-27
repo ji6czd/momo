@@ -11,7 +11,7 @@
   - 第1段階は**その 1 行の中だけで文全体を見る**。
   - 例：「避ける」をヨケル／サケルで、「市場」をイチバ／シジョーで読み分ける。
 - **蒸留はしない。** 微調整済みの `tohoku-nlp/bert-base-japanese-char-v3` をそのまま使う。
-  - 評価用は `experimentals/bert/work/finetuned/train`、実用は `full`。
+  - 評価用は `momo-bert-train/work/finetuned/train`、実用は `full`。
 - **対象はデスクトップ。** 実行速度はできる限り速くする。
 
 ## 段階の分け方
@@ -36,14 +36,14 @@
 - 配布物：
   - `onnxruntime.dll`。`ort` の配布済みバイナリを使う。
   - モデル `reading_bert.onnx`（int8 で約 90MB / f32 で約 350MB）、`labels.json`、`cands.json`、`vocab.txt`。
-- Python（`experimentals/bert`）：`onnx`、`onnxruntime` を足す。
+- Python（`momo-bert-train`）：`onnx`、`onnxruntime` を足す。
 - トークナイザのクレートは要らない。1 字 1 トークンなので、`vocab.txt` を 1 字ずつ引く。
   - 語彙に無い字は NFKC で 1 字になればそれを、だめなら [UNK]。
-  - 規則は `experimentals/bert/src/bert/encoder_core.py:95` の `CharVocab.token_id` と同じ。
+  - 規則は `momo-bert-train/src/momo_bert_train/encoder_core.py:95` の `CharVocab.token_id` と同じ。
 
-## Step 1：ONNX 書き出し（Python、`experimentals/bert`）
+## Step 1：ONNX 書き出し（Python、`momo-bert-train`）
 
-- `src/bert/export_onnx.py` を新規に作る。`pyproject.toml` の scripts に `export_onnx` を足す。
+- `src/momo_bert_train/export_onnx.py` を新規に作る。`pyproject.toml` の scripts に `export_onnx` を足す。
   - 入力：`work/finetuned/<name>/`。`step10_infer.FineTunedReader` の読み込み方をそのまま使う。
   - グラフ：入力は `input_ids [B,T]`、`attention_mask [B,T]`。出力は `logits [B,T,L]`。dynamic axes は B と T。
   - 量子化：f32 版と、`onnxruntime.quantization.quantize_dynamic` で作る int8 版の 2 つを出す。
@@ -113,7 +113,7 @@
 
 ## Step 5：評価と速度
 
-- **`experimentals/bert/src/bert/step12_rust_eval.py`**（新規）：
+- **`momo-bert-train/src/momo_bert_train/step12_rust_eval.py`**（新規）：
   - pyo3 経由で、w7 単独と w7＋BERT を dev に流す。
   - 漢字スロット一致率（`export_data.w7_readings` と同じ割り付け）と、かな文字列の一致を並べる。
   - 読みが変わったスロットの一覧を出す。w7 が誤り・BERT が正解、およびその逆。
@@ -158,13 +158,13 @@
 
 | 場所 | 中身 |
 |---|---|
-| `experimentals/bert/src/bert/export_onnx.py` | ONNX（float32 / int8）とラベル表・候補表・語彙・参照 logit の書き出し |
+| `momo-bert-train/src/momo_bert_train/export_onnx.py` | ONNX（float32 / int8）とラベル表・候補表・語彙・参照 logit の書き出し |
 | `momors/crates/momors-core/src/slot_reader.rs` | trait `SlotReader`・`SlotScores`（core の依存は増えていない） |
 | `momors/crates/momors-core/src/prediction.rs` | `Predictor::set_slot_reader`・`pick_reading`/`reader_argmax`・`DecisionSource::Bert`・`Phase::SlotReader` |
 | `momors/crates/momors-bert/` | `BertReader`（ort 2.0.0-rc.15 = ONNX Runtime 1.31）・語彙・長い行の窓 |
 | `momors-cli`（feature `bert`） | `momo` / `momo-inspect` に `--bert DIR` `--bert-f32` `--bert-threads N` |
 | `momors-pyo3`（feature `bert`） | `Predictor(..., bert=DIR, bert_f32=, bert_threads=)`・`PredictionResult.decisions` |
-| `experimentals/bert/src/bert/step12_rust_eval.py` | Rust の推論経路で w7 と w7＋BERT を dev で比べる |
+| `momo-bert-train/src/momo_bert_train/step12_rust_eval.py` | Rust の推論経路で w7 と w7＋BERT を dev で比べる |
 | `eval/run_regression.sh` | `MOMO_ARGS` で momo に追加の引数を渡せる |
 
 ### 計画からの変更
@@ -186,7 +186,7 @@ w7 は train だけで学習したもの、BERT は `work/finetuned/train`（int
 - 読みが変わったスロットは 518。BERT が正解 402、w7 が正解 71、両方誤り 45。
 - `eval_context.tsv` の dev 220 行（読み分けのある語 26）：行の一致 86.8% → 92.3%、全部の読みを当てた語 14 → 19。
 - `eval/run_regression.sh large` は BERT モード（`work/onnx/full`）でも 53/53 通過。
-- 変わったスロットの一覧は `experimentals/bert/work/rust_eval/train/changed.tsv`。
+- 変わったスロットの一覧は `momo-bert-train/work/rust_eval/train/changed.tsv`。
 
 ### 速度（i9-13900H、dev 38,004 字、1 行ずつ）
 

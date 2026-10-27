@@ -87,9 +87,9 @@ dev は `dataset/basic_raw.tsv` から原文ハッシュ mod 10 で分けたも�
 
 | ファイル | 内容 |
 |---|---|
-| `src/bert/step2_tokenize.py` | モデルとトークナイザの読み込み、文字の分割の確認 |
-| `src/bert/step3_no_mecab.py` | MeCab なしの入力処理と、付属トークナイザの比較 |
-| `src/bert/step4_char_vectors.py` | `CharEncoder`: 文字ごとのベクトルと元の文字との対応づけ |
-| `src/bert/step5_benchmark.py` | 推論速度の計測 |
+| `src/momo_bert_train/step2_tokenize.py` | モデルとトークナイザの読み込み、文字の分割の確認 |
+| `src/momo_bert_train/step3_no_mecab.py` | MeCab なしの入力処理と、付属トークナイザの比較 |
+| `src/momo_bert_train/step4_char_vectors.py` | `CharEncoder`: 文字ごとのベクトルと元の文字との対応づけ |
+| `src/momo_bert_train/step5_benchmark.py` | 推論速度の計測 |
 
-実行例: `uv run python src/bert/step4_char_vectors.py`
+実行例: `uv run python src/momo_bert_train/step4_char_vectors.py`

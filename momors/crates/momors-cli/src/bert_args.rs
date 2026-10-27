@@ -7,7 +7,7 @@ use momors_bert::{BertOptions, BertReader};
 #[derive(Debug, clap::Args)]
 pub struct BertArgs {
     /// BERT 読みモード: 漢字・漢数字の読みを微調整 BERT で推論する。
-    /// `export_onnx`（experimentals/bert）の出力ディレクトリを指定する
+    /// `export_onnx`（momo-bert-train）の出力ディレクトリを指定する
     #[arg(long, value_name = "DIR", global = true)]
     pub bert: Option<PathBuf>,
 

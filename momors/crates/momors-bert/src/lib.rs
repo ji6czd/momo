@@ -3,7 +3,7 @@
 //! 微調整した BERT（`tohoku-nlp/bert-base-japanese-char-v3`）で漢字・漢数字の読みを
 //! 推論し、[`momors_core::SlotReader`] として予測器に差し込む。
 //!
-//! モデルは `experimentals/bert` の `export_onnx` が書き出したディレクトリを読む:
+//! モデルは `momo-bert-train` の `export_onnx` が書き出したディレクトリを読む:
 //!
 //! | ファイル | 中身 |
 //! |---|---|

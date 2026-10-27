@@ -3,8 +3,8 @@
     uv run make_kit
 
 basic_raw.tsv から学習データ（work/data/）を作り直してから詰めるので、キットは常に最新のデータになる。
-中身: pyproject（torch・transformers・numpy）、src/bert/（common・encoder_core・step9_finetune）、
-work/data/（train_full.jsonl・dev_full.jsonl）。出力: work/bert_kit.zip。作ったあとの手順も表示する。
+中身: pyproject（torch・transformers・numpy）、src/momo_bert_train/（common・encoder_core・step9_finetune）、
+work/data/（train_full.jsonl・dev_full.jsonl・meta.json）。出力: work/bert_kit.zip。作ったあとの手順も表示する。
 """
 
 import zipfile
@@ -12,14 +12,16 @@ import zipfile
 from .common import DATA, PKG_ROOT, WORK
 from .export_data import export
 
+PKG = "momo_bert_train"  # キットに入れるパッケージ（src/ の下）
+
 PYPROJECT = """[project]
-name = "bert"
+name = "momo-bert-train"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = ["torch", "transformers", "numpy"]
 
 [project.scripts]
-step9_finetune = "bert.step9_finetune:main"
+step9_finetune = "momo_bert_train.step9_finetune:main"
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]
@@ -34,7 +36,7 @@ STEPS = """
   uv run step9_finetune --smoke            # 動作確認
   uv run step9_finetune                    # train で学習・dev で評価
   uv run step9_finetune --all-data --name full
-手元へ: work/finetuned/<名前>/ を experimentals/bert/work/finetuned/ に置く"""
+手元へ: work/finetuned/<名前>/ を momo-bert-train/work/finetuned/ に置く"""
 
 
 def main() -> None:
@@ -51,8 +53,8 @@ def main() -> None:
             "encoder_core.py",
             "step9_finetune.py",
         ):
-            z.write(PKG_ROOT / "src" / "bert" / name, f"src/bert/{name}")
-        for name in ("train_full.jsonl", "dev_full.jsonl"):
+            z.write(PKG_ROOT / "src" / PKG / name, f"src/{PKG}/{name}")
+        for name in ("train_full.jsonl", "dev_full.jsonl", "meta.json"):
             z.write(DATA / name, f"work/data/{name}")
     print(f"{out}（{out.stat().st_size / 1e6:.1f} MB）")
     print(STEPS)

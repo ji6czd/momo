@@ -3,7 +3,7 @@
 `tohoku-nlp/bert-base-japanese-char-v3` を、Momo の読み推定に使えるかを調べる実験場。
 検証の知見は [docs/bert-char-v3-findings.md](docs/bert-char-v3-findings.md)。
 
-`tools/llm_reading` には依存しない（エンコーダ本体の [src/bert/encoder_core.py](src/bert/encoder_core.py) は
+`tools/llm_reading` には依存しない（エンコーダ本体の [src/momo_bert_train/encoder_core.py](src/momo_bert_train/encoder_core.py) は
 そこから引き取ったもの）。必要なのは `momo-train`（データの展開）と `momors-py`（dev に w7 を添えるときだけ）。
 
 ## データ
@@ -25,12 +25,12 @@ uv run export_data --w7 <train だけで学習した basic_data_7.mbm>   # dev �
 dev の w7 比較（`step7_head` ほか）には、train だけで学習した w7 が要る（全データで学習した w7 は dev を学習済みで、比較にならない）。
 
 ```bash
-cd ../../momo-train
-d=../experimentals/bert/work/w7_train && mkdir -p $d && cp ../experimentals/bert/work/data/train_raw.tsv $d/basic_raw.tsv
+cd ../momo-train
+d=../momo-bert-train/work/w7_train && mkdir -p $d && cp ../momo-bert-train/work/data/train_raw.tsv $d/basic_raw.tsv
 uv run trainer createdata --raw $d/basic_raw.tsv
 uv run makedic $d/basic_data.tsv $d/single_character_dic.tsv
 uv run trainer train --tsv $d/basic_data.tsv --window 7 --jobs 16 --boundary-n-estimators 200
-cd ../experimentals/bert && uv run export_data --w7 work/w7_train/basic_data_7.mbm
+cd ../momo-bert-train && uv run export_data --w7 work/w7_train/basic_data_7.mbm
 ```
 
 （人名辞書を使うときは `--name-dict` を付ける。手順は `tools/llm_reading/02_learning_curve.py` と同じ。）
@@ -64,7 +64,7 @@ uv run step11_audit                      # 全データで学習したモデル�
 ## momo 本体の BERT 読みモード（Rust）
 
 微調整モデルを ONNX に書き出し、momo 本体（`momors/crates/momors-bert`）で 1 行ずつ推論する。
-計画と結果は [docs/bert-plan.md](../../docs/bert-plan.md)。
+計画と結果は [docs/bert-plan.md](../docs/bert-plan.md)。
 
 ```bash
 uv run export_onnx                       # work/finetuned/train → work/onnx/train（dev で PyTorch と突き合わせる）
@@ -72,24 +72,26 @@ uv run export_onnx --name full --no-eval # 実用（全データで学習した�
 ```
 
 - 出力は `reading_bert.onnx`（float32）、`reading_bert.int8.onnx`（int8 動的量子化）、`labels.json`、`cands.json`、`vocab.txt`、`reference.jsonl`（Rust との突き合わせ用）、`meta.json`。
+- 配布用の `work/onnx/momo-bert-<名前>.zip` も作る（中は `momo-bert/`。int8 版・表・語彙・meta・NOTICE。`--zip-f32` で float32 版も入る）。本体のリリースのあと `gh release upload <tag> work/onnx/momo-bert-full.zip` で上げる。
+- `meta.json` の `basic_raw_sha256` は、学習に使った basic_raw.tsv の SHA-256（改行コードは無視）。`export_data` → `make_kit` → `step9_finetune` の順に引き継がれる。書き出すときに今の basic_raw.tsv と違えば注意が出る（本体の w7 と同じデータから作ったかの確認）。
 - int8 版は、出力層と最後の 2 層の FFN 出力を float32 のまま残す。全部 int8 にすると dev が 0.35pt 落ちるため。
 
 momo 本体で使うには、feature `bert` を付けてビルドする（ONNX Runtime はビルド時に取得される）。
 
 ```bash
-cd ../../momors
+cd ../momors
 cargo build --release -p momors-cli --features bert
-target/release/momo --bert ../experimentals/bert/work/onnx/full --bert-threads 6 < input.txt
-target/release/momo-inspect trace --bert ../experimentals/bert/work/onnx/full   # 根拠 BERT が出る
-MOMO_BERT_DIR=../experimentals/bert/work/onnx/train cargo test -p momors-bert --release   # 参照 logit と突き合わせる
+target/release/momo --bert ../momo-bert-train/work/onnx/full --bert-threads 6 < input.txt
+target/release/momo-inspect trace --bert ../momo-bert-train/work/onnx/full   # 根拠 BERT が出る
+MOMO_BERT_DIR=../momo-bert-train/work/onnx/train cargo test -p momors-bert --release   # 参照 logit と突き合わせる
 ```
 
 Rust の推論経路で w7 と比べるには、feature `bert` 付きの momors_py が要る。
 `pyproject.toml` は `work/wheels/` の wheel を指している。
 
 ```bash
-cd ../../momors/crates/momors-pyo3 && uvx maturin build --release --features bert -o ../../../experimentals/bert/work/wheels
-cd ../../../experimentals/bert
+cd ../momors/crates/momors-pyo3 && uvx maturin build --release --features bert -o ../../../momo-bert-train/work/wheels
+cd ../../../momo-bert-train
 uv lock --upgrade-package momors-py --refresh-package momors-py && uv sync --reinstall-package momors-py
 uv run step12_rust_eval                  # w7（work/w7_train）と w7＋BERT（work/onnx/train）を dev で比べる
 ```

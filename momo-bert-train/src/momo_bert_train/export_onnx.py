@@ -3,6 +3,7 @@
     uv run export_onnx                    # work/finetuned/train → work/onnx/train
     uv run export_onnx --name full        # 実用（全データで学習したもの）
     uv run export_onnx --no-eval          # dev での突き合わせを省く
+    uv run export_onnx --name full --no-eval --zip-f32   # 配布用 zip に float32 版も入れる
 
 グラフは BERT 本体と読みの出力層だけで、入力 input_ids / attention_mask [B, T]（int64）、
 出力 logits [B, T, ラベル数]（float32）。候補への絞り込みと softmax はグラフの外（Rust 側）で行う。
@@ -17,13 +18,21 @@ FFN 出力（3072→768）は float32 のまま残す。全部を int8 にする
   cands.json               文字 → 読み候補（ラベル番号）
   vocab.txt                文字の語彙（1行1トークン）
   reference.jsonl          突き合わせ用。数文分の入力 id と、漢字位置の logit（float32 版の値）
-  meta.json                書き出し元と dev の一致率（PyTorch / ONNX float32 / ONNX int8）
+  meta.json                書き出し元、学習に使った basic_raw.tsv のハッシュ、dev の一致率
+work/onnx/momo-bert-<名前>.zip   配布用（GitHub のリリースに `gh release upload <tag>` で上げる）
+  momo-bert/ の下に reading_bert.int8.onnx・labels.json・cands.json・vocab.txt・meta.json・NOTICE.txt
+  （--zip-f32 で reading_bert.onnx も入る）。展開した momo-bert/ を `momo --bert` に渡す。
+
+meta.json の basic_raw_sha256 は、モデルを学習したときの basic_raw.tsv の SHA-256（改行コードは
+無視）。momo 本体の w7 と同じ basic_raw.tsv から作ったかを確かめるのに使う。書き出すときに
+今の dataset/basic_raw.tsv と比べ、違えば注意を出す。
 """
 
 import argparse
 import json
 import shutil
 import time
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +40,7 @@ import torch
 from torch import nn
 
 from .common import DATA, DEFAULT_MODEL, WORK, load_jsonl
+from .export_data import raw_digest
 from .step10_infer import FineTunedReader, is_kanji
 
 OPSET = 18
@@ -42,6 +52,20 @@ REFERENCE_TEXTS = [
     "人々は堂々と歩いた。",
 ]
 N_REFERENCE_DEV = 4
+
+ZIP_DIR = "momo-bert"  # 配布用 zip の中のディレクトリ名
+ZIP_FILES = ["reading_bert.int8.onnx", "labels.json", "cands.json", "vocab.txt", "meta.json"]
+NOTICE = f"""momo BERT reading model
+
+This model is a fine-tuned derivative of {DEFAULT_MODEL}
+(https://huggingface.co/{DEFAULT_MODEL}),
+licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+Modifications: fine-tuned to predict the readings (kana) of kanji for the momo
+Japanese braille translation project, and converted to ONNX (float32 / int8).
+See meta.json for the training data and the evaluation.
+"""
 
 
 class LogitsGraph(nn.Module):
@@ -103,6 +127,40 @@ def export_int8(src: Path, dst: Path, num_layers: int) -> None:
     pre.unlink()
 
 
+def write_zip(out: Path, name: str, with_f32: bool) -> Path:
+    """配布用の zip（中は momo-bert/ の下）を work/onnx/ に作る。"""
+    path = out.parent / f"momo-bert-{name}.zip"
+    files = ZIP_FILES + (["reading_bert.onnx"] if with_f32 else [])
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            z.write(out / f, f"{ZIP_DIR}/{f}")
+        z.writestr(f"{ZIP_DIR}/NOTICE.txt", NOTICE)
+    return path
+
+
+def data_provenance(src: Path) -> dict:
+    """微調整モデルの meta と、学習に使った basic_raw.tsv のハッシュ。今のファイルと違えば注意を出す。"""
+    meta_path = src / "meta.json"
+    finetune = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    trained = finetune.get("data", {}).get("basic_raw_sha256")
+    current = raw_digest()
+    if trained is None:
+        print(
+            "注意: 学習に使った basic_raw.tsv のハッシュがモデルに記録されていない"
+            "（記録を始める前のキットで学習したモデル）"
+        )
+    elif trained != current:
+        print(
+            "注意: 学習に使った basic_raw.tsv と、今の dataset/basic_raw.tsv が違う"
+            f"（学習 {trained[:12]} / 今 {current[:12]}）"
+        )
+    return {
+        "basic_raw_sha256": trained,
+        "basic_raw_sha256_at_export": current,
+        "finetune": finetune,
+    }
+
+
 def session(path: Path, threads: int):
     import onnxruntime as ort
 
@@ -148,6 +206,8 @@ def main() -> None:
     ap.add_argument("--name", default="train", help="work/finetuned/ 下の名前")
     ap.add_argument("--threads", type=int, default=0, help="評価のスレッド数（0=既定）")
     ap.add_argument("--no-eval", action="store_true", help="dev での突き合わせを省く")
+    ap.add_argument("--no-zip", action="store_true", help="配布用 zip を作らない")
+    ap.add_argument("--zip-f32", action="store_true", help="配布用 zip に float32 版も入れる")
     args = ap.parse_args()
 
     src = WORK / "finetuned" / args.name
@@ -211,7 +271,9 @@ def main() -> None:
     print(f"PyTorch と ONNX float32 の logit の最大差: {max_diff:.2e}")
 
     meta = {
+        "exported": time.strftime("%Y-%m-%d %H:%M:%S"),
         "source": str(src),
+        **data_provenance(src),
         "opset": OPSET,
         "labels": len(reader.labels),
         "max_chars": reader.max_chars,
@@ -234,6 +296,9 @@ def main() -> None:
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(f"保存先: {out}")
+    if not args.no_zip:
+        z = write_zip(out, args.name, args.zip_f32)
+        print(f"配布用: {z}（{z.stat().st_size / 2**20:.0f} MiB）")
 
 
 if __name__ == "__main__":

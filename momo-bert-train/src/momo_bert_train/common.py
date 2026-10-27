@@ -11,7 +11,7 @@ from pathlib import Path
 
 PKG_ROOT = (
     Path(__file__).resolve().parents[2]
-)  # experimentals/bert（クラウドのキットでは展開先）
+)  # momo-bert-train（クラウドのキットでは展開先）
 WORK = PKG_ROOT / "work"  # git 管理外
 DATA = WORK / "data"
 

@@ -30,10 +30,18 @@ from typing import Any
 from .common import WORK
 from .gold import GoldSentence, parse_gold, read_raw_lines
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[3]  # リポジトリのルート
 RAW_PATH = ROOT / "dataset" / "basic_raw.tsv"
 DATA = WORK / "data"
 MODULUS = 10
+
+
+def raw_digest(path: Path = RAW_PATH) -> str:
+    """basic_raw.tsv の中身の SHA-256。
+
+    改行コード（CRLF / LF）の違いは無視する。Windows の作業コピーと CI の checkout で同じ値になる。
+    """
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def is_dev(text: str, modulus: int = MODULUS) -> bool:
@@ -96,6 +104,7 @@ def export(raw_path: Path = RAW_PATH, w7_path: str | None = None) -> dict[str, A
         "source": str(raw_path.relative_to(ROOT))
         if raw_path.is_relative_to(ROOT)
         else str(raw_path),
+        "basic_raw_sha256": raw_digest(raw_path),
         "modulus": MODULUS,
         "counts": rows,
         "w7": w7_path,

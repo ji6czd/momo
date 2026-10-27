@@ -1,0 +1,38 @@
+[project]
+name = "momo-bert-train"
+version = "0.1.0"
+description = "Fine-tuning and ONNX export of the BERT reading model for momo (momors-bert)"
+readme = "README.md"
+authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]
+requires-python = ">=3.13"
+dependencies = [
+    "momo-train",
+    "momors-py",
+    "numpy>=2.5.4",
+    "onnx>=1.23.2",
+    "onnxruntime>=1.31.1",
+    "onnxscript>=0.7.2",
+    "torch>=2.14.1",
+    "transformers>=5.20.2",
+]
+
+[project.scripts]
+export_data = "momo_bert_train.export_data:main"
+make_kit = "momo_bert_train.make_kit:main"
+step6_extract = "momo_bert_train.step6_extract:main"
+step7_head = "momo_bert_train.step7_head:main"
+step8_predict = "momo_bert_train.step8_predict:main"
+step9_finetune = "momo_bert_train.step9_finetune:main"
+step10_infer = "momo_bert_train.step10_infer:main"
+step11_audit = "momo_bert_train.step11_audit:main"
+export_onnx = "momo_bert_train.export_onnx:main"
+step12_rust_eval = "momo_bert_train.step12_rust_eval:main"
+
+
+[tool.uv.sources]
+momo-train = { path = "../momo-train", editable = true }
+momors-py = { path = "work/wheels/momors_py-0.11.2-cp313-abi3-win_amd64.whl" }
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"

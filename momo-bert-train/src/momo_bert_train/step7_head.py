@@ -4,8 +4,8 @@
 その文字の辞書候補だけに絞った softmax で選ぶ。評価は dev の漢字スロット一致率で、同じスロットでの
 w7 の読み（export_data --w7 で dev に添えたもの。無ければ w7 の欄は出さない）と並べる。
 
-    uv run python -m bert.step7_head --vectors L1_w0
-    uv run python -m bert.step7_head --vectors L4_w0 --hidden 512 --epochs 40
+    uv run python -m momo_bert_train.step7_head --vectors L1_w0
+    uv run python -m momo_bert_train.step7_head --vectors L4_w0 --hidden 512 --epochs 40
 
 比べる数字（dev 923 行・漢字スロット一致率。memory: project-encoder-first-experiment）:
   w7 95.4% ／ 微調整（3シード平均）97.68%

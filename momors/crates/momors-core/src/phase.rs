@@ -26,10 +26,15 @@ pub enum Phase {
     Boundary,
     /// 末尾整形 + 原文→かなインデックス構築。
     Finalize,
+    /// 読みの別推論器（BERT など、[`crate::SlotReader`]）による 1 行ぶんの推論。
+    SlotReader,
 }
 
+/// 段階の数（[`Phase`] のバリアント数）。
+pub const N_PHASES: usize = 10;
+
 /// 段階名（[`Phase`] の順）。
-pub const PHASE_NAMES: [&str; 9] = [
+pub const PHASE_NAMES: [&str; N_PHASES] = [
     "total",
     "normalize",
     "source",
@@ -39,16 +44,17 @@ pub const PHASE_NAMES: [&str; 9] = [
     "read",
     "boundary",
     "finalize",
+    "slot_reader",
 ];
 
 #[cfg(feature = "diagnostics")]
 mod imp {
-    use super::Phase;
+    use super::{N_PHASES, Phase};
     use std::cell::RefCell;
     use std::time::Instant;
 
     thread_local! {
-        static ACC: RefCell<[u128; 9]> = const { RefCell::new([0; 9]) };
+        static ACC: RefCell<[u128; N_PHASES]> = const { RefCell::new([0; N_PHASES]) };
     }
 
     #[inline]
@@ -63,7 +69,7 @@ mod imp {
     }
 
     /// 積算値を取り出してリセットする。
-    pub fn take() -> [u128; 9] {
+    pub fn take() -> [u128; N_PHASES] {
         ACC.with(|a| std::mem::take(&mut *a.borrow_mut()))
     }
 
@@ -86,7 +92,7 @@ mod imp {
 
 #[cfg(not(feature = "diagnostics"))]
 mod imp {
-    use super::Phase;
+    use super::{N_PHASES, Phase};
 
     #[inline(always)]
     pub fn start() {}
@@ -94,8 +100,8 @@ mod imp {
     #[inline(always)]
     pub fn add(_phase: Phase, _t: ()) {}
 
-    pub fn take() -> [u128; 9] {
-        [0; 9]
+    pub fn take() -> [u128; N_PHASES] {
+        [0; N_PHASES]
     }
 
     pub struct Guard;

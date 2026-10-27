@@ -18,7 +18,12 @@ path = "src/bin/compare_quant.rs"
 name = "momo-inspect"
 path = "src/bin/inspect.rs"
 
+[features]
+# BERT 読みモード（--bert）。ONNX Runtime に依存するので既定では入れない。
+bert = ["dep:momors-bert"]
+
 [dependencies]
 momors-core.workspace = true
 momors-braille.workspace = true
+momors-bert = { workspace = true, optional = true }
 clap.workspace = true

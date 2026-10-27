@@ -6,6 +6,8 @@
 # 使い方:
 #   bash eval/run_regression.sh            # 全窓を検証
 #   bash eval/run_regression.sh medium     # 特定の窓だけ
+#   MOMO_ARGS="--bert DIR" bash eval/run_regression.sh large   # momo に追加の引数を渡す
+#                                          # （BERT 読みモードは feature bert 付きの momo.exe が要る）
 #
 # 期待出力は「壊してはいけない基準」。再学習のたびに走らせ、差分が出たら
 # データ追加が既存を壊していないか確認する。全ケース通れば exit 0、
@@ -51,7 +53,8 @@ fi
 total_fail=0
 for m in "${MODELS[@]}"; do
   # 全入力を一括で推論（1入力=1行出力）
-  mapfile -t outs < <(printf '%s\n' "${inputs[@]}" | PYTHONIOENCODING=utf-8 "$MOMO" --model "$m" 2>/dev/null)
+  # shellcheck disable=SC2086 # MOMO_ARGS は空白区切りの引数列として展開する
+  mapfile -t outs < <(printf '%s\n' "${inputs[@]}" | PYTHONIOENCODING=utf-8 "$MOMO" --model "$m" ${MOMO_ARGS:-} 2>/dev/null)
 
   fail=0
   for i in $(seq 0 $((n - 1))); do

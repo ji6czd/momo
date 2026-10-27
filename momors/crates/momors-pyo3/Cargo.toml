@@ -10,7 +10,13 @@ include = ["src/**", "/Cargo.toml"]
 name = "momors_py"
 crate-type = ["cdylib"]
 
+[features]
+# BERT 読みモード（Predictor(..., bert=DIR)）。ONNX Runtime に依存するので既定では入れない。
+# 評価用の wheel は `uvx maturin build --release --features bert` で作る。
+bert = ["dep:momors-bert"]
+
 [dependencies]
 momors-core = { workspace = true }
 momors-braille = { workspace = true }
+momors-bert = { workspace = true, optional = true }
 pyo3 = { version = "0.29.0", features = ["extension-module", "abi3-py313"] }

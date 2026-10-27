@@ -1,0 +1,22 @@
+[package]
+name = "momors-bert"
+description = "BERT (ONNX Runtime) reading predictor plugged into momors-core as a SlotReader."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+momors-core.workspace = true
+thiserror.workspace = true
+serde_json = "1.0"
+unicode-normalization = "0.1"
+# ONNX Runtime。配布済みのバイナリをビルド時に取得し、DLL を実行ファイルの隣にコピーする。
+# ndarray / tracing は使わないので既定の feature から外す。
+ort = { version = "=2.0.0-rc.15", default-features = false, features = [
+    "std",
+    "download-binaries",
+    "copy-dylibs",
+    "tls-native",
+    "api-31",
+] }

@@ -52,6 +52,7 @@ mod name_dict;
 mod normalize;
 mod numeric;
 pub mod phase;
+mod slot_reader;
 mod vocab;
 mod weight_model;
 
@@ -79,6 +80,7 @@ pub use prediction::{
     Contribution, DecisionSource, PredictionResult, Predictor, PredictorConfig, TraceResult,
     TraceRow,
 };
+pub use slot_reader::{SlotReader, SlotScores};
 
 /// 量子化前 (`.mbmf`) の重みで推論する `Predictor`。
 ///

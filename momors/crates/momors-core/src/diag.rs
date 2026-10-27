@@ -58,7 +58,7 @@ pub struct PhaseReport {
     /// 文字数 × 繰り返し回数。
     pub chars: usize,
     /// `crate::phase::PHASE_NAMES` の順で、1 文字あたりの平均 µs。
-    pub us_per_char: [f64; 9],
+    pub us_per_char: [f64; crate::phase::N_PHASES],
 }
 
 impl PhaseReport {
@@ -99,7 +99,7 @@ impl Predictor<MomoModel> {
         }
         let acc = crate::phase::take();
         let n = (chars * repeat.max(1)) as f64;
-        let mut us_per_char = [0f64; 9];
+        let mut us_per_char = [0f64; crate::phase::N_PHASES];
         for (dst, &ns) in us_per_char.iter_mut().zip(&acc) {
             *dst = ns as f64 / 1000.0 / n;
         }

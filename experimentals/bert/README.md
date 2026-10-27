@@ -61,6 +61,39 @@ uv run step11_audit                      # 全データで学習したモデル�
 
 `pyproject.toml` の `[project.scripts]` に登録してあるので、`uv run <名前>` で呼べる。
 
+## momo 本体の BERT 読みモード（Rust）
+
+微調整モデルを ONNX に書き出し、momo 本体（`momors/crates/momors-bert`）で 1 行ずつ推論する。
+計画と結果は [docs/bert-plan.md](../../docs/bert-plan.md)。
+
+```bash
+uv run export_onnx                       # work/finetuned/train → work/onnx/train（dev で PyTorch と突き合わせる）
+uv run export_onnx --name full --no-eval # 実用（全データで学習したもの）
+```
+
+- 出力は `reading_bert.onnx`（float32）、`reading_bert.int8.onnx`（int8 動的量子化）、`labels.json`、`cands.json`、`vocab.txt`、`reference.jsonl`（Rust との突き合わせ用）、`meta.json`。
+- int8 版は、出力層と最後の 2 層の FFN 出力を float32 のまま残す。全部 int8 にすると dev が 0.35pt 落ちるため。
+
+momo 本体で使うには、feature `bert` を付けてビルドする（ONNX Runtime はビルド時に取得される）。
+
+```bash
+cd ../../momors
+cargo build --release -p momors-cli --features bert
+target/release/momo --bert ../experimentals/bert/work/onnx/full --bert-threads 6 < input.txt
+target/release/momo-inspect trace --bert ../experimentals/bert/work/onnx/full   # 根拠 BERT が出る
+MOMO_BERT_DIR=../experimentals/bert/work/onnx/train cargo test -p momors-bert --release   # 参照 logit と突き合わせる
+```
+
+Rust の推論経路で w7 と比べるには、feature `bert` 付きの momors_py が要る。
+`pyproject.toml` は `work/wheels/` の wheel を指している。
+
+```bash
+cd ../../momors/crates/momors-pyo3 && uvx maturin build --release --features bert -o ../../../experimentals/bert/work/wheels
+cd ../../../experimentals/bert
+uv lock --upgrade-package momors-py --refresh-package momors-py && uv sync --reinstall-package momors-py
+uv run step12_rust_eval                  # w7（work/w7_train）と w7＋BERT（work/onnx/train）を dev で比べる
+```
+
 ## 物差し
 
 dev の漢字スロット一致率。旧データ（dev 923 行）での記録は w7 95.4%、本体固定の分類器 96.9%、

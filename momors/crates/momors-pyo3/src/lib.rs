@@ -21,6 +21,8 @@ struct PredictionResult {
     kana: String,
     /// 各カナ文字の自信度（0.0〜1.0）
     confidences: Vec<f32>,
+    /// 各カナ文字の決定根拠（`LR`・`BERT`・`FALLBACK_NUM` など）
+    decisions: Vec<String>,
     /// 分かち書きされたカナ（`ワガハイ/ワ/ネコ/デ/アル` 形式）
     segmented: String,
     /// 分かち書きされた原文（`吾輩/は/猫/で/ある` 形式）
@@ -42,10 +44,16 @@ impl PredictionResult {
             .char_indices()
             .map(|(b, _)| r.confidences()[b])
             .collect();
+        let decisions: Vec<String> = r
+            .kana_text()
+            .char_indices()
+            .map(|(b, _)| r.decision_sources()[b].as_str().to_string())
+            .collect();
         Self {
             source: r.source_text().to_string(),
             kana: r.kana_text().to_string(),
             confidences,
+            decisions,
             segmented,
             source_segmented,
             kana_to_source,
@@ -68,6 +76,30 @@ impl PredictionResult {
 // Predictor
 // ============================================================
 
+/// BERT 読みモードの推論器を読み込んで予測器に差し込む。
+#[cfg(feature = "bert")]
+fn attach_bert(
+    predictor: &mut RustPredictor,
+    dir: &str,
+    f32_model: bool,
+    threads: usize,
+) -> PyResult<Vec<String>> {
+    let options = momors_bert::BertOptions {
+        int8: !f32_model,
+        threads,
+    };
+    let reader = momors_bert::BertReader::load(dir, &options)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    Ok(predictor.set_slot_reader(Box::new(reader)))
+}
+
+#[cfg(not(feature = "bert"))]
+fn attach_bert(_: &mut RustPredictor, _: &str, _: bool, _: usize) -> PyResult<Vec<String>> {
+    Err(PyRuntimeError::new_err(
+        "この momors_py は BERT 読みモードなしでビルドされている（feature `bert`）",
+    ))
+}
+
 /// 日本語テキスト → カナ変換器。
 ///
 /// ```python
@@ -80,6 +112,8 @@ impl PredictionResult {
 #[pyclass]
 struct Predictor {
     inner: RustPredictor,
+    /// BERT のラベルのうち、読みモデルのクラスに無くて使えないもの。
+    bert_unknown_labels: Vec<String>,
 }
 
 #[pymethods]
@@ -91,13 +125,30 @@ impl Predictor {
     ///     single_char_dict: 単一文字辞書 TSV のパス（省略可）
     ///     custom_dict: カスタム辞書（フレーズ辞書）TSV のパス（省略可）
     ///     numeric_threshold: 数字ルールベース変換を発動させる自信度の上限（デフォルト 0.5）
+    ///     bert: BERT 読みモードのモデルディレクトリ（`export_onnx` の出力、省略可）。
+    ///         feature `bert` 付きでビルドした wheel だけが受け付ける
+    ///     bert_f32: BERT を float32 版で動かす（既定は int8 版）
+    ///     bert_threads: BERT の演算スレッド数（0 は ONNX Runtime の既定）
     #[new]
-    #[pyo3(signature = (model_path, *, single_char_dict=None, custom_dict=None, numeric_threshold=0.5))]
+    #[pyo3(signature = (
+        model_path,
+        *,
+        single_char_dict=None,
+        custom_dict=None,
+        numeric_threshold=0.5,
+        bert=None,
+        bert_f32=false,
+        bert_threads=0,
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         model_path: &str,
         single_char_dict: Option<&str>,
         custom_dict: Option<&str>,
         numeric_threshold: f32,
+        bert: Option<&str>,
+        bert_f32: bool,
+        bert_threads: usize,
     ) -> PyResult<Self> {
         let mut config =
             PredictorConfig::new(model_path).with_numeric_confidence_threshold(numeric_threshold);
@@ -107,9 +158,29 @@ impl Predictor {
         if let Some(path) = custom_dict {
             config = config.with_custom_dict_path(path);
         }
-        let inner =
+        #[cfg_attr(not(feature = "bert"), allow(unused_mut))]
+        let mut inner =
             RustPredictor::load(config).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        Ok(Self { inner })
+        let bert_unknown_labels = match bert {
+            Some(dir) => attach_bert(&mut inner, dir, bert_f32, bert_threads)?,
+            None => Vec::new(),
+        };
+        Ok(Self {
+            inner,
+            bert_unknown_labels,
+        })
+    }
+
+    /// BERT のラベルのうち、読みモデルのクラスに無くて使えないもの。
+    #[getter]
+    fn bert_unknown_labels(&self) -> Vec<String> {
+        self.bert_unknown_labels.clone()
+    }
+
+    /// BERT 読みモードが有効か。
+    #[getter]
+    fn has_bert(&self) -> bool {
+        self.inner.has_slot_reader()
     }
 
     /// テキストをカナに変換する。
@@ -164,7 +235,10 @@ impl Predictor {
         }
         let inner =
             RustPredictor::load(config).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            bert_unknown_labels: Vec::new(),
+        })
     }
 
     fn __repr__(&self) -> String {

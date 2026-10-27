@@ -25,6 +25,7 @@ use crate::numeric::{
     NumericFallback, convert_japanese_numeric, is_digit_label, is_kun_counter_signal,
 };
 use crate::phase::{self, Phase};
+use crate::slot_reader::{AttachedReader, ReadingView, SlotReader};
 use crate::weight_model::WeightModel;
 
 // ============================================================
@@ -86,6 +87,8 @@ pub enum DecisionSource {
     DictCustom,
     /// 記号・空白・英字などの素通し。
     Bypass,
+    /// 読みの別推論器（BERT など、[`SlotReader`]）の予測を採用。
+    Bert,
 }
 
 impl DecisionSource {
@@ -102,6 +105,7 @@ impl DecisionSource {
             DecisionSource::DictName => "DICT_NAME",
             DecisionSource::DictCustom => "DICT_CUSTOM",
             DecisionSource::Bypass => "BYPASS",
+            DecisionSource::Bert => "BERT",
         }
     }
 }
@@ -494,6 +498,31 @@ pub struct Predictor<M: WeightModel = MomoModel> {
     /// `binary_search` で引く（ファイル内の順序に依存せず、RAM は n_classes × 4B）。
     /// `read_p*` 特徴量（確定済みの前方読み）のペイロードに使う。
     class_order: Vec<u32>,
+    /// 読みの別推論器（BERT など）。設定されていれば、漢字・漢数字の読みは
+    /// LR ではなくこちらの候補から選ぶ（[`Predictor::set_slot_reader`]）。
+    slot_reader: Option<AttachedReader>,
+}
+
+/// 読みを選んだ結果。
+#[derive(Debug, Clone, Copy)]
+struct ReadPick {
+    /// 読みモデルのクラス id。
+    cls: usize,
+    /// 自信度。LR は線形スコアの sigmoid、別推論器は候補内 softmax の確率。
+    conf: f32,
+    /// 別推論器（[`SlotReader`]）が決めたか。
+    by_reader: bool,
+}
+
+impl ReadPick {
+    /// この読みの決定根拠（自信度による LR / LR_LOW の区別はしない）。
+    fn source(self) -> DecisionSource {
+        if self.by_reader {
+            DecisionSource::Bert
+        } else {
+            DecisionSource::Lr
+        }
+    }
 }
 
 /// クラス id をラベルのバイト順に並べた順列を作る。
@@ -532,6 +561,7 @@ impl<M: WeightModel> Predictor<M> {
             single_char_dict,
             custom_dict,
             class_order,
+            slot_reader: None,
         })
     }
 
@@ -556,7 +586,35 @@ impl<M: WeightModel> Predictor<M> {
             single_char_dict,
             custom_dict: crate::custom_dict::CustomDictIndex::new(),
             class_order,
+            slot_reader: None,
         })
+    }
+
+    /// 読みの別推論器（BERT など）を設定する。以後の推論では、推論器が候補を付けた
+    /// 漢字・漢数字の読みを、LR ではなくその候補から選ぶ。
+    ///
+    /// 推論器のラベルはここで読みモデルのクラスに解決する。戻り値は、クラスに無くて
+    /// 使えないラベルの一覧（推論器とモデルの学習データがずれていないかの確認用）。
+    pub fn set_slot_reader(&mut self, reader: Box<dyn SlotReader>) -> Vec<String> {
+        let mut unknown = Vec::new();
+        let label_map = reader
+            .labels()
+            .iter()
+            .map(|label| {
+                let id = self.read_class_id(label);
+                if id.is_none() {
+                    unknown.push(label.clone());
+                }
+                id
+            })
+            .collect();
+        self.slot_reader = Some(AttachedReader { reader, label_map });
+        unknown
+    }
+
+    /// 読みの別推論器が設定されているか。
+    pub fn has_slot_reader(&self) -> bool {
+        self.slot_reader.is_some()
     }
 
     /// 読みラベル文字列 → クラス id。モデルのクラスに無ければ `None`。
@@ -665,7 +723,15 @@ impl<M: WeightModel> Predictor<M> {
         let t = phase::start();
         let normalized = crate::normalize::normalize_input(text);
         phase::add(Phase::Normalize, t);
-        let mut result = self.predict_with_brackets(&normalized.text)?;
+        // 読みの別推論器は、括弧の注釈も含めた行全体を一度に読む（学習時と同じ入力）。
+        let t = phase::start();
+        let line = match &self.slot_reader {
+            Some(r) => Some(r.read_line(&normalized.text)?),
+            None => None,
+        };
+        phase::add(Phase::SlotReader, t);
+        let mut result =
+            self.predict_with_brackets(&normalized.text, ReadingView::new(line.as_ref()))?;
         if let Some(byte_map) = &normalized.byte_map {
             remap_result_to_source(&mut result, text, byte_map);
         }
@@ -696,7 +762,13 @@ impl<M: WeightModel> Predictor<M> {
     /// Aside の中身は本関数を再帰的に通すので、入れ子や中身の引用符も扱える。
     ///
     /// [`predict_normalized_with_feature_text`]: Predictor::predict_normalized_with_feature_text
-    fn predict_with_brackets(&self, text: &str) -> Result<PredictionResult> {
+    ///
+    /// `readings` は `text` の座標で見た、別推論器の読みの候補。
+    fn predict_with_brackets(
+        &self,
+        text: &str,
+        readings: ReadingView<'_>,
+    ) -> Result<PredictionResult> {
         // --- Aside span を本文から抜く ---
         let (outer, spans) = extract_aside_spans(text);
 
@@ -709,7 +781,13 @@ impl<M: WeightModel> Predictor<M> {
         } else {
             replace_inline_brackets_with_token(&replace_aside_spans_with_token(text, &spans))
         };
-        let mut result = self.predict_normalized_with_feature_text(&outer.text, &feature_text)?;
+        let outer_readings = if spans.is_empty() {
+            readings
+        } else {
+            readings.mapped(&outer.byte_map)
+        };
+        let mut result =
+            self.predict_normalized_with_feature_text(&outer.text, &feature_text, outer_readings)?;
         if !spans.is_empty() {
             // outer 座標 → text 座標
             remap_result_to_source(&mut result, text, &outer.byte_map);
@@ -718,7 +796,10 @@ impl<M: WeightModel> Predictor<M> {
         // --- 各 Aside span の中身を独立に推論して原子を組む ---
         let mut atoms = Vec::with_capacity(spans.len());
         for sp in &spans {
-            let inner = self.predict_with_brackets(&text[sp.content.clone()])?;
+            let inner = self.predict_with_brackets(
+                &text[sp.content.clone()],
+                readings.shifted(sp.content.start),
+            )?;
             let offset = sp.content.start;
             let mut kana = String::new();
             let mut srcs = Vec::new();
@@ -774,10 +855,13 @@ impl<M: WeightModel> Predictor<M> {
     /// フィルタしない。
     /// `feature_text == text` のとき（大多数のケース、括弧の無い通常入力）は
     /// 従来と全く同じ経路を通る（オーバーヘッドゼロ）。
+    ///
+    /// `readings` は `text` の座標で見た、別推論器の読みの候補（無ければ空）。
     fn predict_normalized_with_feature_text(
         &self,
         text: &str,
         feature_text: &str,
+        readings: ReadingView<'_>,
     ) -> Result<PredictionResult> {
         // --- 初期化 ---
         let mut result = PredictionResult {
@@ -1042,8 +1126,9 @@ impl<M: WeightModel> Predictor<M> {
                 let counter_cp = source_seq[run_end].cp;
                 // ゲートが要る助数詞（日）だけ、助数詞文字のモデル読みを見る。
                 let model_reading = if counter_needs_gate(counter_cp) {
-                    let (cls, _) = self.read_argmax(
+                    let pick = self.pick_reading(
                         &source_seq[run_end],
+                        readings.get(&source_seq[run_end]),
                         self.read_feat_ids(
                             &all_feat_ids[run_end],
                             &decided,
@@ -1054,7 +1139,7 @@ impl<M: WeightModel> Predictor<M> {
                         &mut scores,
                         self.resolved_read_label(&decided, run_end - 1),
                     );
-                    self.model.read_class(cls as u32).unwrap_or("")
+                    self.model.read_class(pick.cls as u32).unwrap_or("")
                 } else {
                     ""
                 };
@@ -1185,18 +1270,19 @@ impl<M: WeightModel> Predictor<M> {
             let prev_read_label = i
                 .checked_sub(1)
                 .and_then(|j| self.resolved_read_label(&decided, j));
-            let (best_cls, best_score) = self.read_argmax(
+            let pick = self.pick_reading(
                 entry,
+                readings.get(entry),
                 self.read_feat_ids(&all_feat_ids[i], &decided, i, &mut feat_buf),
                 &mut read_scratch,
                 &mut scores,
                 prev_read_label,
             );
 
-            let conf = sigmoid(best_score);
-            let label = self.model.read_class(best_cls as u32).unwrap_or("");
+            let conf = pick.conf;
+            let label = self.model.read_class(pick.cls as u32).unwrap_or("");
             // 以降の分岐が読みを差し替えない限り、この位置の確定読みはモデルのラベル。
-            decided[i] = Some(best_cls as u32);
+            decided[i] = Some(pick.cls as u32);
 
             // ============================================================
             // JAPANESE_NUMERIC ルールベース変換
@@ -1217,14 +1303,15 @@ impl<M: WeightModel> Predictor<M> {
                 && conf < self.config.numeric_confidence_threshold
                 && i + 1 < n
             {
-                let (next_cls, _) = self.read_argmax(
+                let next = self.pick_reading(
                     &source_seq[i + 1],
+                    readings.get(&source_seq[i + 1]),
                     self.read_feat_ids(&all_feat_ids[i + 1], &decided, i + 1, &mut feat_buf),
                     &mut read_scratch,
                     &mut scores,
                     self.resolved_read_label(&decided, i),
                 );
-                let next_label = self.model.read_class(next_cls as u32).unwrap_or("");
+                let next_label = self.model.read_class(next.cls as u32).unwrap_or("");
                 let next_char = char::from_u32(source_seq[i + 1].cp)
                     .map(|c| c.to_string())
                     .unwrap_or_default();
@@ -1294,8 +1381,9 @@ impl<M: WeightModel> Predictor<M> {
                     label != src_ch
                 } else {
                     let next_is_kun_counter = if i + 1 < n {
-                        let (next_cls, _) = self.read_argmax(
+                        let next = self.pick_reading(
                             &source_seq[i + 1],
+                            readings.get(&source_seq[i + 1]),
                             self.read_feat_ids(
                                 &all_feat_ids[i + 1],
                                 &decided,
@@ -1306,7 +1394,7 @@ impl<M: WeightModel> Predictor<M> {
                             &mut scores,
                             self.resolved_read_label(&decided, i),
                         );
-                        let next_label = self.model.read_class(next_cls as u32).unwrap_or("");
+                        let next_label = self.model.read_class(next.cls as u32).unwrap_or("");
                         let next_char = char::from_u32(source_seq[i + 1].cp)
                             .map(|c| c.to_string())
                             .unwrap_or_default();
@@ -1376,7 +1464,7 @@ impl<M: WeightModel> Predictor<M> {
                 // 2. NUMERIC + CONTINUE 救済: 数字 (1, 2, ...) を素通し
                 if entry.ctype == CharType::Numeric {
                     decided[i] = self.read_class_id_cp(entry.cp);
-                    self.emit_char_passthrough(entry, conf, DecisionSource::Lr, &mut result);
+                    self.emit_char_passthrough(entry, conf, pick.source(), &mut result);
                     continue;
                 }
 
@@ -1385,7 +1473,7 @@ impl<M: WeightModel> Predictor<M> {
                     self.insert_small_kana_into_parent(
                         entry.cp,
                         conf,
-                        DecisionSource::Lr,
+                        pick.source(),
                         &source_seq,
                         parent_src_idx.unwrap(),
                         &mut parent_kana_byte_end,
@@ -1406,7 +1494,7 @@ impl<M: WeightModel> Predictor<M> {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
                     result.confidences.push(conf);
-                    result.decision_sources.push(DecisionSource::Lr);
+                    result.decision_sources.push(pick.source());
                 }
                 continue;
             }
@@ -1418,7 +1506,7 @@ impl<M: WeightModel> Predictor<M> {
                 // NUMERIC + SKIP 救済: 数字を素通し
                 if entry.ctype == CharType::Numeric {
                     decided[i] = self.read_class_id_cp(entry.cp);
-                    self.emit_char_passthrough(entry, conf, DecisionSource::Lr, &mut result);
+                    self.emit_char_passthrough(entry, conf, pick.source(), &mut result);
                     continue;
                 }
                 // それ以外の SKIP は単純スキップ (親情報は更新しない)
@@ -1441,7 +1529,9 @@ impl<M: WeightModel> Predictor<M> {
             // 文字列は通常短い (数バイト) のでコピーのオーバーヘッドは小さい。
             // 決定根拠タグ（trace 用）。LR の既定は自信度で LR / LR_LOW を分ける。
             // 各フォールバック分岐が発火したら上書きする。
-            let mut dec = if conf < LR_LOW_THRESHOLD {
+            let mut dec = if pick.by_reader {
+                DecisionSource::Bert
+            } else if conf < LR_LOW_THRESHOLD {
                 DecisionSource::LrLow
             } else {
                 DecisionSource::Lr
@@ -1531,6 +1621,96 @@ impl<M: WeightModel> Predictor<M> {
         (label != LABEL_CONTINUE && label != LABEL_SKIP).then_some(label)
     }
 
+    /// 位置の読みを選ぶ。別推論器の候補 `reader` があればそこから選び（LR は計算しない）、
+    /// 無いか、候補の中に許される読みが無ければ LR（[`read_argmax`]）で選ぶ。
+    ///
+    /// [`read_argmax`]: Predictor::read_argmax
+    #[allow(clippy::too_many_arguments)]
+    fn pick_reading(
+        &self,
+        entry: &SourceEntry,
+        reader: Option<&[(u32, f32)]>,
+        feat_ids: &[u32],
+        scratch: &mut M::Scratch,
+        scores: &mut [f32],
+        prev_read_label: Option<&str>,
+    ) -> ReadPick {
+        if let Some((cls, conf)) =
+            reader.and_then(|c| self.reader_argmax(entry, c, prev_read_label))
+        {
+            return ReadPick {
+                cls,
+                conf,
+                by_reader: true,
+            };
+        }
+        let (cls, score) = self.read_argmax(entry, feat_ids, scratch, scores, prev_read_label);
+        ReadPick {
+            cls,
+            conf: sigmoid(score),
+            by_reader: false,
+        }
+    }
+
+    /// 別推論器の候補（確率の降順）から、[`read_argmax`] と同じ制約で読みを選ぶ。
+    ///
+    /// - 「々」: 直前の確定読みとその連濁形（または単独出現の固定読み）だけ。
+    ///   どちらも候補に無ければ `None`（LR の規則に任せる）。
+    /// - 漢字: 単一文字辞書の読みに絞る。辞書の読みが候補に無ければ、候補の 1 位。
+    ///
+    /// [`read_argmax`]: Predictor::read_argmax
+    fn reader_argmax(
+        &self,
+        entry: &SourceEntry,
+        candidates: &[(u32, f32)],
+        prev_read_label: Option<&str>,
+    ) -> Option<(usize, f32)> {
+        let _g = phase::Guard::new(Phase::Read);
+        if entry.ctype == CharType::Kanji && entry.cp == CHAR_NOMA {
+            let (allowed, n) = self.noma_candidates(prev_read_label);
+            return candidates
+                .iter()
+                .find(|(c, _)| allowed[..n].contains(&(*c as usize)))
+                .map(|&(c, p)| (c as usize, p));
+        }
+        if entry.ctype == CharType::Kanji
+            && let Some(allowed) = char::from_u32(entry.cp)
+                .and_then(|ch| lookup_single_char_dict(&self.single_char_dict, ch))
+            && let Some(&(c, p)) = candidates
+                .iter()
+                .find(|(c, _)| allowed.binary_search(&(*c as usize)).is_ok())
+        {
+            return Some((c as usize, p));
+        }
+        candidates.first().map(|&(c, p)| (c as usize, p))
+    }
+
+    /// 「々」に許す読みのクラス id（最大 2 つ）と、その個数。
+    ///
+    /// 直前の確定読みがあればそれと連濁形、無ければ単独出現（文頭・記号直後など、
+    /// 記号自体への言及）の固定読み。
+    fn noma_candidates(&self, prev_read_label: Option<&str>) -> ([usize; 2], usize) {
+        let mut candidates = [0usize; 2];
+        let mut n = 0;
+        if let Some(base) = prev_read_label {
+            if let Some(id) = self.read_class_id(base) {
+                candidates[n] = id as usize;
+                n += 1;
+            }
+            if let Some(id) = rendaku_form(base)
+                .as_deref()
+                .and_then(|v| self.read_class_id(v))
+            {
+                candidates[n] = id as usize;
+                n += 1;
+            }
+        } else if let Some(id) = self.read_class_id(NOMA_STANDALONE_READING) {
+            candidates[0] = id as usize;
+            n = 1;
+        }
+        (candidates, n)
+    }
+
     /// 1文字分の読みスコアを計算し、（単一文字辞書制約付き）argmax のクラスとスコアを返す。
     /// `scratch` / `scores` はスクラッチバッファ（呼び出しごとに上書きされる）。
     /// `prev_read_label` は直前の文字の確定読み（「々」の連濁判定に使う）。
@@ -1553,28 +1733,11 @@ impl<M: WeightModel> Predictor<M> {
         // その場で確定読みから候補を作る方が構造的に正しい。basic_raw.tsv への
         // データ追加だけで対応できる従来の入力フローは変えない。
         if entry.ctype == CharType::Kanji && entry.cp == CHAR_NOMA {
-            if let Some(base) = prev_read_label {
-                let voiced = rendaku_form(base);
-                let mut candidates = [0usize; 2];
-                let mut n = 0;
-                if let Some(id) = self.read_class_id(base) {
-                    candidates[n] = id as usize;
-                    n += 1;
-                }
-                if let Some(id) = voiced.as_deref().and_then(|v| self.read_class_id(v)) {
-                    candidates[n] = id as usize;
-                    n += 1;
-                }
-                if n > 0 {
-                    if let Some(result) = constrained_argmax_cls(scores, &candidates[..n]) {
-                        return result;
-                    }
-                }
-            } else if let Some(id) = self.read_class_id(NOMA_STANDALONE_READING) {
-                // 繰り返す対象が無い単独出現（文頭・記号直後など、記号自体への言及）。
-                if let Some(result) = constrained_argmax_cls(scores, &[id as usize]) {
-                    return result;
-                }
+            let (candidates, n) = self.noma_candidates(prev_read_label);
+            if n > 0
+                && let Some(result) = constrained_argmax_cls(scores, &candidates[..n])
+            {
+                return result;
             }
         }
 
@@ -3157,6 +3320,7 @@ mod tests {
             single_char_dict: Vec::new(),
             custom_dict: crate::custom_dict::CustomDictIndex::new(),
             class_order,
+            slot_reader: None,
         }
     }
 
@@ -3191,6 +3355,102 @@ mod tests {
         // 直後が無ければ従来どおり数字化する（このトイモデルは read_p1=オトトイ だけで
         // 次を --- に倒すので、直後がある否定例は実モデルの regression に委ねる）。
         assert_eq!(p.predict("一").unwrap().kana_text(), "1");
+    }
+
+    // --- 読みの別推論器（SlotReader） ---
+
+    /// 文字ごとに決まったラベルを返す、テスト用の別推論器。
+    struct FakeReader {
+        labels: Vec<String>,
+        /// (文字, ラベル番号, 確率)。同じ文字が複数あれば、その順で候補に並べる。
+        table: Vec<(char, u32, f32)>,
+    }
+
+    impl SlotReader for FakeReader {
+        fn labels(&self) -> &[String] {
+            &self.labels
+        }
+
+        fn read_line(&self, text: &str) -> std::result::Result<Vec<crate::SlotScores>, String> {
+            Ok(text
+                .char_indices()
+                .filter_map(|(b, ch)| {
+                    let candidates: Vec<(u32, f32)> = self
+                        .table
+                        .iter()
+                        .filter(|(c, _, _)| *c == ch)
+                        .map(|&(_, l, p)| (l, p))
+                        .collect();
+                    (!candidates.is_empty()).then_some(crate::SlotScores {
+                        byte_pos: b,
+                        candidates,
+                    })
+                })
+                .collect())
+        }
+    }
+
+    fn fake_reader(table: &[(char, &str, f32)]) -> Box<FakeReader> {
+        let mut labels: Vec<String> = Vec::new();
+        let table = table
+            .iter()
+            .map(|&(ch, label, p)| {
+                let idx = labels.iter().position(|l| l == label).unwrap_or_else(|| {
+                    labels.push(label.to_string());
+                    labels.len() - 1
+                });
+                (ch, idx as u32, p)
+            })
+            .collect();
+        Box::new(FakeReader { labels, table })
+    }
+
+    #[test]
+    fn slot_reader_overrides_kanji_reading() {
+        let mut p = predictor_with_read_prev();
+        // LR では「字」→ジ。別推論器がカンを付ければカンになり、根拠は BERT。
+        let unknown = p.set_slot_reader(fake_reader(&[('字', "カン", 0.9)]));
+        assert!(unknown.is_empty());
+        let r = p.predict("字").unwrap();
+        assert_eq!(r.kana_text(), "カン");
+        assert!(
+            r.decision_sources()
+                .iter()
+                .all(|&d| d == DecisionSource::Bert)
+        );
+        assert!((r.confidences()[0] - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn slot_reader_reading_feeds_read_prev_of_following_lr_char() {
+        let mut p = predictor_with_read_prev();
+        // 漢 だけ別推論器（カン）。字 は LR で、read_p1=カン を見て --- に倒れる。
+        p.set_slot_reader(fake_reader(&[('漢', "カン", 0.8)]));
+        assert_eq!(p.predict("漢字").unwrap().kana_text(), "カン");
+    }
+
+    #[test]
+    fn slot_reader_skips_labels_unknown_to_the_model() {
+        let mut p = predictor_with_read_prev();
+        // 1 位のラベル（ナシ）はモデルのクラスに無いので落ち、2 位のカンが選ばれる。
+        let unknown = p.set_slot_reader(fake_reader(&[('字', "ナシ", 0.7), ('字', "カン", 0.2)]));
+        assert_eq!(unknown, vec!["ナシ".to_string()]);
+        assert_eq!(p.predict("字").unwrap().kana_text(), "カン");
+    }
+
+    #[test]
+    fn slot_reader_positions_follow_aside_brackets() {
+        let mut p = predictor_with_read_prev();
+        assert_eq!(p.predict("漢（字）").unwrap().kana_text(), "カン（ジ）");
+        // 注釈の中身は本文から抜いて別に推論するが、別推論器の候補は行全体の座標で
+        // 付くので、中身の 字 にも届く。
+        p.set_slot_reader(fake_reader(&[('字', "カン", 0.9)]));
+        assert_eq!(p.predict("漢（字）").unwrap().kana_text(), "カン（カン）");
+        // 注釈の後ろの本文（行の座標とずれる位置）にも届く。
+        assert_eq!(
+            p.predict("漢（漢）字").unwrap().kana_text(),
+            p.predict("漢（漢）").unwrap().kana_text().to_owned() + "カン"
+        );
     }
 
     #[test]

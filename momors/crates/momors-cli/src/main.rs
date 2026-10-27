@@ -14,6 +14,9 @@ use momors_braille::{
 };
 use momors_core::{FloatPredictor, PredictionResult, Predictor, PredictorConfig};
 
+#[cfg(feature = "bert")]
+mod bert_args;
+
 fn data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("MOMO_DATASET_DIR") {
         return PathBuf::from(dir);
@@ -117,6 +120,10 @@ struct Cli {
     /// .brf 以外の出力形式に指定するとエラー
     #[arg(long, default_value = "upper")]
     nabcc_case: NabccCaseArg,
+
+    #[cfg(feature = "bert")]
+    #[command(flatten)]
+    bert: bert_args::BertArgs,
 }
 
 /// `--nabcc-case` の選択肢。
@@ -165,6 +172,15 @@ impl AnyPredictor {
             AnyPredictor::Float(p) => p.predict(text),
         }
     }
+
+    /// 読みの別推論器（BERT）を設定し、読みモデルに無いラベルの一覧を返す。
+    #[cfg(feature = "bert")]
+    fn set_slot_reader(&mut self, reader: Box<dyn momors_core::SlotReader>) -> Vec<String> {
+        match self {
+            AnyPredictor::Quantized(p) => p.set_slot_reader(reader),
+            AnyPredictor::Float(p) => p.set_slot_reader(reader),
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -198,13 +214,26 @@ fn main() -> ExitCode {
         config = config.with_custom_dict_path(&p);
     }
 
-    let predictor = match AnyPredictor::load(config) {
+    #[cfg_attr(not(feature = "bert"), allow(unused_mut))]
+    let mut predictor = match AnyPredictor::load(config) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("モデル読み込みエラー: {e}");
             return ExitCode::FAILURE;
         }
     };
+
+    #[cfg(feature = "bert")]
+    match cli.bert.load() {
+        Ok(Some(reader)) => {
+            bert_args::warn_unknown_labels(&predictor.set_slot_reader(Box::new(reader)));
+        }
+        Ok(None) => {}
+        Err(msg) => {
+            eprintln!("{msg}");
+            return ExitCode::FAILURE;
+        }
+    }
 
     if cli.input.is_some() {
         match run_format(&cli, &predictor) {

@@ -224,7 +224,7 @@ fn main() -> ExitCode {
     };
 
     #[cfg(feature = "bert")]
-    match cli.bert.load() {
+    match cli.bert.load(&data_dir()) {
         Ok(Some(reader)) => {
             bert_args::warn_unknown_labels(&predictor.set_slot_reader(Box::new(reader)));
         }

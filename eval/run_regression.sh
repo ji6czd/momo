@@ -6,7 +6,7 @@
 # 使い方:
 #   bash eval/run_regression.sh            # 全窓を検証
 #   bash eval/run_regression.sh medium     # 特定の窓だけ
-#   MOMO_ARGS="--bert DIR" bash eval/run_regression.sh large   # momo に追加の引数を渡す
+#   MOMO_ARGS="--bert" bash eval/run_regression.sh large   # momo に追加の引数を渡す（--bert-dir DIR でモデルの場所を指定）
 #                                          # （BERT 読みモードは feature bert 付きの momo.exe が要る）
 #
 # 期待出力は「壊してはいけない基準」。再学習のたびに走らせ、差分が出たら

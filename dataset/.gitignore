@@ -1,5 +1,7 @@
 *.zip
 *.mbm
 *.mbmf
+# BERT 読みモードのモデル（momo-bert-*.zip を展開したもの）
+momo-bert/
 *.txt
 basic_data.tsv

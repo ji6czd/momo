@@ -41,6 +41,10 @@ use ort::value::TensorRef;
 
 use crate::vocab::CharVocab;
 
+/// モデルを置く既定のディレクトリ名。`.mbm` を探す既定のディレクトリの下に置く
+/// （配布用の momo-bert-*.zip を展開すると、このディレクトリができる）。
+pub const DEFAULT_DIR_NAME: &str = "momo-bert";
+
 /// 読みのラベル表で、継続（前の文字と一続きの読み）を表すもの（momors-core と同じ）。
 const LABEL_CONTINUE: &str = "---";
 
@@ -155,7 +159,9 @@ impl BertReader {
             .map(|l| match l.as_str() {
                 Some("") => Ok(LABEL_CONTINUE.to_string()),
                 Some(l) => Ok(l.to_string()),
-                None => Err(BertError::Format("labels.json に文字列でない要素があります".into())),
+                None => Err(BertError::Format(
+                    "labels.json に文字列でない要素があります".into(),
+                )),
             })
             .collect::<Result<_, _>>()?;
 
@@ -356,8 +362,10 @@ mod tests {
     #[ignore]
     fn bench_read() {
         let dir = std::env::var("MOMO_BERT_DIR").expect("MOMO_BERT_DIR");
-        let text = read_text(Path::new(&std::env::var("MOMO_BENCH_TEXT").expect("MOMO_BENCH_TEXT")))
-            .unwrap();
+        let text = read_text(Path::new(
+            &std::env::var("MOMO_BENCH_TEXT").expect("MOMO_BENCH_TEXT"),
+        ))
+        .unwrap();
         let threads = std::env::var("MOMO_BERT_THREADS")
             .ok()
             .and_then(|v| v.parse().ok())

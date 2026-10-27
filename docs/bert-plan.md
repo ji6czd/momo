@@ -162,7 +162,7 @@
 | `momors/crates/momors-core/src/slot_reader.rs` | trait `SlotReader`・`SlotScores`（core の依存は増えていない） |
 | `momors/crates/momors-core/src/prediction.rs` | `Predictor::set_slot_reader`・`pick_reading`/`reader_argmax`・`DecisionSource::Bert`・`Phase::SlotReader` |
 | `momors/crates/momors-bert/` | `BertReader`（ort 2.0.0-rc.15 = ONNX Runtime 1.31）・語彙・長い行の窓 |
-| `momors-cli`（feature `bert`） | `momo` / `momo-inspect` に `--bert DIR` `--bert-f32` `--bert-threads N` |
+| `momors-cli`（feature `bert`） | `momo` / `momo-inspect` に `--bert`（既定の場所 `<.mbm の既定ディレクトリ>/momo-bert/`、int8 版）`--bert-dir DIR` `--bert-f32` `--bert-threads N` |
 | `momors-pyo3`（feature `bert`） | `Predictor(..., bert=DIR, bert_f32=, bert_threads=)`・`PredictionResult.decisions` |
 | `momo-bert-train/src/momo_bert_train/step12_rust_eval.py` | Rust の推論経路で w7 と w7＋BERT を dev で比べる |
 | `eval/run_regression.sh` | `MOMO_ARGS` で momo に追加の引数を渡せる |
@@ -172,6 +172,7 @@
 - **int8 は一部を float32 に残す。** 全部を int8 にすると dev が 97.78% → 97.43% に落ちる。出力層と最後の 2 層の FFN 出力（3072→768）を float32 に残すと 97.77% に戻る（106MiB）。前の層を残しても戻らない。
 - **長い行の区切りは句点を探さない。** 510 字の窓を前後 64 字ずつ重ねて機械的に切り、重なりは隣の窓の中央側の結果を使う。文脈は重なりで確保できるので、句点を探す処理は省いた。
 - **飛ばす文字のラベル。** BERT の学習データは、飛ばす文字（「三百二十」の「十」）の正解をその文字自身で表している。読み込み時に、そのラベルを `_` に読み替える。
+- **モデルの既定の場所（2026-10-28）。** `--bert` だけで、.mbm を探す既定のディレクトリ（`MOMO_DATASET_DIR`、無ければ実行ファイルの場所）の下の `momo-bert/` を読む。配布用 zip を展開するとこのディレクトリができる。別の場所は `--bert-dir DIR`。`--model-file` で .mbm を別の場所から読んでも、既定の場所は変わらない。
 - **候補表に無い文字（学習データに出なかった漢字）は LR が読む。** Python の評価では全ラベルの argmax にしていたが、Rust では LR の制約なし argmax と同じ扱いにした。
 
 ### 精度（dev 957 行・漢字スロット 14,706）

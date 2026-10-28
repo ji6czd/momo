@@ -13,10 +13,12 @@ serde_json = "1.0"
 unicode-normalization = "0.1"
 # ONNX Runtime。配布済みのバイナリをビルド時に取得し、DLL を実行ファイルの隣にコピーする。
 # ndarray / tracing は使わないので既定の feature から外す。
+# 取得に使う TLS は rustls にする（ビルド時だけ使う。tls-native だと Linux で OpenSSL の
+# 開発パッケージと pkg-config が要る）。
 ort = { version = "=2.0.0-rc.15", default-features = false, features = [
     "std",
     "download-binaries",
     "copy-dylibs",
-    "tls-native",
+    "tls-rustls",
     "api-31",
 ] }

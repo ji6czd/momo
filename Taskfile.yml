@@ -535,6 +535,7 @@ tasks:
         bumptoml momors/Cargo.toml
         bumptoml momors/crates/momors-esp32/Cargo.toml
         bumptoml momo-train/pyproject.toml
+        bumptoml momo-bert-train/pyproject.toml
         bumptoml momors/crates/momors-pyo3/pyproject.toml
         node -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('vscode-momo/package.json','utf8'));p.version='$V';fs.writeFileSync('vscode-momo/package.json',JSON.stringify(p,null,2)+'\n')"
         sed "s|<Version>[^<]*</Version>|<Version>$V</Version>|" momo-editor/MomoEditor.csproj > momo-editor/MomoEditor.csproj.tmp && mv momo-editor/MomoEditor.csproj.tmp momo-editor/MomoEditor.csproj

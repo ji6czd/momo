@@ -173,6 +173,7 @@
 - **長い行の区切りは句点を探さない。** 510 字の窓を前後 64 字ずつ重ねて機械的に切り、重なりは隣の窓の中央側の結果を使う。文脈は重なりで確保できるので、句点を探す処理は省いた。
 - **飛ばす文字のラベル。** BERT の学習データは、飛ばす文字（「三百二十」の「十」）の正解をその文字自身で表している。読み込み時に、そのラベルを `_` に読み替える。
 - **モデルの既定の場所（2026-10-28）。** `--bert` だけで、.mbm を探す既定のディレクトリ（`MOMO_DATASET_DIR`、無ければ実行ファイルの場所）の下の `momo-bert/` を読む。配布用 zip を展開するとこのディレクトリができる。別の場所は `--bert-dir DIR`。`--model-file` で .mbm を別の場所から読んでも、既定の場所は変わらない。
+- **feature `bert` を既定にした（2026-10-28）。** `momors-cli` と `momors-pyo3` は既定で `momors-bert` を取り込む。ONNX Runtime の配布バイナリが無いターゲット（Milk-V Duo の `riscv64gc-unknown-linux-musl` など）は `--no-default-features` で外す。
 - **候補表に無い文字（学習データに出なかった漢字）は LR が読む。** Python の評価では全ラベルの argmax にしていたが、Rust では LR の制約なし argmax と同じ扱いにした。
 
 ### 精度（dev 957 行・漢字スロット 14,706）
@@ -208,3 +209,5 @@ w7 は train だけで学習したもの、BERT は `work/finetuned/train`（int
 - 第2段階（FFI・C#・エディタ・MSI）。
   - ort は ONNX Runtime を静的に組み込んでいて、`onnxruntime.dll` は出ない。
   - ビルド時に `DirectML.dll` が実行ファイルの隣にコピーされるので、配布に要るかどうかを確かめる。
+    - CPU で動かすだけなら要らない（2026-10-28：`momo.exe` だけを置いたフォルダで `--bert` が動いた）。DirectML を使うときに改めて確かめる。
+  - BERT 入りの `momo.exe` は、`VCRUNTIME140.dll` に加えて `MSVCP140.dll`・`MSVCP140_1.dll`・`VCRUNTIME140_1.dll`（どれも VC++ 再頒布可能パッケージ）を読む。MSI は今も再頒布可能パッケージを同梱していない。

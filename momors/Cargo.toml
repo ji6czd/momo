@@ -13,7 +13,7 @@ members = [
 # momors-pyo3 は maturin 経由でビルドするため通常の cargo build から除外する
 # momors-wasm は wasm-pack 経由でビルドするため通常の cargo build から除外する
 # momors-mobile は cargo-ndk / XCFramework 経由でビルドするため通常の cargo build から除外する
-# momors-bert は ONNX Runtime に依存するため、使う側（CLI の feature `bert` など）が取り込むときだけビルドする
+# momors-bert は CLI が既定の feature `bert` で取り込むので、単体では入れない
 # momors-esp32 は ESP-IDF ターゲット (nightly + build-std) 専用のため、ワークスペース自体から
 # 除外して独自の Cargo.lock / profile を持たせる（docs/esp32p4-plan.md）
 exclude = ["crates/momors-esp32"]

@@ -11,8 +11,9 @@ name = "momors_py"
 crate-type = ["cdylib"]
 
 [features]
-# BERT 読みモード（Predictor(..., bert=DIR)）。ONNX Runtime に依存するので既定では入れない。
-# 評価用の wheel は `uvx maturin build --release --features bert` で作る。
+default = ["bert"]
+# BERT 読みモード（Predictor(..., bert=DIR)）。ONNX Runtime に依存する。
+# 外した wheel は `uvx maturin build --release --no-default-features` で作る。
 bert = ["dep:momors-bert"]
 
 [dependencies]

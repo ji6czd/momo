@@ -76,24 +76,24 @@ uv run export_onnx --name full --no-eval # 実用（全データで学習した�
 - `meta.json` の `basic_raw_sha256` は、学習に使った basic_raw.tsv の SHA-256（改行コードは無視）。`export_data` → `make_kit` → `step9_finetune` の順に引き継がれる。書き出すときに今の basic_raw.tsv と違えば注意が出る（本体の w7 と同じデータから作ったかの確認）。
 - int8 版は、出力層と最後の 2 層の FFN 出力を float32 のまま残す。全部 int8 にすると dev が 0.35pt 落ちるため。
 
-momo 本体で使うには、feature `bert` を付けてビルドする（ONNX Runtime はビルド時に取得される）。
+momo 本体（`momo` / `momo-inspect` / momors_py）は既定で BERT 読みモードを含む（feature `bert`。ONNX Runtime はビルド時に取得される）。
 モデルの既定の場所は、.mbm を探す既定のディレクトリ（`MOMO_DATASET_DIR`、無ければ実行ファイルの場所）の
 下の `momo-bert/`。配布用の zip をそこで展開すればよい（`dataset/momo-bert/` は git の管理外）。
 
 ```bash
 cd ../momors
-cargo build --release -p momors-cli --features bert
+cargo build --release -p momors-cli
 target/release/momo --bert --bert-threads 6 < input.txt          # .mbm と同じ既定のディレクトリの momo-bert/ を読む
 target/release/momo --bert-dir ../momo-bert-train/work/onnx/full < input.txt   # 場所を指定する
 target/release/momo-inspect trace --bert   # 根拠 BERT が出る
 MOMO_BERT_DIR=../momo-bert-train/work/onnx/train cargo test -p momors-bert --release   # 参照 logit と突き合わせる
 ```
 
-Rust の推論経路で w7 と比べるには、feature `bert` 付きの momors_py が要る。
+Rust の推論経路で w7 と比べるには、feature `bert` 付き（既定）の momors_py が要る。
 `pyproject.toml` は `work/wheels/` の wheel を指している。
 
 ```bash
-cd ../momors/crates/momors-pyo3 && uvx maturin build --release --features bert -o ../../../momo-bert-train/work/wheels
+cd ../momors/crates/momors-pyo3 && uvx maturin build --release -o ../../../momo-bert-train/work/wheels
 cd ../../../momo-bert-train
 uv lock --upgrade-package momors-py --refresh-package momors-py && uv sync --reinstall-package momors-py
 uv run step12_rust_eval                  # w7（work/w7_train）と w7＋BERT（work/onnx/train）を dev で比べる

@@ -19,7 +19,9 @@ name = "momo-inspect"
 path = "src/bin/inspect.rs"
 
 [features]
-# BERT 読みモード（--bert）。ONNX Runtime に依存するので既定では入れない。
+default = ["bert"]
+# BERT 読みモード（--bert）。ONNX Runtime に依存する。ONNX Runtime の配布バイナリが無い
+# ターゲット（riscv64gc-unknown-linux-musl など）では --no-default-features で外す。
 bert = ["dep:momors-bert"]
 
 [dependencies]

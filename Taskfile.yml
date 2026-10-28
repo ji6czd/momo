@@ -27,14 +27,14 @@ tasks:
   rust:
     desc: Build Rust workspace (release)
     run: once
+    deps: [rust:gen_tables]
     dir: momors
     cmds:
-      - uv run -p 3.13 tools/gen_char_type_rs.py
-      - uv run -p 3.13 tools/gen_normalize_table.py
       - cargo build --release
 
   rust:gen_tables:
     desc: Generate char_type.rs and normalize_table.rs
+    run: once
     dir: momors
     cmds:
       - uv run -p 3.13 tools/gen_char_type_rs.py

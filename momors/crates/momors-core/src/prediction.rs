@@ -1207,7 +1207,7 @@ impl<M: WeightModel> Predictor<M> {
             }
 
             // ============================================================
-            // 音韻助数詞パス: 「算用数字ラン＋匹/階/本/版/分」の読みを末尾の数字から確定する
+            // 音韻助数詞パス: 「算用数字ラン＋匹/階/本/版/分/世」の読みを末尾の数字から確定する
             //
             // 日/人と違い一桁からも発火する（学習データを桁数分書かずに済ませるのが
             // 狙い）。ゲートは無い（「2024日本」のような衝突語がこれらの助数詞には
@@ -1219,7 +1219,12 @@ impl<M: WeightModel> Predictor<M> {
                 && (i == 0 || source_seq[i - 1].ctype != CharType::Numeric)
                 && let Some((value, run_end)) = arabic_run(&source_seq, i)
                 && run_end < n
-                && let Some(reading) = resolve_phono(source_seq[run_end].cp, value, run_end - i)
+                && let Some(reading) = resolve_phono(
+                    source_seq[run_end].cp,
+                    value,
+                    run_end - i,
+                    source_seq.get(run_end + 1).map(|e| e.cp),
+                )
             {
                 let has_split =
                     self.boundary_has_split(&all_feat_refs[run_end], &source_seq, run_end);

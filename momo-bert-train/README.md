@@ -58,6 +58,7 @@ uv run make_kit                          # データを作り直し、クラウ�
 # クラウドで: uv run step9_finetune [--all-data --name full]
 uv run step10_infer --name train "文"     # 保存したモデルで読みを表示（手元の CPU）
 uv run step11_audit                      # 全データで学習したモデルと注釈の食い違い一覧
+uv run audit_raw                         # 注釈どうしの食い違い一覧（モデルを使わない。--w7・--sudachi も）
 ```
 
 `pyproject.toml` の `[project.scripts]` に登録してあるので、`uv run <名前>` で呼べる。

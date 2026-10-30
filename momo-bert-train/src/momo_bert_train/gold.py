@@ -56,6 +56,7 @@ class Slot:
     ctype: str
     start: int  # 推論入力での開始位置
     end: int
+    space: bool = False  # 注釈でこのスロットの後にマスあけがある（+S）
 
 
 @dataclass
@@ -76,6 +77,7 @@ def parse_gold(line: str, line_num: int = 0) -> GoldSentence:
     slots = []
     for row in rows:
         surface, label, ctype, orig = row.split("\t")[:4]
+        space = "+S" in label
         label = label.replace("+S", "")
         if label == LABEL_CONTINUE:
             gold = ""
@@ -84,5 +86,5 @@ def parse_gold(line: str, line_num: int = 0) -> GoldSentence:
         else:
             gold = label
         start = pos_map[int(orig)]
-        slots.append(Slot(surface, gold, ctype, start, start + len(surface)))
+        slots.append(Slot(surface, gold, ctype, start, start + len(surface), space))
     return GoldSentence(line, text, slots)

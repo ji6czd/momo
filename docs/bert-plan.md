@@ -211,4 +211,8 @@ w7 は train だけで学習したもの、BERT は `work/finetuned/train`（int
   - ort は ONNX Runtime を静的に組み込んでいて、`onnxruntime.dll` は出ない。
   - ビルド時に `DirectML.dll` が実行ファイルの隣にコピーされるので、配布に要るかどうかを確かめる。
     - CPU で動かすだけなら要らない（2026-10-28：`momo.exe` だけを置いたフォルダで `--bert` が動いた）。DirectML を使うときに改めて確かめる。
+    - ただし `DirectML.dll` は遅延読み込みでなく起動時に読む（`--bert` を付けなくても）。上の確認は `System32` の `DirectML.dll`（Windows 10/11 に入っている）で解決していた。
+  - ライセンス文言（2026-10-30）：
+    - ONNX Runtime（MIT）を静的に組み込むので、1.31.0 の `LICENSE` と `ThirdPartyNotices.txt` を `momors-bert/licenses/` に置き、MSI（`licenses/`）と momors-py の wheel（`.dist-info/licenses/`、`task pyo3:sync` が写す）に入れる。ort を上げたら差し替える。
+    - momo-bert の zip には、元のモデルの Apache-2.0 の本文を `LICENSE.txt` として入れる（`export_onnx`）。変更したことの表示は `NOTICE.txt`。元のモデルには NOTICE ファイルが無いので、引き継ぐ帰属表示は無い。
   - BERT 入りの `momo.exe` は、`VCRUNTIME140.dll` に加えて `MSVCP140.dll`・`MSVCP140_1.dll`・`VCRUNTIME140_1.dll`（どれも VC++ 再頒布可能パッケージ）を読む。MSI は今も再頒布可能パッケージを同梱していない。

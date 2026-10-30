@@ -6,7 +6,8 @@ authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]
 requires-python = ">=3.13"
 readme = "README.md"
 license = "BSD-3-Clause"
-license-files = ["LICENSE"]
+# licenses/ は task pyo3:sync が momors-bert から写す ONNX Runtime のライセンス文言（wheel に静的に組み込むため）
+license-files = ["LICENSE", "licenses/*.txt"]
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]

@@ -194,6 +194,18 @@
                                   Source='$(var.StageDir)\licenses\SixBraille-LICENSE.txt'
                                   KeyPath='yes'/>
                         </Component>
+                        <!-- momo.exe に静的に組み込んだ ONNX Runtime（BERT 読みモード）のライセンス文言 -->
+                        <Component Id='OnnxRuntimeLicense' Guid='F7CCC2ED-733F-4D11-89D6-70E1DB28C71F'>
+                            <File Id='OnnxRuntimeLicenseTxt'
+                                  Name='onnxruntime-LICENSE.txt'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\licenses\onnxruntime-LICENSE.txt'
+                                  KeyPath='yes'/>
+                            <File Id='OnnxRuntimeThirdPartyNoticesTxt'
+                                  Name='onnxruntime-ThirdPartyNotices.txt'
+                                  DiskId='1'
+                                  Source='$(var.StageDir)\licenses\onnxruntime-ThirdPartyNotices.txt'/>
+                        </Component>
                     </Directory>
 
                     <Directory Id='Data' Name='data'>
@@ -245,6 +257,7 @@
             <ComponentRef Id='ApplicationShortcut'/>
             <ComponentRef Id='SixBrailleFont'/>
             <ComponentRef Id='SixBrailleLicense'/>
+            <ComponentRef Id='OnnxRuntimeLicense'/>
 
             <Feature
                 Id='EnvironmentPath'

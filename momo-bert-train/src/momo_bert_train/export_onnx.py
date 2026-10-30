@@ -20,8 +20,10 @@ FFN 出力（3072→768）は float32 のまま残す。全部を int8 にする
   reference.jsonl          突き合わせ用。数文分の入力 id と、漢字位置の logit（float32 版の値）
   meta.json                書き出し元、学習に使った basic_raw.tsv のハッシュ、dev の一致率
 work/onnx/momo-bert-<名前>.zip   配布用（GitHub のリリースに `gh release upload <tag>` で上げる）
-  momo-bert/ の下に reading_bert.int8.onnx・labels.json・cands.json・vocab.txt・meta.json・NOTICE.txt
-  （--zip-f32 で reading_bert.onnx も入る）。展開した momo-bert/ を `momo --bert` に渡す。
+  momo-bert/ の下に reading_bert.int8.onnx・labels.json・cands.json・vocab.txt・meta.json・NOTICE.txt・
+  LICENSE.txt（--zip-f32 で reading_bert.onnx も入る）。展開した momo-bert/ を `momo --bert` に渡す。
+  元のモデルは Apache-2.0 なので、再配布にはライセンスの本文（LICENSE.txt）と、変更したことの
+  表示（NOTICE.txt）を添える。
 
 meta.json の basic_raw_sha256 は、モデルを学習したときの basic_raw.tsv の SHA-256（改行コードは
 無視）。momo 本体の w7 と同じ basic_raw.tsv から作ったかを確かめるのに使う。書き出すときに
@@ -54,18 +56,26 @@ REFERENCE_TEXTS = [
 N_REFERENCE_DEV = 4
 
 ZIP_DIR = "momo-bert"  # 配布用 zip の中のディレクトリ名
-ZIP_FILES = ["reading_bert.int8.onnx", "labels.json", "cands.json", "vocab.txt", "meta.json"]
+ZIP_FILES = [
+    "reading_bert.int8.onnx",
+    "labels.json",
+    "cands.json",
+    "vocab.txt",
+    "meta.json",
+]
 NOTICE = f"""momo BERT reading model
 
 This model is a fine-tuned derivative of {DEFAULT_MODEL}
 (https://huggingface.co/{DEFAULT_MODEL}),
 licensed under the Apache License, Version 2.0
-(https://www.apache.org/licenses/LICENSE-2.0).
+(https://www.apache.org/licenses/LICENSE-2.0). A copy of the license is in LICENSE.txt.
 
 Modifications: fine-tuned to predict the readings (kana) of kanji for the momo
 Japanese braille translation project, and converted to ONNX (float32 / int8).
 See meta.json for the training data and the evaluation.
 """
+# Apache License 2.0 の本文（https://www.apache.org/licenses/LICENSE-2.0.txt のまま）
+LICENSE = Path(__file__).with_name("LICENSE-Apache-2.0.txt")
 
 
 class LogitsGraph(nn.Module):
@@ -135,13 +145,16 @@ def write_zip(out: Path, name: str, with_f32: bool) -> Path:
         for f in files:
             z.write(out / f, f"{ZIP_DIR}/{f}")
         z.writestr(f"{ZIP_DIR}/NOTICE.txt", NOTICE)
+        z.write(LICENSE, f"{ZIP_DIR}/LICENSE.txt")
     return path
 
 
 def data_provenance(src: Path) -> dict:
     """微調整モデルの meta と、学習に使った basic_raw.tsv のハッシュ。今のファイルと違えば注意を出す。"""
     meta_path = src / "meta.json"
-    finetune = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    finetune = (
+        json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    )
     trained = finetune.get("data", {}).get("basic_raw_sha256")
     current = raw_digest()
     if trained is None:
@@ -207,7 +220,9 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=0, help="評価のスレッド数（0=既定）")
     ap.add_argument("--no-eval", action="store_true", help="dev での突き合わせを省く")
     ap.add_argument("--no-zip", action="store_true", help="配布用 zip を作らない")
-    ap.add_argument("--zip-f32", action="store_true", help="配布用 zip に float32 版も入れる")
+    ap.add_argument(
+        "--zip-f32", action="store_true", help="配布用 zip に float32 版も入れる"
+    )
     args = ap.parse_args()
 
     src = WORK / "finetuned" / args.name

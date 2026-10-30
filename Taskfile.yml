@@ -386,21 +386,29 @@ tasks:
     vars:
       SRC: "{{.ROOT_DIR}}/dataset"
       DST: "{{.ROOT_DIR}}/momors/crates/momors-pyo3/python/momors_py"
+      # wheel に静的に組み込む ONNX Runtime（feature bert）のライセンス文言。
+      # license-files は pyproject.toml の外を指せないので、クレートの中へ写す。
+      LIC_SRC: "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses"
+      LIC_DST: "{{.ROOT_DIR}}/momors/crates/momors-pyo3/licenses"
     sources:
       - "{{.SRC}}/basic_data_4.mbm"
       - "{{.SRC}}/basic_data_5.mbm"
       - "{{.SRC}}/basic_data_7.mbm"
       - "{{.SRC}}/single_character_dic.tsv"
+      - "{{.LIC_SRC}}/*.txt"
     generates:
       - "{{.DST}}/basic_data_4.mbm"
       - "{{.DST}}/basic_data_5.mbm"
       - "{{.DST}}/basic_data_7.mbm"
       - "{{.DST}}/single_character_dic.tsv"
+      - "{{.LIC_DST}}/*.txt"
     cmds:
       - cp "{{.SRC}}/basic_data_4.mbm" "{{.DST}}/"
       - cp "{{.SRC}}/basic_data_5.mbm" "{{.DST}}/"
       - cp "{{.SRC}}/basic_data_7.mbm" "{{.DST}}/"
       - cp "{{.SRC}}/single_character_dic.tsv" "{{.DST}}/"
+      - mkdir -p "{{.LIC_DST}}"
+      - cp "{{.LIC_SRC}}"/*.txt "{{.LIC_DST}}/"
 
   pyo3:
     desc: Build Python wheel from Rust bindings (maturin)
@@ -447,6 +455,9 @@ tasks:
       # エディタの点字セル表示用フォント（システムインストール）
       - cp "{{.ROOT_DIR}}/momo-installer/fonts/sixbraille.ttc" "{{.STAGE}}/fonts/"
       - cp "{{.ROOT_DIR}}/momo-installer/fonts/LICENSE-SixBraille.txt" "{{.STAGE}}/licenses/SixBraille-LICENSE.txt"
+      # momo.exe に静的に組み込んだ ONNX Runtime（feature bert）のライセンス文言
+      - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-LICENSE.txt" "{{.STAGE}}/licenses/"
+      - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-ThirdPartyNotices.txt" "{{.STAGE}}/licenses/"
 
   dist:msi:
     desc: Build Windows installer (.msi) — requires WiX Toolset v3

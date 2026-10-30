@@ -15,6 +15,9 @@ unicode-normalization = "0.1"
 # ndarray / tracing は使わないので既定の feature から外す。
 # 取得に使う TLS は rustls にする（ビルド時だけ使う。tls-native だと Linux で OpenSSL の
 # 開発パッケージと pkg-config が要る）。
+# ONNX Runtime は実行ファイルに静的に組み込まれるので、配布物には licenses/ のライセンス文言を
+# 添える（rc.15 = ONNX Runtime 1.31.0）。ort を上げたら、その版の LICENSE と ThirdPartyNotices.txt に
+# 差し替える。
 ort = { version = "=2.0.0-rc.15", default-features = false, features = [
     "std",
     "download-binaries",

@@ -77,7 +77,7 @@ uv run export_onnx --name full --no-eval # 実用（全データで学習した�
 ```
 
 - 出力は `reading_bert.onnx`（float32）、`reading_bert.int8.onnx`（int8 動的量子化）、`labels.json`、`cands.json`、`vocab.txt`、`reference.jsonl`（Rust との突き合わせ用）、`meta.json`。
-- 配布用の `work/onnx/momo-bert-<名前>.zip` も作る（中は `momo-bert/`。int8 版・表・語彙・meta・NOTICE。`--zip-f32` で float32 版も入る）。本体のリリースのあと `gh release upload <tag> work/onnx/momo-bert-full.zip` で上げる。
+- 配布用の `work/onnx/momo-bert-<名前>.zip` も作る（中は `momo-bert/`。int8 版・表・語彙・meta・NOTICE・LICENSE（元のモデルの Apache-2.0 の本文）。`--zip-f32` で float32 版も入る）。本体のリリースのあと `gh release upload <tag> work/onnx/momo-bert-full.zip` で上げる。
 - `meta.json` の `basic_raw_sha256` は、学習に使った basic_raw.tsv の SHA-256（改行コードは無視）。`export_data` → `make_kit` → `step9_finetune` の順に引き継がれる。書き出すときに今の basic_raw.tsv と違えば注意が出る（本体の w7 と同じデータから作ったかの確認）。
 - int8 版は、出力層と最後の 2 層の FFN 出力を float32 のまま残す。全部 int8 にすると dev が 0.35pt 落ちるため。
 

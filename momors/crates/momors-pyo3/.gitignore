@@ -2,6 +2,9 @@
 # Force-included into the wheel via [tool.maturin] include.
 python/momors_py/*.mbm
 python/momors_py/single_character_dic.tsv
+# ONNX Runtime license texts copied from ../momors-bert/licenses/ (task pyo3:sync).
+# Listed in pyproject.toml's license-files.
+licenses/
 
 # maturin develop / uv run local artifacts (must also stay out of the
 # sdist: Cargo.toml's include allowlist bypasses .gitignore, so these

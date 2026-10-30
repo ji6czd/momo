@@ -482,7 +482,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "momors-bert"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "momors-core",
  "ort",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "momors-braille"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "momors-cli"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "clap",
  "momors-bert",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "momors-core"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "byteorder",
  "memmap2",
@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "momors-ffi"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "cbindgen",
  "momors-braille",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "momors-mobile"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "momors-braille",
  "momors-core",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "momors-pyo3"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "momors-bert",
  "momors-braille",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "momors-wasm"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "js-sys",
  "momors-braille",

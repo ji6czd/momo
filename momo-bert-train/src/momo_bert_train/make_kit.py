@@ -36,6 +36,7 @@ STEPS = """
   uv run step9_finetune --smoke            # 動作確認
   uv run step9_finetune                    # train で学習・dev で評価
   uv run step9_finetune --all-data --name full
+プリエンプトされたら: VM を起動し直し、同じコマンドを打ち直すと続きから学習する
 手元へ: work/finetuned/<名前>/ を momo-bert-train/work/finetuned/ に置く"""
 
 

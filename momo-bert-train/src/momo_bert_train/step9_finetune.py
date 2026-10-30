@@ -16,9 +16,14 @@ step10_infer.py が手元の CPU で読み込める。
   meta.json     学習の設定と dev の一致率、学習データの meta（basic_raw.tsv のハッシュ）
 
 --all-data では dev も学習に使うので、meta の dev 一致率は学習済みの文での値（評価にならない）。
+
+学習の途中の状態を 5 分ごとと各エポックの終わりに work/finetuned/<名前>/checkpoint.pt に保存する。
+VM がプリエンプトされたら、同じコマンドを打ち直せば続きから学習する（設定かデータが違えば最初から）。
+保存し終えたら消える。meta の秒数は、再開したときは再開してからの時間。
 """
 
 import argparse
+import hashlib
 import json
 import random
 import time
@@ -62,6 +67,12 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--smoke", action="store_true", help="極小モデルで数十行だけ通す")
+    ap.add_argument(
+        "--checkpoint-minutes",
+        type=float,
+        default=5.0,
+        help="途中の状態を保存する間隔（分）",
+    )
     args = ap.parse_args()
 
     train_recs = load_jsonl(str(DATA / "train_full.jsonl"))
@@ -98,6 +109,17 @@ def main() -> None:
         acc = dev_accuracy(model, dev_recs, dev_exs, cands, labels, vocab, args.device)
         return f"dev={acc:.4f}"
 
+    # 続きから再開してよいかの照合に使う（保存先の名前・デバイス・保存間隔は学習の中身に関わらない）
+    digest = hashlib.sha256()
+    for f in ("train_full.jsonl", "dev_full.jsonl"):
+        digest.update((DATA / f).read_bytes())
+    run_key = {
+        k: v
+        for k, v in vars(args).items()
+        if k not in ("name", "device", "checkpoint_minutes")
+    } | {"data": digest.hexdigest()}
+    checkpoint = out_dir / "checkpoint.pt"
+
     t0 = time.time()
     train(
         model,
@@ -110,6 +132,9 @@ def main() -> None:
         seed=args.seed,
         device=args.device,
         on_epoch=diag,
+        checkpoint=checkpoint,
+        run_key=run_key,
+        checkpoint_every=args.checkpoint_minutes * 60,
     )
     acc = dev_accuracy(model, dev_recs, dev_exs, cands, labels, vocab, args.device)
     print(f"dev 漢字スロット一致率 {acc:.4f}（{time.time() - t0:.0f} 秒）", flush=True)
@@ -148,6 +173,7 @@ def main() -> None:
     (out_dir / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    checkpoint.unlink(missing_ok=True)
     print(f"保存先: {out_dir}")
 
 

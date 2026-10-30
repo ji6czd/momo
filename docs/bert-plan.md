@@ -110,6 +110,7 @@
 - **`momors-pyo3`**：
   - feature `bert` を足し、`Predictor(..., bert=<dir>)` を受けるようにする。評価スクリプトから呼ぶため。
   - wheel の更新は memory の手順どおり（`uv lock --upgrade-package momors-py --refresh-package momors-py` と `uv sync --reinstall-package`）。
+    - 2026-10-28 から、momo-bert-train は momors-pyo3 のディレクトリを直接参照し、`uv sync` のときに作る（作り直しは momors-pyo3 の `tool.uv.cache-keys`）。
 
 ## Step 5：評価と速度
 

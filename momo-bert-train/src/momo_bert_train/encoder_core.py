@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import random
 import time
 import unicodedata
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import torch
@@ -280,7 +282,13 @@ def train(
     weight_decay: float = 0.01,
     on_epoch=None,
     log=lambda s: print(s, flush=True),
+    checkpoint: Path | None = None,
+    run_key: dict | None = None,
+    checkpoint_every: float = 300.0,
 ) -> None:
+    """checkpoint を渡すと、エポックの終わりと checkpoint_every 秒ごとに途中の状態を保存し、
+    run_key が同じ保存があればその続きから学習する（クラウドの VM がプリエンプトされても、
+    同じコマンドを打ち直せば続きから）。学習の結果を保存し終えたら、呼び出し側で消す。"""
     exs = [p for e in exs for p in (e.parts if e.parts is not None else [e])]
     exs = [e for e in exs if e.pos]
     table = cands.table.to(device)
@@ -303,13 +311,55 @@ def train(
     sched = get_linear_schedule_with_warmup(opt, int(steps * warmup), steps)
     dtype, scaler = amp_mode(device)
     log(f"  学習 {len(exs)} 行・{steps} ステップ・精度={dtype or 'float32'}")
-    t0 = time.time()
-    for epoch in range(1, epochs + 1):
+
+    def save(epoch: int, k: int, total: float, n: int) -> None:
+        state = {
+            "run_key": run_key,
+            "epoch": epoch,  # この epoch の k 番目の例から続ける
+            "k": k,
+            "total": total,
+            "n": n,
+            "model": model.state_dict(),
+            "opt": opt.state_dict(),
+            "sched": sched.state_dict(),
+            "scaler": scaler.state_dict() if scaler else None,
+            "rng_cpu": torch.get_rng_state(),
+            "rng_cuda": torch.cuda.get_rng_state_all()
+            if torch.cuda.is_available()
+            else None,
+        }
+        # 書いている途中で落ちても前の保存が残るように、別名に書いてから置き換える
+        tmp = checkpoint.with_suffix(".tmp")
+        torch.save(state, tmp)
+        os.replace(tmp, checkpoint)
+
+    start_epoch, start_k, total, n = 1, 0, 0.0, 0
+    if checkpoint is not None and checkpoint.exists():
+        state = torch.load(checkpoint, map_location="cpu")
+        if state["run_key"] == run_key:
+            model.load_state_dict(state["model"])
+            opt.load_state_dict(state["opt"])
+            sched.load_state_dict(state["sched"])
+            if scaler and state["scaler"]:
+                scaler.load_state_dict(state["scaler"])
+            torch.set_rng_state(state["rng_cpu"])
+            if state["rng_cuda"] is not None and torch.cuda.is_available():
+                torch.cuda.set_rng_state_all(state["rng_cuda"])
+            start_epoch, start_k = state["epoch"], state["k"]
+            total, n = state["total"], state["n"]
+            log(
+                f"  {checkpoint.name} から再開（epoch {start_epoch} の {start_k} 例目から）"
+            )
+        else:
+            log(f"  {checkpoint.name} は設定かデータが違うので使わず、最初から学習する")
+        del state
+
+    t0 = last_save = time.time()
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         order = list(range(len(exs)))
         random.Random(seed * 1000 + epoch).shuffle(order)
-        total = n = 0
-        for k in range(0, len(order), batch_size):
+        for k in range(start_k, len(order), batch_size):
             ids, mask, pos_b, pos_t, rows, gold = collate(
                 [exs[i] for i in order[k : k + batch_size]], vocab.pad, device
             )
@@ -332,10 +382,17 @@ def train(
             sched.step()
             total += loss.item() * len(gold)
             n += len(gold)
+            if checkpoint is not None and time.time() - last_save >= checkpoint_every:
+                save(epoch, k + batch_size, total, n)
+                last_save = time.time()
         msg = f"  epoch {epoch}/{epochs} loss={total / n:.4f}（{time.time() - t0:.0f} 秒）"
         if on_epoch:
             msg += " " + on_epoch(epoch)
         log(msg)
+        start_k, total, n = 0, 0.0, 0
+        if checkpoint is not None:
+            save(epoch + 1, 0, 0.0, 0)
+            last_save = time.time()
 
 
 @torch.no_grad()

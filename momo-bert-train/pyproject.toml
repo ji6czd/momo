@@ -1,6 +1,6 @@
 [project]
 name = "momo-bert-train"
-version = "0.1.0"
+version = "0.12.0"
 description = "Fine-tuning and ONNX export of the BERT reading model for momo (momors-bert)"
 readme = "README.md"
 authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]
@@ -31,7 +31,8 @@ step12_rust_eval = "momo_bert_train.step12_rust_eval:main"
 
 [tool.uv.sources]
 momo-train = { path = "../momo-train", editable = true }
-momors-py = { path = "work/wheels/momors_py-0.11.2-cp313-abi3-win_amd64.whl" }
+# uv sync のときに momors-pyo3 から wheel を作る（Rust の変更は momors-pyo3 の cache-keys で拾う）
+momors-py = { path = "../momors/crates/momors-pyo3" }
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]

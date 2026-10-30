@@ -617,7 +617,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "momors-braille"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "momors-core"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "momors-esp32"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "embuild",
  "esp-idf-sys",

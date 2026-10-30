@@ -457,7 +457,7 @@ wheels = [
 
 [[package]]
 name = "momo-bert-train"
-version = "0.1.0"
+version = "0.12.0"
 source = { editable = "." }
 dependencies = [
     { name = "momo-train" },
@@ -473,7 +473,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "momo-train", editable = "../momo-train" },
-    { name = "momors-py", path = "work/wheels/momors_py-0.11.2-cp313-abi3-win_amd64.whl" },
+    { name = "momors-py", directory = "../momors/crates/momors-pyo3" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "onnx", specifier = ">=1.23.2" },
     { name = "onnxruntime", specifier = ">=1.31.1" },
@@ -484,7 +484,7 @@ requires-dist = [
 
 [[package]]
 name = "momo-train"
-version = "0.11.2"
+version = "0.12.0"
 source = { editable = "../momo-train" }
 dependencies = [
     { name = "joblib" },
@@ -508,11 +508,8 @@ dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "momors-py"
-version = "0.11.2"
-source = { path = "work/wheels/momors_py-0.11.2-cp313-abi3-win_amd64.whl" }
-wheels = [
-    { filename = "momors_py-0.11.2-cp313-abi3-win_amd64.whl", hash = "sha256:472ac01dfbcfd3470bf16fe23d0698e1011e7d7a4c6ccad46bc9613f4ca38f0d" },
-]
+version = "0.12.0"
+source = { directory = "../momors/crates/momors-pyo3" }
 
 [[package]]
 name = "mpmath"
@@ -525,11 +522,11 @@ wheels = [
 
 [[package]]
 name = "narwhals"
-version = "2.27.1"
+version = "2.28.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/bf/21/f64d6b2dbea7bf3f8c38cdc786dcc6ef012ca3d173ad208c782c9a7bedf6/narwhals-2.27.1.tar.gz", hash = "sha256:aed93076a3ea42d9c32c88e4eb5ea422a21937011cbe1f480f9572a523c82094", size = 735013, upload-time = "2026-10-10T06:52:18.113Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/43/e11d75a7fb635c6f63dd6e176cb3e050ec2fee35f2f2267b332a6ad351ec/narwhals-2.28.0.tar.gz", hash = "sha256:2d9860c80d6610820826e94c6e42ce4b1d92d89cdd479586e652a8d211dab345", size = 754977, upload-time = "2026-10-27T12:19:33.777Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/89/5d4c86da1130d9059681e5b6cd7645df5c10279a6a079c5c37dcb2cc6f3f/narwhals-2.27.1-py3-none-any.whl", hash = "sha256:d057df13f5852b8e157596e82eb5e955fad267425df5e420e0ee9863da483b31", size = 483211, upload-time = "2026-10-10T06:52:16.32Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/82/8ef9c7e0f50493307a49c09cfa7f00c5a778b6d1921f7b2dabe1d3a5809e/narwhals-2.28.0-py3-none-any.whl", hash = "sha256:1f69d6385ec30e2fa6e1fdeb37c562ecabd0f713f6f3e3b58a668c5c9df9567f", size = 490591, upload-time = "2026-10-27T12:19:31.649Z" },
 ]
 
 [[package]]

@@ -5,6 +5,7 @@
 
 `tools/llm_reading` には依存しない（エンコーダ本体の [src/momo_bert_train/encoder_core.py](src/momo_bert_train/encoder_core.py) は
 そこから引き取ったもの）。必要なのは `momo-train`（データの展開）と `momors-py`（dev に w7 を添えるときだけ）。
+`momors-py` は `uv sync` のときに `../momors/crates/momors-pyo3` から作るので、Rust のツールチェインが要る。
 
 ## データ
 
@@ -61,6 +62,10 @@ uv run step11_audit                      # 全データで学習したモデル�
 
 `pyproject.toml` の `[project.scripts]` に登録してあるので、`uv run <名前>` で呼べる。
 
+step9_finetune は、5 分ごと（`--checkpoint-minutes`）と各エポックの終わりに途中の状態を
+`work/finetuned/<名前>/checkpoint.pt`（重みと AdamW の状態で 1GB 余り）へ保存する。VM がプリエンプトされたら、VM を起動し直して
+同じコマンドを打ち直せば続きから学習する。設定かデータが違えば使わずに最初から学習する。終われば消える。
+
 ## momo 本体の BERT 読みモード（Rust）
 
 微調整モデルを ONNX に書き出し、momo 本体（`momors/crates/momors-bert`）で 1 行ずつ推論する。
@@ -90,12 +95,12 @@ MOMO_BERT_DIR=../momo-bert-train/work/onnx/train cargo test -p momors-bert --rel
 ```
 
 Rust の推論経路で w7 と比べるには、feature `bert` 付き（既定）の momors_py が要る。
-`pyproject.toml` は `work/wheels/` の wheel を指している。
+`pyproject.toml` は `../momors/crates/momors-pyo3` を直接指していて、`uv sync` のときに wheel を作る
+（初回は Rust のビルドが走る）。Rust のソースを変えたら、次の `uv sync`／`uv run` で作り直される。
+作り直しの判断に使うファイルは、momors-pyo3 の pyproject.toml の `tool.uv.cache-keys`。
 
 ```bash
-cd ../momors/crates/momors-pyo3 && uvx maturin build --release -o ../../../momo-bert-train/work/wheels
-cd ../../../momo-bert-train
-uv lock --upgrade-package momors-py --refresh-package momors-py && uv sync --reinstall-package momors-py
+uv sync
 uv run step12_rust_eval                  # w7（work/w7_train）と w7＋BERT（work/onnx/train）を dev で比べる
 ```
 

@@ -1,6 +1,6 @@
 [project]
 name = "momors-py"
-version = "0.11.2"
+version = "0.12.0"
 description = "Python bindings for the MOMO Japanese text-to-Braille engine (Rust backend)"
 authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]
 requires-python = ">=3.13"
@@ -17,3 +17,25 @@ module-name = "momors_py.momors_py"
 python-source = "python"
 features = ["pyo3/extension-module"]
 include = ["python/momors_py/*.mbm"]
+
+# 他のプロジェクトがこのディレクトリを path 依存にしたとき（momo-bert-train など）、
+# uv が作り直すかどうかを決めるファイル。既定は pyproject.toml だけなので、
+# このクレートと取り込むクレートのソース・埋め込みデータを並べる。
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "src/**/*.rs" },
+    { file = "python/momors_py/*.py" },
+    { file = "python/momors_py/*.pyi" },
+    { file = "python/momors_py/*.mbm" },
+    { file = "../momors-core/Cargo.toml" },
+    { file = "../momors-core/src/**/*.rs" },
+    { file = "../momors-braille/Cargo.toml" },
+    { file = "../momors-braille/src/**/*.rs" },
+    { file = "../momors-braille/tables/*.toml" },
+    { file = "../momors-bert/Cargo.toml" },
+    { file = "../momors-bert/src/**/*.rs" },
+    { file = "../../Cargo.toml" },
+    { file = "../../Cargo.lock" },
+]

@@ -41,7 +41,7 @@ pub struct Predictor {
 impl Predictor {
     /// モデルバイト列 (.mbm) からインスタンスを構築する。
     #[wasm_bindgen(constructor)]
-    pub fn new(mbm_data: &[u8]) -> Result<Predictor, JsValue> {
+    pub fn new(#[wasm_bindgen(js_name = mbmData)] mbm_data: &[u8]) -> Result<Predictor, JsValue> {
         let inner = RustPredictor::from_model_bytes(mbm_data)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(Predictor { inner })
@@ -57,7 +57,10 @@ impl Predictor {
     }
 }
 
-/// 予測結果。[`Predictor::predict`] の戻り値。
+/// 予測結果。`Predictor.predict()` の戻り値。
+///
+/// 文字位置はすべてコードポイント単位（`Array.from(source)` / `Array.from(kana)` の添字）。
+/// JS 文字列の添字（UTF-16 単位）とは、サロゲートペアの文字（𠮟・𩸽 など）より後ろでずれる。
 #[wasm_bindgen]
 pub struct PredictionResult {
     source: String,
@@ -106,7 +109,9 @@ impl PredictionResult {
         self.kana.clone()
     }
 
-    /// 各カナ文字の自信度（0.0〜1.0）。
+    /// 各カナ文字の自信度（0.0〜1.0）。`Array.from(kana)` の各要素に対応する。
+    ///
+    /// 参照のたびに新しい配列を作るので、ループ内では変数に受けてから使う。
     #[wasm_bindgen(getter)]
     pub fn confidences(&self) -> Vec<f32> {
         self.confidences.clone()
@@ -124,14 +129,20 @@ impl PredictionResult {
         self.source_segmented.clone()
     }
 
-    /// かな文字インデックス → 原文文字インデックス。
+    /// かなの文字位置 → 原文の文字位置（いずれもコードポイント単位）。
+    ///
+    /// 参照のたびに新しい配列を作るので、ループ内では変数に受けてから使う。
     #[wasm_bindgen(getter, js_name = kanaToSource)]
     pub fn kana_to_source(&self) -> Vec<u32> {
         self.kana_to_source.iter().map(|&x| x as u32).collect()
     }
 
-    /// 原文文字インデックス → かな文字インデックスの配列（配列の配列）。
-    #[wasm_bindgen(getter, js_name = sourceToKana)]
+    /// 原文の文字位置 → かなの文字位置の配列（いずれもコードポイント単位）。
+    ///
+    /// 原文 1 文字が複数のかなに対応しうるため配列の配列になる。
+    /// 参照のたびに外側・内側の配列をすべて作り直すので、ループ内では変数に受けてから使う。
+    // js_sys::Array のままだと d.ts が `Array<any>` になるので、実際の型を明示する。
+    #[wasm_bindgen(getter, js_name = sourceToKana, unchecked_return_type = "Uint32Array[]")]
     pub fn source_to_kana(&self) -> js_sys::Array {
         nested_usize_to_js(&self.source_to_kana)
     }
@@ -144,7 +155,7 @@ impl PredictionResult {
 /// 点訳器。読み（かな／英文）を点字に変換する。行の言語を判定して日本語／英語へ振り分ける。
 ///
 /// 入力は**読みに変換済みのテキスト**（日本語ならカナ）。漢字かな交じり文はまず
-/// [`Predictor::predict`] でカナにしてから渡す。
+/// `Predictor.predict()` でカナにしてから渡す。
 ///
 /// ```js
 /// const t = new BrailleTranslator();
@@ -195,10 +206,21 @@ impl BrailleTranslator {
     }
 }
 
-/// 点字変換結果。[`BrailleTranslator::translate`] 等の戻り値。
+/// 点訳した経路。`BrailleResult.language` の値。
+#[wasm_bindgen]
+#[derive(Clone, Copy)]
+pub enum BrailleLanguage {
+    Japanese = "japanese",
+    English = "english",
+}
+
+/// 点字変換結果。`BrailleTranslator.translate()` 等の戻り値。
+///
+/// テキスト側の文字位置はコードポイント単位（`Array.from(text)` の添字）。点字セルは
+/// すべて BMP 内（U+2800 台）なので、セル位置は `braille` の添字（UTF-16 単位）と一致する。
 #[wasm_bindgen]
 pub struct BrailleResult {
-    language: String,
+    language: BrailleLanguage,
     text: String,
     braille: String,
     text_to_braille: Vec<usize>,
@@ -209,8 +231,8 @@ impl BrailleResult {
     fn from_rust(r: RustBrailleResult) -> Self {
         Self {
             language: match r.language() {
-                Language::Japanese => "japanese".to_string(),
-                Language::English => "english".to_string(),
+                Language::Japanese => BrailleLanguage::Japanese,
+                Language::English => BrailleLanguage::English,
             },
             text: r.text().to_string(),
             braille: r.braille_text().to_string(),
@@ -224,8 +246,8 @@ impl BrailleResult {
 impl BrailleResult {
     /// 点訳した経路（`"japanese"` / `"english"`）。
     #[wasm_bindgen(getter)]
-    pub fn language(&self) -> String {
-        self.language.clone()
+    pub fn language(&self) -> BrailleLanguage {
+        self.language
     }
 
     /// 点訳したテキスト（日本語=かな / 英語=英文）。
@@ -240,13 +262,17 @@ impl BrailleResult {
         self.braille.clone()
     }
 
-    /// テキスト文字インデックス → 点字先頭セルインデックス。
+    /// テキストの文字位置 → 対応する点字の先頭セル位置。
+    ///
+    /// 参照のたびに新しい配列を作るので、ループ内では変数に受けてから使う。
     #[wasm_bindgen(getter, js_name = textToBraille)]
     pub fn text_to_braille(&self) -> Vec<u32> {
         self.text_to_braille.iter().map(|&x| x as u32).collect()
     }
 
-    /// 点字セルインデックス → テキスト文字インデックス。
+    /// 点字のセル位置 → テキストの文字位置。
+    ///
+    /// 参照のたびに新しい配列を作るので、ループ内では変数に受けてから使う。
     #[wasm_bindgen(getter, js_name = brailleToText)]
     pub fn braille_to_text(&self) -> Vec<u32> {
         self.braille_to_text.iter().map(|&x| x as u32).collect()
@@ -259,7 +285,7 @@ impl BrailleResult {
 
 /// 点字をかな・記号・数字・ラテン文字に逆変換する。
 ///
-/// 順変換 [`BrailleTranslator`] と異なりモデル（.mbm）不要で、組み込みテーブルのみで動作する。
+/// 順変換 `BrailleTranslator` と異なりモデル（.mbm）不要で、組み込みテーブルのみで動作する。
 ///
 /// ```js
 /// const bt = new BrailleBackTranslator();
@@ -301,8 +327,8 @@ impl BrailleBackTranslator {
     /// 点字 1 セルを逐次逆変換する（エディタでの逐次入力向け）。
     ///
     /// `cell` は点字 1 セル分の文字列（先頭の 1 文字のみ使用）。
-    /// 行頭では [`BackTransState::new`] の初期状態を渡し、以降は返り値の
-    /// [`StepResult::state`] を次回呼び出しに渡して、数符・外字符・濁音前置
+    /// 行頭では `new BackTransState()` の初期状態を渡し、以降は返り値の
+    /// `StepResult.state` を次回呼び出しに渡して、数符・外字符・濁音前置
     /// などの行内状態を引き継ぐ。前置セル（濁音など）の直後は `text` が空になる
     /// ことがある（次のセルと結合して確定するまで保留されるため）。
     pub fn step(&self, cell: &str, state: &BackTransState) -> Result<StepResult, JsValue> {
@@ -319,7 +345,7 @@ impl BrailleBackTranslator {
 
     /// 行末で呼び、保留中のセル（結合待ちの前置セルなど）を確定させる。
     ///
-    /// [`BackTransState::isSettled`] が `false` のまま行が終わる場合に呼ぶ。
+    /// `BackTransState.isSettled()` が `false` のまま行が終わる場合に呼ぶ。
     pub fn flush(&self, state: &BackTransState) -> StepResult {
         let result = self.inner.flush(state.inner);
         StepResult {
@@ -329,7 +355,7 @@ impl BrailleBackTranslator {
     }
 }
 
-/// [`BrailleBackTranslator::step`] / [`BrailleBackTranslator::flush`] が引き継ぐ行内状態。
+/// `BrailleBackTranslator.step()` / `flush()` が引き継ぐ行内状態。
 ///
 /// 不透明なハンドル。JS 側は中身を参照せず、次回の `step`/`flush` にそのまま渡す。
 #[wasm_bindgen]
@@ -361,7 +387,7 @@ impl Default for BackTransState {
     }
 }
 
-/// [`BrailleBackTranslator::step`] / [`BrailleBackTranslator::flush`] の結果。
+/// `BrailleBackTranslator.step()` / `flush()` の結果。
 #[wasm_bindgen]
 pub struct StepResult {
     text: String,
@@ -383,7 +409,24 @@ impl StepResult {
     }
 }
 
-/// [`BrailleBackTranslator::back_translate_aligned`] の結果。
+#[wasm_bindgen(typescript_custom_section)]
+const BACK_TRANS_SEGMENT_TS: &str = r#"
+/**
+ * 点字セル範囲 → 復元文字列の対応。`BackTransResult.segments` の要素。
+ *
+ * セル位置は `braille` の添字（点字セルはすべて BMP 内なので UTF-16 単位と一致する）。
+ */
+export interface BackTransSegment {
+    /** 対応する点字セル範囲の先頭（この位置を含む）。 */
+    cellStart: number;
+    /** 対応する点字セル範囲の終端（この位置を含まない）。 */
+    cellEnd: number;
+    /** このセル範囲から復元された文字列。 */
+    text: string;
+}
+"#;
+
+/// `BrailleBackTranslator.backTranslateAligned()` の結果。
 #[wasm_bindgen]
 pub struct BackTransResult {
     text: String,
@@ -398,8 +441,10 @@ impl BackTransResult {
         self.text.clone()
     }
 
-    /// 点字セル範囲 → 文字列のセグメント列。各要素は `{ cellStart, cellEnd, text }`。
-    #[wasm_bindgen(getter)]
+    /// 点字セル範囲 → 文字列のセグメント列。範囲は半開区間 `[cellStart, cellEnd)`。
+    ///
+    /// 参照のたびに新しい配列とオブジェクトを作るので、ループ内では変数に受けてから使う。
+    #[wasm_bindgen(getter, unchecked_return_type = "BackTransSegment[]")]
     pub fn segments(&self) -> js_sys::Array {
         let out = js_sys::Array::new();
         for seg in &self.segments {

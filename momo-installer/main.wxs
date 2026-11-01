@@ -2,6 +2,11 @@
 <!--
   $(var.Version)   - バージョン番号 (例: 0.1.0)。candle に -dVersion=x.y.z で渡す。
   $(var.StageDir)  - ステージングディレクトリ (stage/)。candle に -dStageDir=<path> で渡す。
+  $(var.WithBert)  - 定義すると BERT 読みモードのモデル (stage\data\momo-bert\) を入れた版になる。
+                     candle に -dWithBert=yes で渡す。モデルが大きいので通常版には入れない。
+
+  通常版と BERT 版は同じ製品の別の版として UpgradeCode を共有する。同じフォルダに同じ
+  コンポーネントを入れるので、両方が同時に入ることはなく、入れた方がもう一方を置き換える。
 -->
 <?if $(sys.BUILDARCH) = x64 or $(sys.BUILDARCH) = arm64 ?>
     <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
@@ -9,11 +14,17 @@
     <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
 <?endif ?>
 
+<?ifdef WithBert ?>
+    <?define ProductName = "Momo（BERT 読みモード付き）" ?>
+<?else ?>
+    <?define ProductName = "Momo" ?>
+<?endif ?>
+
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
 
     <Product
         Id='*'
-        Name='Momo'
+        Name='$(var.ProductName)'
         UpgradeCode='B4C7E921-3F5A-4D8B-9E1C-6A2D8F0B4E73'
         Manufacturer='KIRIAKE Masanori'
         Language='1041'
@@ -30,8 +41,12 @@
             SummaryCodepage='932'
             />
 
+        <!-- AllowSameVersionUpgrades: 同じバージョンの通常版と BERT 版を入れ替えられるようにする。
+             ProductCode はビルドごとに変わるので、これが無いと同じバージョンの別の版が
+             取り除かれずに両方とも入ってしまう。 -->
         <MajorUpgrade
             Schedule='afterInstallInitialize'
+            AllowSameVersionUpgrades='yes'
             DowngradeErrorMessage='新しいバージョンの [ProductName] がすでにインストールされています。'/>
 
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes'/>
@@ -233,6 +248,30 @@
                                 Action='set'
                                 System='yes'/>
                         </Component>
+                        <?ifdef WithBert ?>
+                        <!-- BERT 読みモードのモデル（momo-bert-*.zip を展開したものと同じ構成）。
+                             BERT 読みモードは MOMO_DATASET_DIR の下の momo-bert\ を既定で読む。
+                             float32 版 (reading_bert.onnx) は大きいので入れない。
+                             LICENSE.txt / NOTICE.txt は元のモデル (Apache-2.0) のもの。 -->
+                        <Directory Id='BertDir' Name='momo-bert'>
+                            <Component Id='BertModel' Guid='703E844D-D3BC-4FA5-9525-79790E0F03E9'>
+                                <File Id='BertOnnxInt8' Name='reading_bert.int8.onnx' DiskId='1'
+                                      Source='$(var.StageDir)\data\momo-bert\reading_bert.int8.onnx' KeyPath='yes'/>
+                                <File Id='BertLabels' Name='labels.json' DiskId='1'
+                                      Source='$(var.StageDir)\data\momo-bert\labels.json'/>
+                                <File Id='BertCands' Name='cands.json' DiskId='1'
+                                      Source='$(var.StageDir)\data\momo-bert\cands.json'/>
+                                <File Id='BertVocab' Name='vocab.txt' DiskId='1'
+                                      Source='$(var.StageDir)\data\momo-bert\vocab.txt'/>
+                                <File Id='BertMeta' Name='meta.json' DiskId='1'
+                                      Source='$(var.StageDir)\data\momo-bert\meta.json'/>
+                                <File Id='BertLicense' Name='LICENSE.txt' DiskId='1'
+                                      Source='$(var.StageDir)\data\momo-bert\LICENSE.txt'/>
+                                <File Id='BertNotice' Name='NOTICE.txt' DiskId='1'
+                                      Source='$(var.StageDir)\data\momo-bert\NOTICE.txt'/>
+                            </Component>
+                        </Directory>
+                        <?endif ?>
                     </Directory>
 
                 </Directory>
@@ -276,6 +315,17 @@
                 Absent='allow'>
                 <ComponentRef Id='FileAssociationMbr'/>
             </Feature>
+
+            <?ifdef WithBert ?>
+            <Feature
+                Id='BertReading'
+                Title='BERT 読みモード'
+                Description='momo コマンドの BERT 読みモード (--bert) で使うモデルをインストールします。漢字の読みを文脈から推論します。'
+                Level='1'
+                Absent='allow'>
+                <ComponentRef Id='BertModel'/>
+            </Feature>
+            <?endif ?>
 
         </Feature>
 

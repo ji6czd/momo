@@ -459,27 +459,69 @@ tasks:
       - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-LICENSE.txt" "{{.STAGE}}/licenses/"
       - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-ThirdPartyNotices.txt" "{{.STAGE}}/licenses/"
 
+  dist:stage:bert:
+    desc: Stage the BERT model (dataset/momo-bert/) for the BERT edition installer (after dist:stage)
+    vars:
+      STAGE: "{{.ROOT_DIR}}/momo-installer/stage"
+      # momo-bert-*.zip を dataset/ に展開したもの（momo --bert の既定の場所と同じ）
+      SRC: "{{.ROOT_DIR}}/dataset/momo-bert"
+    preconditions:
+      - sh: '[ -f "{{.SRC}}/reading_bert.int8.onnx" ]'
+        msg: "{{.SRC}} に BERT モデルがありません（momo-bert-*.zip を dataset/ に展開してください）"
+    cmds:
+      - mkdir -p "{{.STAGE}}/data/momo-bert"
+      # float32 版（reading_bert.onnx）は大きいので入れない
+      - cp "{{.SRC}}/reading_bert.int8.onnx" "{{.STAGE}}/data/momo-bert/"
+      - cp "{{.SRC}}/labels.json"            "{{.STAGE}}/data/momo-bert/"
+      - cp "{{.SRC}}/cands.json"             "{{.STAGE}}/data/momo-bert/"
+      - cp "{{.SRC}}/vocab.txt"              "{{.STAGE}}/data/momo-bert/"
+      - cp "{{.SRC}}/meta.json"              "{{.STAGE}}/data/momo-bert/"
+      - cp "{{.SRC}}/LICENSE.txt"            "{{.STAGE}}/data/momo-bert/"
+      - cp "{{.SRC}}/NOTICE.txt"             "{{.STAGE}}/data/momo-bert/"
+
   dist:msi:
     desc: Build Windows installer (.msi) — requires WiX Toolset v3
-    vars:
-      VERSION:
-        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
-      STAGE: "{{.ROOT_DIR}}/momo-installer/stage"
-      WXS: "{{.ROOT_DIR}}/momo-installer/main.wxs"
-      OBJ: "{{.ROOT_DIR}}/momo-installer/momo.wixobj"
-      OUT: "{{.ROOT_DIR}}/dist"
     deps:
       - rust
     cmds:
       - task: gui
       - task: editor
       - task: dist:stage
+      - task: dist:wix
+
+  dist:msi:bert:
+    desc: Build Windows installer with the BERT model (-bert.msi) — requires WiX Toolset v3 and dataset/momo-bert/
+    deps:
+      - rust
+    cmds:
+      - task: gui
+      - task: editor
+      - task: dist:stage
+      - task: dist:stage:bert
+      - task: dist:wix
+        vars:
+          BERT: "yes"
+
+  dist:wix:
+    # dist:msi / dist:msi:bert から呼ぶ。BERT を渡すと main.wxs の WithBert を定義した版を作る。
+    internal: true
+    vars:
+      VERSION:
+        sh: grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/'
+      STAGE: "{{.ROOT_DIR}}/momo-installer/stage"
+      WXS: "{{.ROOT_DIR}}/momo-installer/main.wxs"
+      SUFFIX: '{{if .BERT}}-bert{{end}}'
+      OBJ: "{{.ROOT_DIR}}/momo-installer/momo{{.SUFFIX}}.wixobj"
+      OUT: "{{.ROOT_DIR}}/dist"
+    cmds:
       - mkdir -p "{{.OUT}}"
-      - candle -arch x64 "-dVersion={{.VERSION}}" "-dStageDir={{.STAGE}}" -out "{{.OBJ}}" "{{.WXS}}"
+      - candle -arch x64 "-dVersion={{.VERSION}}" "-dStageDir={{.STAGE}}" {{if .BERT}}-dWithBert=yes{{end}} -out "{{.OBJ}}" "{{.WXS}}"
       # ICE69: FileAssociationMbr が [#MomoEditorExe] を参照する。ICE69 はフィーチャ間の
       # [#File] 参照を一律に弾くが、FileAssociation は Application の子フィーチャなので
       # MomoEditor.exe は必ず同時にインストールされる。誤検知のため抑止する。
-      - light -ext WixUIExtension -sice:ICE69 -loc "C:/Program Files (x86)/WiX Toolset v3.14/SDK/wixui/WixUI_ja-jp.wxl" -out "{{.OUT}}/Momo-{{.VERSION}}-x64.msi" "{{.OBJ}}"
+      # ICE61: 同じバージョンも置き換える（AllowSameVersionUpgrades）と出る警告。
+      # 同じバージョンの通常版と BERT 版を入れ替えるための意図した設定なので抑止する。
+      - light -ext WixUIExtension -sice:ICE69 -sice:ICE61 -loc "C:/Program Files (x86)/WiX Toolset v3.14/SDK/wixui/WixUI_ja-jp.wxl" -out "{{.OUT}}/Momo-{{.VERSION}}-x64{{.SUFFIX}}.msi" "{{.OBJ}}"
 
   dist:pyo3:
     desc: Build Python wheel and copy to dist/

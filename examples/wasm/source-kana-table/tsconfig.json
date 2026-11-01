@@ -1,0 +1,14 @@
+{
+  // 型検査専用（pnpm check）。実行は Node の型除去で main.ts を直接走らせる。
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "files": ["main.ts"]
+}

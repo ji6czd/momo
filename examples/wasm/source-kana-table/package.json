@@ -1,0 +1,20 @@
+{
+  "name": "momo-wasm-source-kana-table",
+  "private": true,
+  "description": "MOMO (momors-wasm) で原文とかなの文字対応表を表示するサンプル",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node main.ts",
+    "check": "tsc"
+  },
+  "dependencies": {
+    "momors-wasm": "link:../../../dist/sdk/wasm/pkg"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

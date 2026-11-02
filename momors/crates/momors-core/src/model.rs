@@ -501,7 +501,10 @@ mod tests {
         // version 0x09: feature_id はセクション順・キー順の通し番号になる。
         let mut b = crate::vocab::VocabBuilder::new();
         for (ft, keys) in [
-            (FeatureType::Bias, vec![FeatureKey::no_payload(FeatureType::Bias)]),
+            (
+                FeatureType::Bias,
+                vec![FeatureKey::no_payload(FeatureType::Bias)],
+            ),
             (
                 FeatureType::TypeSelf,
                 vec![FeatureKey::type_1(FeatureType::TypeSelf, CharType::Kanji)],
@@ -514,7 +517,8 @@ mod tests {
                 ],
             ),
         ] {
-            b.begin_section(ft, keys.len() as u32, NO_CAT_COLUMN, 0).unwrap();
+            b.begin_section(ft, keys.len() as u32, NO_CAT_COLUMN, 0)
+                .unwrap();
             for k in &keys {
                 b.push_key(crate::vocab::pack_key(k)).unwrap();
             }

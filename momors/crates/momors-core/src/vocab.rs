@@ -363,9 +363,12 @@ impl VocabBuilder {
 
     /// 開いているセクションに詰めたキーを 1 個積む。狭義昇順であること。
     pub(crate) fn push_key(&mut self, packed: u64) -> Result<()> {
-        let sec = self.sections.last_mut().ok_or_else(|| Error::CorruptModel {
-            reason: "統合語彙のセクションを開く前にキーが現れました".to_string(),
-        })?;
+        let sec = self
+            .sections
+            .last_mut()
+            .ok_or_else(|| Error::CorruptModel {
+                reason: "統合語彙のセクションを開く前にキーが現れました".to_string(),
+            })?;
         if let Some(&last) = sec.keys.last()
             && packed <= last
         {
@@ -516,8 +519,14 @@ mod tests {
         }
 
         // 未登録のキーと、セクションごと存在しないタイプ
-        assert!(v.resolve(&cp_key(FeatureType::CharSelf, &[0x3048])).is_none());
-        assert!(v.resolve(&cp_key(FeatureType::CharNext1, &[0x3042])).is_none());
+        assert!(
+            v.resolve(&cp_key(FeatureType::CharSelf, &[0x3048]))
+                .is_none()
+        );
+        assert!(
+            v.resolve(&cp_key(FeatureType::CharNext1, &[0x3042]))
+                .is_none()
+        );
     }
 
     #[test]

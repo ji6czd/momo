@@ -1,6 +1,6 @@
 [project]
 name = "momo-bert-train"
-version = "0.12.0"
+version = "0.12.1"
 description = "Fine-tuning and ONNX export of the BERT reading model for momo (momors-bert)"
 readme = "README.md"
 authors = [{ name = "KIRIAKE Masanori", email = "seiken@rd01.net" }]

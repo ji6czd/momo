@@ -25,15 +25,15 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.12.1"
+version = "0.12.2"
 edition = "2024"
 authors = ["KIRIAKE Masanori <seiken@rd01.net>"]
 license = "BSD-3-Clause"
 
 [workspace.dependencies]
-thiserror = "1.0"
+thiserror = "2.0"
 clap = { version = "4", features = ["derive"] }
 byteorder = "1.5"
-momors-core = { path = "crates/momors-core"}
-momors-braille = { path = "crates/momors-braille"}
-momors-bert = { path = "crates/momors-bert"}
+momors-core = { path = "crates/momors-core" }
+momors-braille = { path = "crates/momors-braille" }
+momors-bert = { path = "crates/momors-bert" }

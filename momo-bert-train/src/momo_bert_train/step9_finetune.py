@@ -6,7 +6,7 @@ step10_infer.py が手元の CPU で読み込める。
 
     uv run python -m momo_bert_train.step9_finetune --smoke                  # 動作確認（極小モデル・数十行）
     uv run python -m momo_bert_train.step9_finetune                          # train で学習し、dev で評価して保存
-    uv run python -m momo_bert_train.step9_finetune --all-data --name full   # train+dev の全データで学習して保存
+    uv run python -m momo_bert_train.step9_finetune --all-data               # train+dev の全データで学習して保存
     uv run python -m momo_bert_train.step9_finetune --boundary               # 読みと境界（マスあけ）を同時に学習
     uv run python -m momo_bert_train.step9_finetune --boundary --fragments 1 # 境界の学習に行の断片も足す
 

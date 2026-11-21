@@ -4,7 +4,8 @@
 
 basic_raw.tsv から学習データ（work/data/）を作り直してから詰めるので、キットは常に最新のデータになる。
 中身: pyproject（torch・transformers・numpy）、src/momo_bert_train/（common・encoder_core・step9_finetune）、
-work/data/（train_full.jsonl・dev_full.jsonl・meta.json）。出力: work/bert_kit.zip。作ったあとの手順も表示する。
+work/data/（train_full.jsonl・dev_full.jsonl・meta.json）、train_all.sh（6 本をまとめて回す）。
+出力: work/bert_kit.zip。作ったあとの手順も表示する。
 """
 
 import zipfile
@@ -33,14 +34,11 @@ STEPS = """
   unzip bert_kit.zip -d bert_kit && cd bert_kit
   curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.local/bin/env
   uv sync
-  uv run step9_finetune --smoke --boundary --fragments 1   # 動作確認（同時学習＋断片）
-  uv run step9_finetune --boundary --fragments 1           # train で学習・dev で評価 → train_joint_frag
-  uv run step9_finetune --all-data --boundary --fragments 1  # 全データで学習        → full_joint_frag
-ほかの組み合わせ（今回は不要）:
-  uv run step9_finetune [--all-data]             # 読みだけ        → train / full
-  uv run step9_finetune [--all-data] --boundary  # 同時学習（断片なし）→ train_joint / full_joint
-プリエンプトされたら: VM を起動し直し、同じコマンドを打ち直すと続きから学習する
-手元へ: work/finetuned/<名前>/ を momo-bert-train/work/finetuned/ に置く"""
+  bash train_all.sh     # 動作確認のあと 6 本を順に: train_joint_frag・full_joint_frag・train・full・
+                        # train_joint・full_joint（train_* は dev で評価、full_* は全データで学習）
+1 本ずつなら: uv run step9_finetune [--all-data] [--boundary [--fragments 1]]
+プリエンプトされたら: VM を起動し直し、同じコマンドを打ち直すと続きから学習する（済んだものは飛ばす）
+手元へ: finetuned.tar を展開し、finetuned/ の中身を momo-bert-train/work/finetuned/ に置く"""
 
 
 def main() -> None:
@@ -60,6 +58,9 @@ def main() -> None:
             z.write(PKG_ROOT / "src" / PKG / name, f"src/{PKG}/{name}")
         for name in ("train_full.jsonl", "dev_full.jsonl", "meta.json"):
             z.write(DATA / name, f"work/data/{name}")
+        # Linux で動かすので、改行は LF にそろえる
+        script = (PKG_ROOT / "train_all.sh").read_text(encoding="utf-8")
+        z.writestr("train_all.sh", script.replace("\r\n", "\n"))
     print(f"{out}（{out.stat().st_size / 1e6:.1f} MB）")
     print(STEPS)
 

@@ -34,6 +34,7 @@ class Predictor:
         bert: str | None = None,
         bert_f32: bool = False,
         bert_threads: int = 0,
+        bert_boundary: bool = True,
     ) -> None:
         """モデルファイルを読み込んで予測器を作成する。
 
@@ -47,6 +48,8 @@ class Predictor:
                 wheel だけが受け付ける
             bert_f32: BERT を float32 版で動かす（既定は int8 版）
             bert_threads: BERT の演算スレッド数（0 は ONNX Runtime の既定）
+            bert_boundary: 境界も学習した BERT モデルなら、マスあけも BERT で決める
+                （偽なら BERT は読みだけに使い、マスあけは境界モデルで決める）
         """
         ...
 

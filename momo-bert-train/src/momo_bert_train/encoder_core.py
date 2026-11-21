@@ -11,6 +11,13 @@ step6〜11 と、クラウドのキット（step9_finetune）が使う。momo_tr
 - 分類は「その文字の辞書候補だけに絞った softmax」。辞書は学習に使う行だけから作る
   （Candidates）。学習時も推論時も同じ絞り込みをかける。辞書にない文字は、学習に出た全ラベルの
   argmax にフォールバックする。
+
+境界（マスあけ）の同時学習（ReadingModel(boundary=True)）:
+- 境界の出力層（隠れ状態 → 1）を足し、BERT 本体を読みと共有する。BERT は 1 回通すだけで両方が出る。
+- 切れ目は隣り合うスロットの間。その切れ目の直前の字（スロットの最後の字）の位置で、そこで
+  マスをあけるか（注釈の +S）を当てる。momo の境界モデルがスロットの最後の字で問うのと同じ。
+- 行末と、原文の空白をはさむ切れ目は使わない（どちらも momo が原文どおりに扱う）。
+- 漢字の無い行も、境界の学習には使う。
 """
 
 from __future__ import annotations
@@ -21,7 +28,7 @@ import os
 import random
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,6 +51,9 @@ class Slot:
     ctype: str
     start: int
     end: int
+    space: bool = (
+        False  # 注釈でこのスロットの後にマスあけがある（+S）。古いデータには無い
+    )
 
 
 class Rec(SimpleNamespace):
@@ -164,6 +174,11 @@ class Example:
     gold: list[int]  # 正解のラベル番号（表にない読みは -1）
     # 窓つき(window > 0)のときの、スロットごとの短い入力。predict / train はこちらを流す
     parts: list["Example"] | None = None
+    # 境界の切れ目: 切れ目の直前の字のトークン位置と、そこでマスをあけるか（1 / 0）。
+    # 窓つきの部品には付けない
+    bpos: list[int] = field(default_factory=list)
+    bgold: list[int] = field(default_factory=list)
+    bslot: list[int] = field(default_factory=list)  # 切れ目の直前のスロットの番号
 
 
 def make_example(
@@ -191,6 +206,15 @@ def make_example(
             ex.slot.append(i)
             ex.rows.append(cands.row(s.surface))
             ex.gold.append(labels.id.get(s.gold, -1))
+    for i, (a, b) in enumerate(zip(rec.slots, rec.slots[1:])):
+        # 原文の空白をはさむ切れ目は、momo が原文どおりに残すので使わない
+        if rec.text[a.end : b.start] or a.surface.isspace() or b.surface.isspace():
+            continue
+        if off + b.start >= len(ids) - 1:  # 次の字が切り詰めで入っていない
+            break
+        ex.bpos.append(off + a.end - 1)
+        ex.bgold.append(int(a.space))
+        ex.bslot.append(i)
     if not window:
         return ex
     chars = vocab.encode(context + rec.text)
@@ -211,18 +235,56 @@ def make_examples(recs, vocab, labels, cands, window: int = 0) -> list[Example]:
 
 
 class ReadingModel(nn.Module):
-    def __init__(self, encoder: BertModel, n_labels: int, dropout: float = 0.1):
+    """BERT 本体と読みの出力層。boundary=True なら、境界（その字の後でマスをあけるか）の出力層も持つ。
+
+    境界の出力層の無いモデルは、state_dict が従来のものと同じ（古い model.pt をそのまま読める）。
+    """
+
+    def __init__(
+        self,
+        encoder: BertModel,
+        n_labels: int,
+        dropout: float = 0.1,
+        boundary: bool = False,
+    ):
         super().__init__()
         self.encoder = encoder
         self.drop = nn.Dropout(dropout)
         self.head = nn.Linear(encoder.config.hidden_size, n_labels)
+        self.boundary_head = (
+            nn.Linear(encoder.config.hidden_size, 1) if boundary else None
+        )
+
+    def encode(self, ids, mask):
+        return self.encoder(input_ids=ids, attention_mask=mask).last_hidden_state
 
     def forward(self, ids, mask, pos_b, pos_t):
-        h = self.encoder(input_ids=ids, attention_mask=mask).last_hidden_state
-        return self.head(self.drop(h[pos_b, pos_t]))
+        return self.head(self.drop(self.encode(ids, mask)[pos_b, pos_t]))
+
+    def forward_joint(self, ids, mask, pos_b, pos_t, bpos_b, bpos_t):
+        """読みの logit（対象スロットの位置）と、境界の logit（切れ目の位置）を、BERT 1 回で返す。"""
+        h = self.encode(ids, mask)
+        read = self.head(self.drop(h[pos_b, pos_t]))
+        bnd = self.boundary_head(self.drop(h[bpos_b, bpos_t])).squeeze(-1)
+        return read, bnd
 
 
-def build_model(model_name: str, n_labels: int, vocab: CharVocab) -> ReadingModel:
+def load_finetuned(d: Path, n_labels: int) -> ReadingModel:
+    """step9_finetune が保存したモデル（d/encoder.json・d/model.pt）を読む。境界の出力層があればそれも。"""
+    cfg = BertConfig.from_json_file(str(d / "encoder.json"))
+    state = torch.load(d / "model.pt", map_location="cpu")
+    model = ReadingModel(
+        BertModel(cfg, add_pooling_layer=False),
+        n_labels,
+        boundary="boundary_head.weight" in state,
+    )
+    model.load_state_dict(state)
+    return model.eval()
+
+
+def build_model(
+    model_name: str, n_labels: int, vocab: CharVocab, boundary: bool = False
+) -> ReadingModel:
     if model_name == "tiny":  # 動作確認用: 重みを落とさず、極小の乱数初期化で通す
         cfg = BertConfig(
             vocab_size=vocab.size,
@@ -235,7 +297,7 @@ def build_model(model_name: str, n_labels: int, vocab: CharVocab) -> ReadingMode
         enc = BertModel(cfg, add_pooling_layer=False)
     else:
         enc = BertModel.from_pretrained(model_name, add_pooling_layer=False)
-    return ReadingModel(enc, n_labels)
+    return ReadingModel(enc, n_labels, boundary=boundary)
 
 
 def collate(exs: list[Example], pad: int, device: str):
@@ -252,6 +314,17 @@ def collate(exs: list[Example], pad: int, device: str):
         gold += e.gold
     t = lambda x: torch.tensor(x, dtype=torch.long, device=device)  # noqa: E731
     return ids.to(device), mask.to(device), t(pos_b), t(pos_t), t(rows), t(gold)
+
+
+def collate_boundary(exs: list[Example], device: str):
+    """境界の切れ目の (バッチ内の番号, トークン位置, 正解 0/1)。collate に渡したのと同じ並びの exs を渡す。"""
+    pos_b, pos_t, gold = [], [], []
+    for b, e in enumerate(exs):
+        pos_b += [b] * len(e.bpos)
+        pos_t += e.bpos
+        gold += e.bgold
+    t = lambda x: torch.tensor(x, dtype=torch.long, device=device)  # noqa: E731
+    return t(pos_b), t(pos_t), torch.tensor(gold, dtype=torch.float32, device=device)
 
 
 def amp_mode(device: str):
@@ -285,12 +358,18 @@ def train(
     checkpoint: Path | None = None,
     run_key: dict | None = None,
     checkpoint_every: float = 300.0,
+    boundary_weight: float = 1.0,
 ) -> None:
     """checkpoint を渡すと、エポックの終わりと checkpoint_every 秒ごとに途中の状態を保存し、
     run_key が同じ保存があればその続きから学習する（クラウドの VM がプリエンプトされても、
-    同じコマンドを打ち直せば続きから）。学習の結果を保存し終えたら、呼び出し側で消す。"""
+    同じコマンドを打ち直せば続きから）。学習の結果を保存し終えたら、呼び出し側で消す。
+
+    model が境界の出力層を持てば、読みと境界を同時に学習する。損失は
+    読みの交差エントロピー + boundary_weight × 境界の二値交差エントロピー（どちらも位置の平均）。"""
+    joint = model.boundary_head is not None
     exs = [p for e in exs for p in (e.parts if e.parts is not None else [e])]
-    exs = [e for e in exs if e.pos]
+    # 同時学習では、漢字の無い行も境界の学習に使う
+    exs = [e for e in exs if e.pos or (joint and e.bpos)]
     table = cands.table.to(device)
     model.to(device).train()
     no_decay = ("bias", "LayerNorm.weight")
@@ -310,15 +389,22 @@ def train(
     steps = epochs * ((len(exs) + batch_size - 1) // batch_size)
     sched = get_linear_schedule_with_warmup(opt, int(steps * warmup), steps)
     dtype, scaler = amp_mode(device)
-    log(f"  学習 {len(exs)} 行・{steps} ステップ・精度={dtype or 'float32'}")
+    log(
+        f"  学習 {len(exs)} 行・{steps} ステップ・精度={dtype or 'float32'}"
+        + (f"・読みと境界の同時学習（境界の重み {boundary_weight}）" if joint else "")
+    )
 
-    def save(epoch: int, k: int, total: float, n: int) -> None:
+    def save(
+        epoch: int, k: int, total: float, n: int, btotal: float = 0.0, bn: int = 0
+    ) -> None:
         state = {
             "run_key": run_key,
             "epoch": epoch,  # この epoch の k 番目の例から続ける
             "k": k,
             "total": total,
             "n": n,
+            "btotal": btotal,
+            "bn": bn,
             "model": model.state_dict(),
             "opt": opt.state_dict(),
             "sched": sched.state_dict(),
@@ -333,7 +419,7 @@ def train(
         torch.save(state, tmp)
         os.replace(tmp, checkpoint)
 
-    start_epoch, start_k, total, n = 1, 0, 0.0, 0
+    start_epoch, start_k, total, n, btotal, bn = 1, 0, 0.0, 0, 0.0, 0
     if checkpoint is not None and checkpoint.exists():
         state = torch.load(checkpoint, map_location="cpu")
         if state["run_key"] == run_key:
@@ -347,6 +433,7 @@ def train(
                 torch.cuda.set_rng_state_all(state["rng_cuda"])
             start_epoch, start_k = state["epoch"], state["k"]
             total, n = state["total"], state["n"]
+            btotal, bn = state.get("btotal", 0.0), state.get("bn", 0)
             log(
                 f"  {checkpoint.name} から再開（epoch {start_epoch} の {start_k} 例目から）"
             )
@@ -360,36 +447,62 @@ def train(
         order = list(range(len(exs)))
         random.Random(seed * 1000 + epoch).shuffle(order)
         for k in range(start_k, len(order), batch_size):
-            ids, mask, pos_b, pos_t, rows, gold = collate(
-                [exs[i] for i in order[k : k + batch_size]], vocab.pad, device
-            )
+            batch = [exs[i] for i in order[k : k + batch_size]]
+            ids, mask, pos_b, pos_t, rows, gold = collate(batch, vocab.pad, device)
             with torch.autocast(
                 device_type="cuda", dtype=dtype, enabled=dtype is not None
             ):
-                logits = model(ids, mask, pos_b, pos_t)
-            loss = nn.functional.cross_entropy(masked_logits(logits, table, rows), gold)
+                if joint:
+                    bpos_b, bpos_t, bgold = collate_boundary(batch, device)
+                    logits, blogits = model.forward_joint(
+                        ids, mask, pos_b, pos_t, bpos_b, bpos_t
+                    )
+                else:
+                    logits = model(ids, mask, pos_b, pos_t)
+            # 漢字の無い行だけのバッチ（同時学習のときだけ起こりうる）は、読みの損失を 0 にする
+            loss = (
+                nn.functional.cross_entropy(masked_logits(logits, table, rows), gold)
+                if len(gold)
+                else logits.float().sum() * 0.0
+            )
+            objective = loss
+            if joint:
+                bloss = (
+                    nn.functional.binary_cross_entropy_with_logits(
+                        blogits.float(), bgold
+                    )
+                    if len(bgold)
+                    else blogits.float().sum() * 0.0
+                )
+                objective = loss + boundary_weight * bloss
             opt.zero_grad(set_to_none=True)
             if scaler:
-                scaler.scale(loss).backward()
+                scaler.scale(objective).backward()
                 scaler.unscale_(opt)
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 scaler.step(opt)
                 scaler.update()
             else:
-                loss.backward()
+                objective.backward()
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()
             sched.step()
             total += loss.item() * len(gold)
             n += len(gold)
+            if joint:
+                btotal += bloss.item() * len(bgold)
+                bn += len(bgold)
             if checkpoint is not None and time.time() - last_save >= checkpoint_every:
-                save(epoch, k + batch_size, total, n)
+                save(epoch, k + batch_size, total, n, btotal, bn)
                 last_save = time.time()
-        msg = f"  epoch {epoch}/{epochs} loss={total / n:.4f}（{time.time() - t0:.0f} 秒）"
+        msg = f"  epoch {epoch}/{epochs} loss={total / max(n, 1):.4f}"
+        if joint:
+            msg += f" 境界 loss={btotal / max(bn, 1):.4f}"
+        msg += f"（{time.time() - t0:.0f} 秒）"
         if on_epoch:
             msg += " " + on_epoch(epoch)
         log(msg)
-        start_k, total, n = 0, 0.0, 0
+        start_k, total, n, btotal, bn = 0, 0.0, 0, 0.0, 0
         if checkpoint is not None:
             save(epoch + 1, 0, 0.0, 0)
             last_save = time.time()
@@ -441,5 +554,37 @@ def _predict_flat(
         for i in part:
             n = len(exs[i].pos)
             out[i] = list(zip(best[j : j + n], best_p[j : j + n]))
+            j += n
+    return out
+
+
+@torch.no_grad()
+def predict_boundary(
+    model: ReadingModel,
+    exs: list[Example],
+    vocab: CharVocab,
+    device: str,
+    batch_size: int = 64,
+) -> list[list[float]]:
+    """各例の切れ目（Example.bpos）ごとの、マスをあける確率。入力と同じ順で返す（境界の出力層が要る）。"""
+    model.to(device).eval()
+    dtype, _ = amp_mode(device)
+    out: list[list[float]] = [[] for _ in exs]
+    order = sorted(range(len(exs)), key=lambda i: len(exs[i].ids))
+    for k in range(0, len(order), batch_size):
+        part = order[k : k + batch_size]
+        batch = [exs[i] for i in part]
+        bpos_b, bpos_t, _ = collate_boundary(batch, device)
+        if not len(bpos_t):
+            continue
+        ids, mask, *_ = collate(batch, vocab.pad, device)
+        with torch.autocast(device_type="cuda", dtype=dtype, enabled=dtype is not None):
+            h = model.encode(ids, mask)
+            logits = model.boundary_head(h[bpos_b, bpos_t]).squeeze(-1)
+        prob = logits.float().sigmoid().tolist()
+        j = 0
+        for i in part:
+            n = len(exs[i].bpos)
+            out[i] = prob[j : j + n]
             j += n
     return out

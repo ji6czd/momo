@@ -7,15 +7,19 @@ step10_infer.py が手元の CPU で読み込める。
     uv run python -m momo_bert_train.step9_finetune --smoke                  # 動作確認（極小モデル・数十行）
     uv run python -m momo_bert_train.step9_finetune                          # train で学習し、dev で評価して保存
     uv run python -m momo_bert_train.step9_finetune --all-data --name full   # train+dev の全データで学習して保存
+    uv run python -m momo_bert_train.step9_finetune --boundary               # 読みと境界（マスあけ）を同時に学習
 
 出力: work/finetuned/<名前>/
-  model.pt      ReadingModel の重み（float32）
+  model.pt      ReadingModel の重み（float32。--boundary では境界の出力層も入る）
   encoder.json  BERT 本体の構成（学習済みの重みを取り直さずに読み込める）
   labels.json   読みのラベル表
   cands.json    文字 → 読み候補（ラベル番号）の辞書
-  meta.json     学習の設定と dev の一致率、学習データの meta（basic_raw.tsv のハッシュ）
+  meta.json     学習の設定と dev の一致率（--boundary では境界の誤りの数と F1 も）、学習データの meta
+                （basic_raw.tsv のハッシュ）
 
+名前の既定は train / full。--boundary を付けると train_joint / full_joint。
 --all-data では dev も学習に使うので、meta の dev 一致率は学習済みの文での値（評価にならない）。
+境界の dev の数字は、切れ目ごと（行末と原文の空白をはさむ切れ目を除く）に、確率 0.5 以上をマスあけとして数える。
 
 学習の途中の状態を 5 分ごとと各エポックの終わりに work/finetuned/<名前>/checkpoint.pt に保存する。
 VM がプリエンプトされたら、同じコマンドを打ち直せば続きから学習する（設定かデータが違えば最初から）。
@@ -41,6 +45,7 @@ from .common import (
     load_jsonl,
     make_examples,
     predict,
+    predict_boundary,
     train,
     verify_records,
 )
@@ -56,10 +61,51 @@ def dev_accuracy(model, recs, exs, cands, labels, vocab, device) -> float:
     return hit / n if n else 0.0
 
 
+def dev_boundary(model, exs, vocab, device) -> dict:
+    """dev の切れ目ごとの境界の当たり。missed＝注釈はマスあけなのに続けた（くっつけすぎ）、
+    extra＝注釈は続けるのにあけた（分けすぎ）。"""
+    probs = predict_boundary(model, exs, vocab, device)
+    tp = fp = fn = tn = 0
+    for ex, pr in zip(exs, probs):
+        for gold, p in zip(ex.bgold, pr):
+            split = p >= 0.5
+            tp += split and gold == 1
+            fp += split and gold == 0
+            fn += not split and gold == 1
+            tn += not split and gold == 0
+    gaps = tp + fp + fn + tn
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    return {
+        "gaps": gaps,
+        "spaces": tp + fn,
+        "errors": fp + fn,
+        "missed": fn,
+        "extra": fp,
+        "accuracy": (tp + tn) / gaps if gaps else 0.0,
+        "precision": precision,
+        "recall": recall,
+        "f1": 2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0,
+    }
+
+
+def boundary_summary(b: dict) -> str:
+    return (
+        f"境界 誤り {b['errors']}/{b['gaps']}（くっつけすぎ {b['missed']}・分けすぎ {b['extra']}）"
+        f" F1={b['f1']:.4f}"
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--model", default=DEFAULT_MODEL)
-    ap.add_argument("--name", default="", help="保存先の名前（既定: train か full）")
+    ap.add_argument(
+        "--name",
+        default="",
+        help="保存先の名前（既定: train か full。--boundary では train_joint か full_joint）",
+    )
     ap.add_argument("--all-data", action="store_true", help="dev も学習に使う")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--epochs", type=int, default=8)
@@ -67,6 +113,17 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--smoke", action="store_true", help="極小モデルで数十行だけ通す")
+    ap.add_argument(
+        "--boundary",
+        action="store_true",
+        help="境界（マスあけ）の出力層を足し、読みと同時に学習する",
+    )
+    ap.add_argument(
+        "--boundary-weight",
+        type=float,
+        default=1.0,
+        help="同時学習で、読みの損失に足す境界の損失の重み",
+    )
     ap.add_argument(
         "--checkpoint-minutes",
         type=float,
@@ -81,10 +138,16 @@ def main() -> None:
         args.model, args.epochs = "tiny", 1
         train_recs, dev_recs = train_recs[:100], dev_recs[:30]
     verify_records(train_recs + dev_recs)
+    if args.boundary and not any(s.space for r in train_recs for s in r.slots):
+        raise SystemExit(
+            "学習データにマスあけ（+S）が入っていない（古いデータ）。"
+            "手元で make_kit を実行してキットを作り直す"
+        )
 
     fit = train_recs + dev_recs if args.all_data else train_recs
     name = args.name or (
-        "smoke" if args.smoke else "full" if args.all_data else "train"
+        ("smoke" if args.smoke else "full" if args.all_data else "train")
+        + ("_joint" if args.boundary else "")
     )
     out_dir = WORK / "finetuned" / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -95,19 +158,28 @@ def main() -> None:
     cands = Candidates(fit, labels)
     print(
         f"device={args.device} model={args.model} 学習 {len(fit)} 行 / dev {len(dev_recs)} 行"
-        f" / ラベル {len(labels)}",
+        f" / ラベル {len(labels)}"
+        + (
+            f" / 読みと境界の同時学習（境界の重み {args.boundary_weight}）"
+            if args.boundary
+            else ""
+        ),
         flush=True,
     )
 
     random.seed(args.seed)
     torch.manual_seed(args.seed)
-    model = build_model(args.model, len(labels), vocab)
+    model = build_model(args.model, len(labels), vocab, boundary=args.boundary)
     fit_exs = make_examples(fit, vocab, labels, cands)
     dev_exs = make_examples(dev_recs, vocab, labels, cands)
 
     def diag(_epoch: int) -> str:
         acc = dev_accuracy(model, dev_recs, dev_exs, cands, labels, vocab, args.device)
-        return f"dev={acc:.4f}"
+        msg = f"dev={acc:.4f}"
+        if args.boundary:
+            b = dev_boundary(model, dev_exs, vocab, args.device)
+            msg += f" 境界F1={b['f1']:.4f}（誤り {b['errors']}）"
+        return msg
 
     # 続きから再開してよいかの照合に使う（保存先の名前・デバイス・保存間隔は学習の中身に関わらない）
     digest = hashlib.sha256()
@@ -135,9 +207,13 @@ def main() -> None:
         checkpoint=checkpoint,
         run_key=run_key,
         checkpoint_every=args.checkpoint_minutes * 60,
+        boundary_weight=args.boundary_weight,
     )
     acc = dev_accuracy(model, dev_recs, dev_exs, cands, labels, vocab, args.device)
     print(f"dev 漢字スロット一致率 {acc:.4f}（{time.time() - t0:.0f} 秒）", flush=True)
+    bnd = dev_boundary(model, dev_exs, vocab, args.device) if args.boundary else None
+    if bnd:
+        print(f"dev {boundary_summary(bnd)}", flush=True)
 
     model.cpu()
     torch.save(model.state_dict(), out_dir / "model.pt")
@@ -165,7 +241,11 @@ def main() -> None:
         "dev_acc": acc,
         "dev_is_heldout": not args.all_data,
         "seconds": round(time.time() - t0),
+        "boundary": args.boundary,
     }
+    if bnd:
+        meta["boundary_weight"] = args.boundary_weight
+        meta["dev_boundary"] = bnd
     # どの basic_raw.tsv から作ったかを残す（export_data が書いた meta。古いキットには無い）
     data_meta = DATA / "meta.json"
     if data_meta.exists():

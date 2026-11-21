@@ -80,7 +80,7 @@ pub use prediction::{
     Contribution, DecisionSource, PredictionResult, Predictor, PredictorConfig, TraceResult,
     TraceRow,
 };
-pub use slot_reader::{SlotReader, SlotScores};
+pub use slot_reader::{LineScores, SlotReader, SlotScores, SplitScore};
 
 /// 量子化前 (`.mbmf`) の重みで推論する `Predictor`。
 ///

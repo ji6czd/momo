@@ -12,9 +12,8 @@ import json
 import unicodedata
 
 import torch
-from transformers import BertConfig, BertModel
 
-from .common import DEFAULT_MODEL, WORK, CharVocab, ReadingModel
+from .common import DEFAULT_MODEL, WORK, CharVocab, load_finetuned
 
 
 def is_kanji(ch: str) -> bool:
@@ -30,14 +29,9 @@ class FineTunedReader:
         self.cands: dict[str, list[int]] = json.loads(
             (d / "cands.json").read_text(encoding="utf-8")
         )["chars"]
-        cfg = BertConfig.from_json_file(str(d / "encoder.json"))
-        self.model = ReadingModel(
-            BertModel(cfg, add_pooling_layer=False), len(self.labels)
-        )
-        self.model.load_state_dict(torch.load(d / "model.pt", map_location="cpu"))
-        self.model.eval()
+        self.model = load_finetuned(d, len(self.labels))
         self.vocab = CharVocab.from_model(vocab_model)
-        self.max_chars = cfg.max_position_embeddings - 2
+        self.max_chars = self.model.encoder.config.max_position_embeddings - 2
 
     @torch.no_grad()
     def predict(self, text: str, top: int = 3):

@@ -24,7 +24,6 @@ import json
 import time
 
 import torch
-from transformers import BertConfig, BertModel
 
 from .common import (
     DATA,
@@ -33,8 +32,8 @@ from .common import (
     Candidates,
     CharVocab,
     Labels,
-    ReadingModel,
     collate,
+    load_finetuned,
     load_jsonl,
     make_examples,
     masked_logits,
@@ -101,10 +100,7 @@ def main() -> None:
     ), "ラベル表が学習時と違う（データが変わった？）"
     cands = Candidates(recs, labels)
 
-    cfg = BertConfig.from_json_file(str(d / "encoder.json"))
-    model = ReadingModel(BertModel(cfg, add_pooling_layer=False), len(labels))
-    model.load_state_dict(torch.load(d / "model.pt", map_location="cpu"))
-    model.eval()
+    model = load_finetuned(d, len(labels))
     vocab = CharVocab.from_model(meta.get("base_model") or DEFAULT_MODEL)
 
     exs = make_examples(recs, vocab, labels, cands)

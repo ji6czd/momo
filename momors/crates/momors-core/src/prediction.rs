@@ -499,7 +499,8 @@ pub struct Predictor<M: WeightModel = MomoModel> {
     /// `read_p*` 特徴量（確定済みの前方読み）のペイロードに使う。
     class_order: Vec<u32>,
     /// 読みの別推論器（BERT など）。設定されていれば、漢字・漢数字の読みは
-    /// LR ではなくこちらの候補から選ぶ（[`Predictor::set_slot_reader`]）。
+    /// LR ではなくこちらの候補から選び、推論器が確率を付けた切れ目のマスあけは
+    /// 境界モデルではなくその確率で決める（[`Predictor::set_slot_reader`]）。
     slot_reader: Option<AttachedReader>,
 }
 
@@ -591,7 +592,9 @@ impl<M: WeightModel> Predictor<M> {
     }
 
     /// 読みの別推論器（BERT など）を設定する。以後の推論では、推論器が候補を付けた
-    /// 漢字・漢数字の読みを、LR ではなくその候補から選ぶ。
+    /// 漢字・漢数字の読みを、LR ではなくその候補から選ぶ。推論器が切れ目に
+    /// マスあけの確率を付けていれば、その切れ目は境界モデルではなくその確率で決める
+    /// （英数字ラン内部を割らないなどの規則は従来どおり）。
     ///
     /// 推論器のラベルはここで読みモデルのクラスに解決する。戻り値は、クラスに無くて
     /// 使えないラベルの一覧（推論器とモデルの学習データがずれていないかの確認用）。
@@ -995,7 +998,8 @@ impl<M: WeightModel> Predictor<M> {
                         result.decision_sources.push(DecisionSource::DictCustom);
                     }
                 }
-                let has_split = self.boundary_has_split(&all_feat_refs[last], &source_seq, last);
+                let has_split =
+                    self.boundary_has_split(&all_feat_refs[last], &source_seq, last, readings);
                 if has_split {
                     result.kana_text.push(' ');
                     result
@@ -1044,7 +1048,8 @@ impl<M: WeightModel> Predictor<M> {
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
                 if !entry.ctype.skips_boundary_check() {
-                    let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                    let has_split =
+                        self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
                     if has_split {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -1071,7 +1076,8 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                let has_split =
+                    self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -1096,7 +1102,8 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = entry.compound_len >= 2 && is_small_kana(entry.cp2);
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                let has_split =
+                    self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -1145,8 +1152,12 @@ impl<M: WeightModel> Predictor<M> {
                 };
 
                 if let Some(action) = resolve_multi(counter_cp, value, model_reading) {
-                    let has_split =
-                        self.boundary_has_split(&all_feat_refs[run_end], &source_seq, run_end);
+                    let has_split = self.boundary_has_split(
+                        &all_feat_refs[run_end],
+                        &source_seq,
+                        run_end,
+                        readings,
+                    );
                     match action {
                         CounterAction::Spell(kana) => {
                             // 綴り読みは分解できない（トオカ・ハツカ）。ラン先頭に束ねる。
@@ -1226,8 +1237,12 @@ impl<M: WeightModel> Predictor<M> {
                     source_seq.get(run_end + 1).map(|e| e.cp),
                 )
             {
-                let has_split =
-                    self.boundary_has_split(&all_feat_refs[run_end], &source_seq, run_end);
+                let has_split = self.boundary_has_split(
+                    &all_feat_refs[run_end],
+                    &source_seq,
+                    run_end,
+                    readings,
+                );
 
                 for (j, digit) in source_seq[i..run_end].iter().enumerate() {
                     decided[i + j] = self.read_class_id_cp(digit.cp);
@@ -1337,7 +1352,8 @@ impl<M: WeightModel> Predictor<M> {
                         continue;
                     }
                     NumericFallback::Output(fallback) => {
-                        let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                        let has_split =
+                            self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
                         decided[i] = self.read_class_id(fallback);
                         self.emit_label(
                             entry,
@@ -1410,7 +1426,8 @@ impl<M: WeightModel> Predictor<M> {
                     !next_is_kun_counter
                 };
                 if revert {
-                    let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                    let has_split =
+                        self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
                     decided[i] = self.read_class_id_cp(entry.cp);
                     self.emit_char_passthrough(
                         entry,
@@ -1456,7 +1473,8 @@ impl<M: WeightModel> Predictor<M> {
                     parent_is_kanji = entry.ctype == CharType::Kanji;
                     parent_has_small_kana = false;
                     parent_kana_byte_end = result.kana_text.len();
-                    let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                    let has_split =
+                        self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
                     if has_split {
                         result.kana_text.push(' ');
                         result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -1494,7 +1512,8 @@ impl<M: WeightModel> Predictor<M> {
                 //    複合ユニット最終文字の行に付く）。ここで境界モデルを問い合わせず
                 //    単純スキップすると、学習された境界ラベルが推論から一切参照されず
                 //    「今日」「昨日」直後のマスあけが構造的に欠落する（要修正前の挙動）。
-                let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+                let has_split =
+                    self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
                 if has_split {
                     result.kana_text.push(' ');
                     result.kana_to_src_index.push(entry.orig_idx as usize);
@@ -1523,7 +1542,7 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
 
             // 境界判定
-            let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i);
+            let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
 
             // 々フォールバック: 低自信度の「々」は直前漢字の読みを繰り返す
             //
@@ -1767,7 +1786,9 @@ impl<M: WeightModel> Predictor<M> {
 
     /// 位置 `i` の直後に境界スペース（マスあけ）を入れるか判定する。
     ///
-    /// 境界モデルのスコアが閾値を超え、**かつ**英数字ラン内部でないときだけ `true`。
+    /// マスをあける確率が閾値を超え、**かつ**英数字ラン内部でないときだけ `true`。
+    /// 確率は、別推論器（BERT など、[`SlotReader`]）がこの切れ目に確率を付けていれば
+    /// それを使い、無ければ境界モデルで計算する。
     ///
     /// 英数字ラン内部（現在も次も英字/算用数字）を割るのは、点訳のどんな文脈でも
     /// 正しくない不変条件なので、モデル判定より優先して抑制する（`AB345` を
@@ -1779,9 +1800,14 @@ impl<M: WeightModel> Predictor<M> {
         feat_refs: &[VocabRef],
         source_seq: &[SourceEntry],
         i: usize,
+        readings: ReadingView<'_>,
     ) -> bool {
         let _g = phase::Guard::new(Phase::Boundary);
-        if sigmoid(self.model.compute_boundary_score_resolved(feat_refs)) < 0.5 {
+        let prob = source_seq
+            .get(i + 1)
+            .and_then(|next| readings.split_before(next))
+            .unwrap_or_else(|| sigmoid(self.model.compute_boundary_score_resolved(feat_refs)));
+        if prob < 0.5 {
             return false;
         }
         !is_alnum_run_internal(source_seq, i)
@@ -3369,6 +3395,8 @@ mod tests {
         labels: Vec<String>,
         /// (文字, ラベル番号, 確率)。同じ文字が複数あれば、その順で候補に並べる。
         table: Vec<(char, u32, f32)>,
+        /// (文字, 確率)。行頭以外のその文字の直前の切れ目に、マスあけの確率を付ける。
+        split_before: Vec<(char, f32)>,
     }
 
     impl SlotReader for FakeReader {
@@ -3376,8 +3404,8 @@ mod tests {
             &self.labels
         }
 
-        fn read_line(&self, text: &str) -> std::result::Result<Vec<crate::SlotScores>, String> {
-            Ok(text
+        fn read_line(&self, text: &str) -> std::result::Result<crate::LineScores, String> {
+            let slots = text
                 .char_indices()
                 .filter_map(|(b, ch)| {
                     let candidates: Vec<(u32, f32)> = self
@@ -3391,8 +3419,27 @@ mod tests {
                         candidates,
                     })
                 })
-                .collect())
+                .collect();
+            let splits = text
+                .char_indices()
+                .skip(1)
+                .filter_map(|(b, ch)| {
+                    let &(_, prob) = self.split_before.iter().find(|(c, _)| *c == ch)?;
+                    Some(crate::SplitScore { byte_pos: b, prob })
+                })
+                .collect();
+            Ok(crate::LineScores { slots, splits })
         }
+    }
+
+    /// 切れ目の確率も付ける別推論器。
+    fn fake_reader_with_splits(
+        table: &[(char, &str, f32)],
+        split_before: &[(char, f32)],
+    ) -> Box<FakeReader> {
+        let mut r = fake_reader(table);
+        r.split_before = split_before.to_vec();
+        r
     }
 
     fn fake_reader(table: &[(char, &str, f32)]) -> Box<FakeReader> {
@@ -3407,7 +3454,11 @@ mod tests {
                 (ch, idx as u32, p)
             })
             .collect();
-        Box::new(FakeReader { labels, table })
+        Box::new(FakeReader {
+            labels,
+            table,
+            split_before: Vec::new(),
+        })
     }
 
     #[test]
@@ -3456,6 +3507,37 @@ mod tests {
             p.predict("漢（漢）字").unwrap().kana_text(),
             p.predict("漢（漢）").unwrap().kana_text().to_owned() + "カン"
         );
+    }
+
+    #[test]
+    fn slot_reader_splits_replace_boundary_model() {
+        let mut p = predictor_with_read_prev();
+        // このトイモデルの境界モデルは常に「区切らない」。
+        assert_eq!(p.predict("字字").unwrap().kana_text(), "ジジ");
+        p.set_slot_reader(fake_reader_with_splits(&[], &[('字', 0.9)]));
+        assert_eq!(p.predict("字字").unwrap().kana_text(), "ジ ジ");
+        // 確率が閾値未満なら区切らない。
+        p.set_slot_reader(fake_reader_with_splits(&[], &[('字', 0.3)]));
+        assert_eq!(p.predict("字字").unwrap().kana_text(), "ジジ");
+    }
+
+    #[test]
+    fn slot_reader_splits_keep_alnum_run_guard() {
+        let mut p = predictor_with_read_prev();
+        // 英数字ランの内部は、推論器の確率が高くても割らない。
+        p.set_slot_reader(fake_reader_with_splits(&[], &[('B', 0.9), ('3', 0.9)]));
+        assert_eq!(p.predict("AB3").unwrap().kana_text(), "AB3");
+    }
+
+    #[test]
+    fn slot_reader_splits_follow_aside_brackets() {
+        let mut p = predictor_with_read_prev();
+        // 注釈を抜いた本文「字字」の切れ目は、行では「）」と後ろの「字」の間に当たる。
+        p.set_slot_reader(fake_reader_with_splits(&[], &[('字', 0.9)]));
+        assert_eq!(p.predict("字（字）字").unwrap().kana_text(), "ジ（ジ） ジ");
+        // 「（」の直前の切れ目（注釈は前の語に食いつく）の確率は、本文の切れ目には使わない。
+        p.set_slot_reader(fake_reader_with_splits(&[], &[('（', 0.9)]));
+        assert_eq!(p.predict("字（字）字").unwrap().kana_text(), "ジ（ジ）ジ");
     }
 
     #[test]

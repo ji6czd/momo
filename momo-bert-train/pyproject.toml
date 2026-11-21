@@ -28,6 +28,7 @@ step11_audit = "momo_bert_train.step11_audit:main"
 audit_raw = "momo_bert_train.audit_raw:main"
 export_onnx = "momo_bert_train.export_onnx:main"
 step12_rust_eval = "momo_bert_train.step12_rust_eval:main"
+step14_boundary_eval = "momo_bert_train.step14_boundary_eval:main"
 
 
 [tool.uv.sources]

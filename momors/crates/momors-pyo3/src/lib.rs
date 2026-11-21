@@ -83,10 +83,12 @@ fn attach_bert(
     dir: &str,
     f32_model: bool,
     threads: usize,
+    boundary: bool,
 ) -> PyResult<Vec<String>> {
     let options = momors_bert::BertOptions {
         int8: !f32_model,
         threads,
+        boundary,
     };
     let reader = momors_bert::BertReader::load(dir, &options)
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -94,7 +96,13 @@ fn attach_bert(
 }
 
 #[cfg(not(feature = "bert"))]
-fn attach_bert(_: &mut RustPredictor, _: &str, _: bool, _: usize) -> PyResult<Vec<String>> {
+fn attach_bert(
+    _: &mut RustPredictor,
+    _: &str,
+    _: bool,
+    _: usize,
+    _: bool,
+) -> PyResult<Vec<String>> {
     Err(PyRuntimeError::new_err(
         "この momors_py は BERT 読みモードなしでビルドされている（feature `bert`）",
     ))
@@ -129,6 +137,8 @@ impl Predictor {
     ///         feature `bert` 付きでビルドした wheel だけが受け付ける
     ///     bert_f32: BERT を float32 版で動かす（既定は int8 版）
     ///     bert_threads: BERT の演算スレッド数（0 は ONNX Runtime の既定）
+    ///     bert_boundary: 境界も学習した BERT モデルなら、マスあけも BERT で決める
+    ///         （偽なら BERT は読みだけに使い、マスあけは境界モデルで決める）
     #[new]
     #[pyo3(signature = (
         model_path,
@@ -139,6 +149,7 @@ impl Predictor {
         bert=None,
         bert_f32=false,
         bert_threads=0,
+        bert_boundary=true,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -149,6 +160,7 @@ impl Predictor {
         bert: Option<&str>,
         bert_f32: bool,
         bert_threads: usize,
+        bert_boundary: bool,
     ) -> PyResult<Self> {
         let mut config =
             PredictorConfig::new(model_path).with_numeric_confidence_threshold(numeric_threshold);
@@ -162,7 +174,7 @@ impl Predictor {
         let mut inner =
             RustPredictor::load(config).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         let bert_unknown_labels = match bert {
-            Some(dir) => attach_bert(&mut inner, dir, bert_f32, bert_threads)?,
+            Some(dir) => attach_bert(&mut inner, dir, bert_f32, bert_threads, bert_boundary)?,
             None => Vec::new(),
         };
         Ok(Self {

@@ -164,7 +164,7 @@
 | `momors/crates/momors-core/src/prediction.rs` | `Predictor::set_slot_reader`・`pick_reading`/`reader_argmax`・`DecisionSource::Bert`・`Phase::SlotReader` |
 | `momors/crates/momors-bert/` | `BertReader`（ort 2.0.0-rc.15 = ONNX Runtime 1.31）・語彙・長い行の窓 |
 | `momors-cli`（feature `bert`） | `momo` / `momo-inspect` に `--bert`（既定の場所 `<.mbm の既定ディレクトリ>/momo-bert/`、int8 版）`--bert-dir DIR` `--bert-f32` `--bert-threads N` |
-| `momors-pyo3`（feature `bert`） | `Predictor(..., bert=DIR, bert_f32=, bert_threads=)`・`PredictionResult.decisions` |
+| `momors-pyo3`（feature `bert`） | `Predictor(..., bert=DIR, bert_f32=, bert_threads=)`・`PredictionResult.decisions`（2026-11-21 に `bert_boundary=` を足した） |
 | `momo-bert-train/src/momo_bert_train/step12_rust_eval.py` | Rust の推論経路で w7 と w7＋BERT を dev で比べる |
 | `eval/run_regression.sh` | `MOMO_ARGS` で momo に追加の引数を渡せる |
 
@@ -216,3 +216,36 @@ w7 は train だけで学習したもの、BERT は `work/finetuned/train`（int
     - ONNX Runtime（MIT）を静的に組み込むので、1.31.0 の `LICENSE` と `ThirdPartyNotices.txt` を `momors-bert/licenses/` に置き、MSI（`licenses/`）と momors-py の wheel（`.dist-info/licenses/`、`task pyo3:sync` が写す）に入れる。ort を上げたら差し替える。
     - momo-bert の zip には、元のモデルの Apache-2.0 の本文を `LICENSE.txt` として入れる（`export_onnx`）。変更したことの表示は `NOTICE.txt`。元のモデルには NOTICE ファイルが無いので、引き継ぐ帰属表示は無い。
   - BERT 入りの `momo.exe` は、`VCRUNTIME140.dll` に加えて `MSVCP140.dll`・`MSVCP140_1.dll`・`VCRUNTIME140_1.dll`（どれも VC++ 再頒布可能パッケージ）を読む。MSI は今も再頒布可能パッケージを同梱していない。
+
+## マスあけも BERT で（2026-11-21）
+
+境界モデルは切れ目ごとに独立に判定し、窓も局所なので、隣の切れ目に依存する複合語の切れ続きを1字ずらしやすい（点字表示義｜務化、二重管｜弦楽）。行全体を見る BERT に、読みと一緒にマスあけも決めさせる。
+
+### 作り
+
+- **モデルは1本。** BERT 本体を共有し、読みの出力層と境界の出力層（768→1）を載せて同時に微調整する（`step9_finetune --boundary`、名前は `train_joint` / `full_joint`、損失は 読み + `--boundary-weight`（既定 1.0）× 境界）。
+- **境界のラベル**は、隣り合うスロット（学習データの1行＝momo の `SourceEntry`）の間の切れ目ごとに、直前のスロットの最後の字の位置で `+S` の有無。momo の境界モデルがユニットの最後の字で問うのと同じ。行末と、原文の空白に接する切れ目は除く。漢字の無い行も境界の学習に使う。
+- **ONNX** は出力 `boundary_logits` [B, T] を足す（`export_onnx` が出力層の有無を見て書き出す）。int8 では境界の出力層も float32 に残す。
+- **Rust**：`SlotReader::read_line` は `LineScores { slots, splits }` を返す。`SplitScore` は切れ目の **直後** の文字のバイト位置で切れ目を表す（括弧の注釈を抜いた本文でも、「語」の後ろの切れ目が「）」の後ろを指せるように）。`BertReader` はモデルに `boundary_logits` があれば、空白に接しない切れ目すべてに確率を付け、漢字の無い行も含めて全行を通す。
+- **推論ループ**：`boundary_has_split` が、推論器の確率があれば境界モデルの代わりにそれを使う。境界を問う位置・英数字ラン内部を割らない保証・行末のスペースを落とす処理は今までどおりなので、規則で決まる位置（英数字ランの内部・カスタム辞書の内部・助数詞ユニットの内部・行末）は BERT の結果を見ない。
+- **入口**：既定では、境界の出力を持つモデルならマスあけも BERT で決める。読みだけに使うには `momo --bert-no-boundary`、`momors_py.Predictor(..., bert_boundary=False)`。
+
+### 精度（dev 1,098 行・切れ目 43,965、`step14_boundary_eval`）
+
+w7 は train だけで学習したもの、BERT は `train_joint`（L4 で 341 秒）。
+
+| | 誤り | くっつけすぎ | 分けすぎ | F1 | 全部当たった行 |
+|---|---|---|---|---|---|
+| w7 | 189 | 122 | 67 | 0.9916 | 86.4% |
+| w7＋BERT（float32） | **57** | 37 | 20 | **0.9975** | **95.2%** |
+| w7＋BERT（int8） | 68 | 46 | 22 | 0.9970 | 94.3% |
+
+- float32 の Rust 経路は、PyTorch で BERT だけを測った数（57）と同じ。規則で決まる位置との食い違いは無かった。
+- int8 は境界の誤りが 11 増える。float32 に残す層を増やしても戻りにくい（最後の 4 層の FFN 出力 65・全層の FFN 出力 62／173MiB）ので、今の分け方のままにした。
+- 読みは同時学習で少し下がった：Rust 経路の dev 漢字 97.90%（読みだけの `train`）→ 97.78%（17,355 中 −21）。`eval_context.tsv` は行 91.8% → 92.3%。1回ずつの比較なので、揺れの範囲かはまだ分からない。
+- 速度は変わらない（dev は漢字の無い行が少ない。境界モデルの計算は BERT が確率を付けた切れ目では省かれる）。
+
+### マスあけの残り
+
+- 配る版の `full_joint` を作り、`export_onnx --name full_joint` で zip にする。`eval/run_regression.sh` を BERT モードで通す。
+- 読みの低下が揺れかどうか：`--boundary-weight 0.5` か別のシードでもう1本。

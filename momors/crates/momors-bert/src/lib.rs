@@ -1,13 +1,13 @@
 //! # momors-bert
 //!
-//! 微調整した BERT（`tohoku-nlp/bert-base-japanese-char-v3`）で漢字・漢数字の読みを
-//! 推論し、[`momors_core::SlotReader`] として予測器に差し込む。
+//! 微調整した BERT（`tohoku-nlp/bert-base-japanese-char-v3`）で漢字・漢数字の読みと
+//! マスあけを推論し、[`momors_core::SlotReader`] として予測器に差し込む。
 //!
 //! モデルは `momo-bert-train` の `export_onnx` が書き出したディレクトリを読む:
 //!
 //! | ファイル | 中身 |
 //! |---|---|
-//! | `reading_bert.int8.onnx` / `reading_bert.onnx` | 入力 `input_ids`・`attention_mask` [B, T]、出力 `logits` [B, T, ラベル数] |
+//! | `reading_bert.int8.onnx` / `reading_bert.onnx` | 入力 `input_ids`・`attention_mask` [B, T]、出力 `logits` [B, T, ラベル数]（読み）と、境界も学習したモデルなら `boundary_logits` [B, T]（その文字の後ろでマスをあける logit） |
 //! | `labels.json` | 読みのラベル表（継続は `""`） |
 //! | `cands.json` | `{"chars": {文字: [ラベル番号, …]}}`（学習データに出た読み） |
 //! | `vocab.txt` | 文字の語彙 |
@@ -15,6 +15,10 @@
 //! 1 行を丸ごと（長ければ窓に区切って）BERT に通し、`cands.json` に載っている文字の
 //! 位置ごとに、その文字の候補だけに絞った softmax を返す。候補に無い文字（学習データに
 //! 出なかった漢字など）は返さないので、その文字は LR が読む。
+//!
+//! モデルが `boundary_logits` を持っていれば（`momo-bert-train` の `step9_finetune --boundary`）、
+//! 空白に接しない切れ目ごとにマスあけの確率も返し、その切れ目は境界モデルの代わりにこれで
+//! 決まる。マスあけは漢字の無い行にもあるので、そのときは全行を BERT に通す。
 //!
 //! ```no_run
 //! use momors_bert::{BertOptions, BertReader};
@@ -34,7 +38,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use momors_core::{SlotReader, SlotScores};
+use momors_core::{LineScores, SlotReader, SlotScores, SplitScore};
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::TensorRef;
@@ -88,6 +92,9 @@ pub struct BertOptions {
     pub int8: bool,
     /// ONNX Runtime の演算スレッド数。0 なら ONNX Runtime の既定（物理コア数）。
     pub threads: usize,
+    /// モデルが境界の出力（`boundary_logits`）を持っていれば、マスあけも BERT で決める。
+    /// 偽なら読みだけを返し、マスあけは境界モデルに任せる。
+    pub boundary: bool,
 }
 
 impl Default for BertOptions {
@@ -95,11 +102,15 @@ impl Default for BertOptions {
         Self {
             int8: true,
             threads: 0,
+            boundary: true,
         }
     }
 }
 
-/// 微調整 BERT による読みの推論器。
+/// 境界の出力の名前。
+const BOUNDARY_OUTPUT: &str = "boundary_logits";
+
+/// 微調整 BERT による読み（とマスあけ）の推論器。
 pub struct BertReader {
     /// ONNX Runtime のセッションは推論に `&mut` が要るのでロックで包む。
     session: Mutex<Session>,
@@ -107,6 +118,8 @@ pub struct BertReader {
     labels: Vec<String>,
     /// 文字 → その文字に許す読み（ラベル番号）。
     cands: HashMap<char, Vec<u32>>,
+    /// マスあけも返すか（モデルが境界の出力を持ち、[`BertOptions::boundary`] が真）。
+    boundary: bool,
 }
 
 impl std::fmt::Debug for BertReader {
@@ -114,8 +127,21 @@ impl std::fmt::Debug for BertReader {
         f.debug_struct("BertReader")
             .field("labels", &self.labels.len())
             .field("chars", &self.cands.len())
+            .field("boundary", &self.boundary)
             .finish()
     }
+}
+
+/// 窓をまとめて BERT に通した結果。
+struct RunOutput {
+    /// 読みの logit（[B, T, L] を平たくしたもの）。
+    logits: Vec<f32>,
+    /// 境界の logit（[B, T] を平たくしたもの）。マスあけを返さないときは `None`。
+    boundary: Option<Vec<f32>>,
+    /// 窓の長さ T（[CLS]・[SEP] と詰め物を含む）。
+    width: usize,
+    /// ラベル数 L。
+    n_labels: usize,
 }
 
 /// プロセスに 1 つだけ作れる ONNX Runtime の環境（推論器を複数読み込んでも共有する）。
@@ -216,18 +242,28 @@ impl BertReader {
                 .map_err(ort::Error::from)?;
         }
         let session = builder.commit_from_file(&model)?;
+        let boundary = options.boundary
+            && session
+                .outputs()
+                .iter()
+                .any(|o| o.name() == BOUNDARY_OUTPUT);
 
         Ok(Self {
             session: Mutex::new(session),
             vocab,
             labels,
             cands,
+            boundary,
         })
     }
 
-    /// 窓（行の中の文字範囲）をまとめて BERT に通し、窓ごとの logit（[T, L] を平たくしたもの）
-    /// と、窓の長さ T・ラベル数 L を返す。
-    fn run(&self, ids: &[Vec<i64>]) -> Result<(Vec<f32>, usize, usize), BertError> {
+    /// マスあけも返すか（モデルが境界の出力を持ち、[`BertOptions::boundary`] が真）。
+    pub fn has_boundary(&self) -> bool {
+        self.boundary
+    }
+
+    /// 窓（行の中の文字範囲）をまとめて BERT に通す。
+    fn run(&self, ids: &[Vec<i64>]) -> Result<RunOutput, BertError> {
         let batch = ids.len();
         let width = ids.iter().map(Vec::len).max().unwrap_or(0);
         let mut input = vec![self.vocab.pad; batch * width];
@@ -253,26 +289,48 @@ impl BertReader {
                 self.labels.len()
             )));
         }
-        Ok((data.to_vec(), width, n_labels))
+        let logits = data.to_vec();
+        let boundary = if self.boundary {
+            let (_, data) = outputs[BOUNDARY_OUTPUT].try_extract_tensor::<f32>()?;
+            if data.len() != batch * width {
+                return Err(BertError::Format(format!(
+                    "{BOUNDARY_OUTPUT} の要素数 {} が入力の {batch}×{width} と合いません",
+                    data.len()
+                )));
+            }
+            Some(data.to_vec())
+        } else {
+            None
+        };
+        Ok(RunOutput {
+            logits,
+            boundary,
+            width,
+            n_labels,
+        })
     }
 
-    /// 1 行の読みの候補（[`SlotReader::read_line`] の本体）。
-    pub fn read(&self, text: &str) -> Result<Vec<SlotScores>, BertError> {
+    /// 1 行の読みの候補とマスあけの確率（[`SlotReader::read_line`] の本体）。
+    pub fn read(&self, text: &str) -> Result<LineScores, BertError> {
         let chars: Vec<(usize, char)> = text.char_indices().collect();
-        // 候補のある文字が無ければ BERT を通さない。
-        if !chars.iter().any(|(_, c)| self.cands.contains_key(c)) {
-            return Ok(Vec::new());
-        }
-        let windows = window::plan(chars.len(), MAX_CHARS, OVERLAP);
-        // 候補のある文字を含まない窓は流さない。
-        let windows: Vec<_> = windows
+        let has_cands = |i: usize| self.cands.contains_key(&chars[i].1);
+        // 位置 i の後ろの切れ目にマスあけの確率を付けるか。学習と同じく、空白に接する
+        // 切れ目と行末は除く。
+        let has_gap = |i: usize| {
+            self.boundary
+                && i + 1 < chars.len()
+                && !chars[i].1.is_whitespace()
+                && !chars[i + 1].1.is_whitespace()
+        };
+        // 候補のある文字も、マスあけを問う切れ目も無い窓は流さない（境界を返すなら、
+        // 2 文字以上の行は全部流れる）。
+        let windows: Vec<_> = window::plan(chars.len(), MAX_CHARS, OVERLAP)
             .into_iter()
-            .filter(|w| {
-                chars[w.keep.clone()]
-                    .iter()
-                    .any(|(_, c)| self.cands.contains_key(c))
-            })
+            .filter(|w| w.keep.clone().any(|i| has_cands(i) || has_gap(i)))
             .collect();
+        if windows.is_empty() {
+            return Ok(LineScores::default());
+        }
         let ids: Vec<Vec<i64>> = windows
             .iter()
             .map(|w| {
@@ -287,25 +345,37 @@ impl BertReader {
                 v
             })
             .collect();
-        let (logits, width, n_labels) = self.run(&ids)?;
+        let out = self.run(&ids)?;
 
-        let mut out = Vec::new();
+        let mut line = LineScores::default();
         for (b, w) in windows.iter().enumerate() {
             for i in w.keep.clone() {
+                // 窓 b の中のトークン位置（先頭の [CLS] の分ずらす）。
+                let row = b * out.width + 1 + i - w.span.start;
                 let (byte_pos, ch) = chars[i];
-                let Some(allowed) = self.cands.get(&ch) else {
-                    continue;
-                };
-                let t = 1 + i - w.span.start;
-                let row = &logits[(b * width + t) * n_labels..(b * width + t + 1) * n_labels];
-                out.push(SlotScores {
-                    byte_pos,
-                    candidates: softmax_over(row, allowed),
-                });
+                if let Some(allowed) = self.cands.get(&ch) {
+                    let l = out.n_labels;
+                    line.slots.push(SlotScores {
+                        byte_pos,
+                        candidates: softmax_over(&out.logits[row * l..(row + 1) * l], allowed),
+                    });
+                }
+                if let Some(boundary) = &out.boundary
+                    && has_gap(i)
+                {
+                    line.splits.push(SplitScore {
+                        byte_pos: chars[i + 1].0,
+                        prob: sigmoid(boundary[row]),
+                    });
+                }
             }
         }
-        Ok(out)
+        Ok(line)
     }
+}
+
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
 }
 
 /// `allowed` のラベルだけで softmax を取り、(ラベル番号, 確率) を確率の降順に並べる。
@@ -331,7 +401,7 @@ impl SlotReader for BertReader {
         &self.labels
     }
 
-    fn read_line(&self, text: &str) -> Result<Vec<SlotScores>, String> {
+    fn read_line(&self, text: &str) -> Result<LineScores, String> {
         self.read(text).map_err(|e| e.to_string())
     }
 }
@@ -373,7 +443,12 @@ mod tests {
         let lines: Vec<&str> = text.lines().collect();
         let n_chars: usize = lines.iter().map(|l| l.chars().count()).sum();
         for int8 in [true, false] {
-            let reader = BertReader::load(&dir, &BertOptions { int8, threads }).unwrap();
+            let options = BertOptions {
+                int8,
+                threads,
+                ..BertOptions::default()
+            };
+            let reader = BertReader::load(&dir, &options).unwrap();
             let t0 = std::time::Instant::now();
             for line in &lines {
                 reader.read(line).unwrap();
@@ -390,7 +465,8 @@ mod tests {
 
     /// `MOMO_BERT_DIR`（`export_onnx` の出力）があれば、Python が書いた参照 logit と突き合わせる。
     ///
-    /// float32 版は logit の最大差、int8 版は候補内 argmax の一致率を見る。
+    /// float32 版は logit の最大差、int8 版は候補内 argmax の一致率を見る。境界の出力が
+    /// あれば、同じく float32 版は logit の最大差、int8 版はマスあけの判定の一致率を見る。
     #[test]
     fn matches_python_reference() {
         let Ok(dir) = std::env::var("MOMO_BERT_DIR") else {
@@ -404,8 +480,19 @@ mod tests {
             .map(|l| serde_json::from_str(l).unwrap())
             .collect();
         for int8 in [false, true] {
-            let reader = BertReader::load(&dir, &BertOptions { int8, threads: 0 }).unwrap();
+            let options = BertOptions {
+                int8,
+                threads: 0,
+                ..BertOptions::default()
+            };
+            let reader = BertReader::load(&dir, &options).unwrap();
+            assert_eq!(
+                reader.has_boundary(),
+                refs.iter().all(|r| r.get("boundary").is_some()),
+                "境界の出力の有無が参照と合わない"
+            );
             let (mut max_diff, mut hit, mut n) = (0f32, 0, 0);
+            let (mut b_max_diff, mut b_hit, mut b_n) = (0f32, 0, 0);
             for r in &refs {
                 let text = r["text"].as_str().unwrap();
                 let ids: Vec<i64> = r["ids"]
@@ -421,7 +508,17 @@ mod tests {
                     .chain(std::iter::once(reader.vocab.sep))
                     .collect();
                 assert_eq!(mine, ids, "{text}");
-                let (logits, _, l) = reader.run(&[ids]).unwrap();
+                let out = reader.run(&[ids]).unwrap();
+                let (logits, l) = (&out.logits, out.n_labels);
+                if let (Some(got), Some(want)) = (&out.boundary, r.get("boundary")) {
+                    // 参照は文字ごと（[CLS] を除く）。
+                    for (t, w) in want.as_array().unwrap().iter().enumerate() {
+                        let (a, b) = (got[1 + t], w.as_f64().unwrap() as f32);
+                        b_max_diff = b_max_diff.max((a - b).abs());
+                        b_hit += ((a >= 0.0) == (b >= 0.0)) as usize;
+                        b_n += 1;
+                    }
+                }
                 for (p, want) in r["pos"]
                     .as_array()
                     .unwrap()
@@ -449,14 +546,27 @@ mod tests {
                 }
             }
             eprintln!("int8={int8}: logit 最大差 {max_diff:.2e}、候補内 argmax 一致 {hit}/{n}");
+            if b_n > 0 {
+                eprintln!(
+                    "int8={int8}: 境界 logit 最大差 {b_max_diff:.2e}、マスあけの判定の一致 {b_hit}/{b_n}"
+                );
+            }
             if int8 {
                 assert!(
                     hit * 100 >= n * 95,
                     "int8 の argmax 一致が 95% 未満: {hit}/{n}"
                 );
+                assert!(
+                    b_hit * 100 >= b_n * 95,
+                    "int8 のマスあけの判定の一致が 95% 未満: {b_hit}/{b_n}"
+                );
             } else {
                 assert!(max_diff < 1e-3, "float32 の logit 最大差 {max_diff}");
                 assert_eq!(hit, n);
+                assert!(
+                    b_max_diff < 1e-3,
+                    "float32 の境界 logit 最大差 {b_max_diff}"
+                );
             }
         }
     }

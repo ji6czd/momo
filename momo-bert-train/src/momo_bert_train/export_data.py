@@ -11,7 +11,7 @@
     uv run export_data --w7 path/to/basic_data_7.mbm   # dev に w7 の読みと自信度も添える
 
 出力: work/data/
-  train_full.jsonl, dev_full.jsonl  行ごとの原文とスロット（[文字, 読み, 文字種, 開始, 終了]）。
+  train_full.jsonl, dev_full.jsonl  行ごとの原文とスロット（[文字, 読み, 文字種, 開始, 終了, 後ろのマスあけ]）。
                                     --w7 を付けると dev に w7 の読み（w7）と自信度（conf）を添える
   train_raw.tsv, dev_raw.tsv        basic_raw.tsv 形式の分割。trainer に渡すと train だけの w7 を作れる
   meta.json
@@ -49,7 +49,7 @@ def is_dev(text: str, modulus: int = MODULUS) -> bool:
 
 
 def slot_rows(g: GoldSentence) -> list[list]:
-    return [[s.surface, s.gold, s.ctype, s.start, s.end] for s in g.slots]
+    return [[s.surface, s.gold, s.ctype, s.start, s.end, s.space] for s in g.slots]
 
 
 def w7_readings(w7, g: GoldSentence) -> tuple[list[str], list[float]]:

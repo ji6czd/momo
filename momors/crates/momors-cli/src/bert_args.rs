@@ -6,8 +6,8 @@ use momors_bert::{BertOptions, BertReader, DEFAULT_DIR_NAME};
 
 #[derive(Debug, clap::Args)]
 pub struct BertArgs {
-    /// BERT 読みモード: 漢字・漢数字の読みを微調整 BERT で推論する。
-    /// モデルは .mbm と同じ既定のディレクトリの下の momo-bert/ から読む
+    /// BERT 読みモード: 漢字・漢数字の読み（境界も学習したモデルならマスあけも）を
+    /// 微調整 BERT で推論する。モデルは .mbm と同じ既定のディレクトリの下の momo-bert/ から読む
     #[arg(long, global = true)]
     pub bert: bool,
 
@@ -23,6 +23,11 @@ pub struct BertArgs {
     /// BERT の演算スレッド数（0 は ONNX Runtime の既定＝物理コア数）
     #[arg(long, default_value_t = 0, value_name = "N", global = true)]
     pub bert_threads: usize,
+
+    /// BERT は読みだけに使い、マスあけは境界モデルで決める
+    /// （既定では、境界も学習した BERT モデルならマスあけも BERT で決める）
+    #[arg(long, global = true)]
+    pub bert_no_boundary: bool,
 }
 
 impl BertArgs {
@@ -45,6 +50,7 @@ impl BertArgs {
         let options = BertOptions {
             int8: !self.bert_f32,
             threads: self.bert_threads,
+            boundary: !self.bert_no_boundary,
         };
         BertReader::load(dir, &options)
             .map(Some)

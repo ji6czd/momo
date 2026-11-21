@@ -55,7 +55,7 @@ uv run step7_head --vectors L1_w0                    # 分類器の学習（dev 
 
 ```bash
 uv run make_kit                          # データを作り直し、クラウド用 work/bert_kit.zip を作る
-# クラウドで: uv run step9_finetune [--all-data --name full]
+# クラウドで: uv run step9_finetune [--all-data] [--boundary]（--boundary は読みと境界の同時学習。名前は train_joint / full_joint）
 uv run step10_infer --name train "文"     # 保存したモデルで読みを表示（手元の CPU）
 uv run step11_audit                      # 全データで学習したモデルと注釈の食い違い一覧
 uv run audit_raw                         # 注釈どうしの食い違い一覧（モデルを使わない。--w7・--sudachi も）
@@ -81,6 +81,7 @@ uv run export_onnx --name full --no-eval # 実用（全データで学習した�
 - 配布用の `work/onnx/momo-bert-<名前>.zip` も作る（中は `momo-bert/`。int8 版・表・語彙・meta・NOTICE・LICENSE（元のモデルの Apache-2.0 の本文）。`--zip-f32` で float32 版も入る）。本体のリリースのあと `gh release upload <tag> work/onnx/momo-bert-full.zip` で上げる。
 - `meta.json` の `basic_raw_sha256` は、学習に使った basic_raw.tsv の SHA-256（改行コードは無視）。`export_data` → `make_kit` → `step9_finetune` の順に引き継がれる。書き出すときに今の basic_raw.tsv と違えば注意が出る（本体の w7 と同じデータから作ったかの確認）。
 - int8 版は、出力層と最後の 2 層の FFN 出力を float32 のまま残す。全部 int8 にすると dev が 0.35pt 落ちるため。
+- 境界も学習したモデル（`--boundary`）は、出力 `boundary_logits` も書き出す。momo 本体はこれがあればマスあけも BERT で決め、漢字の無い行も BERT に通す（読みだけに使うなら `momo --bert-no-boundary`、`momors_py.Predictor(..., bert_boundary=False)`）。
 
 momo 本体（`momo` / `momo-inspect` / momors_py）は既定で BERT 読みモードを含む（feature `bert`。ONNX Runtime はビルド時に取得される）。
 モデルの既定の場所は、.mbm を探す既定のディレクトリ（`MOMO_DATASET_DIR`、無ければ実行ファイルの場所）の
@@ -102,7 +103,8 @@ Rust の推論経路で w7 と比べるには、feature `bert` 付き（既定�
 
 ```bash
 uv sync
-uv run step12_rust_eval                  # w7（work/w7_train）と w7＋BERT（work/onnx/train）を dev で比べる
+uv run step12_rust_eval                  # w7（work/w7_train）と w7＋BERT（work/onnx/train）の読みを dev で比べる
+uv run step14_boundary_eval              # マスあけを比べる: w7・BERT 単体（work/finetuned/train_joint）・w7＋BERT（work/onnx/train_joint）
 ```
 
 ## 物差し

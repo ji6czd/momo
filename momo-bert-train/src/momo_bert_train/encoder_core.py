@@ -191,11 +191,16 @@ def make_example(
     cands: Candidates,
     context: str = "",
     window: int = 0,
+    last_gap: bool = False,
 ) -> Example:
     """文脈（前の文）を付けるときは原文の前に連結し、位置をずらす。長すぎれば文脈を古い方から削る。
 
     window > 0 なら、スロットごとに前後 window 文字だけを見せる短い入力に切る（行全体の文脈を
-    使っているかを確かめる実験用。w7 の window=7 は前後 3 文字）。"""
+    使っているかを確かめる実験用。w7 の window=7 は前後 3 文字）。
+
+    last_gap なら、断片（crop）の最後のスロットの後ろの切れ目も、元の行の注釈で境界の学習に使う
+    （元の行でもそこが切れ目のとき。rec.tail_gap）。最後の字は [SEP] の直前に来るので、そこに学習の
+    目標が無いと、その字の隠れ状態が [SEP] と同じに潰れてもかまわなくなる。"""
     room = MAX_LEN - 2 - len(rec.text)
     context = context[len(context) - room :] if 0 < room < len(context) else ""
     if room <= 0:
@@ -218,6 +223,15 @@ def make_example(
         ex.bpos.append(off + a.end - 1)
         ex.bgold.append(int(a.space))
         ex.bslot.append(i)
+    last = rec.slots[-1] if rec.slots else None
+    if (
+        last_gap
+        and getattr(rec, "tail_gap", False)
+        and off + last.end - 1 < len(ids) - 1
+    ):
+        ex.bpos.append(off + last.end - 1)
+        ex.bgold.append(int(last.space))
+        ex.bslot.append(len(rec.slots) - 1)
     if not window:
         return ex
     chars = vocab.encode(context + rec.text)
@@ -246,8 +260,17 @@ DEV_FRAGMENTS = {
 
 
 def crop(rec: Rec, i: int, j: int) -> Rec:
-    """rec.slots[i] から rec.slots[j] まで（両端を含む）を 1 行にしたもの。位置は切り出した先頭から数え直す。"""
+    """rec.slots[i] から rec.slots[j] まで（両端を含む）を 1 行にしたもの。位置は切り出した先頭から数え直す。
+
+    tail_gap は、元の行で最後のスロットの後ろが切れ目か（行末でなく、空白をはさまない）。"""
     base = rec.slots[i].start
+    nxt = rec.slots[j + 1] if j + 1 < len(rec.slots) else None
+    tail_gap = (
+        nxt is not None
+        and not rec.text[rec.slots[j].end : nxt.start]
+        and not rec.slots[j].surface.isspace()
+        and not nxt.surface.isspace()
+    )
     return Rec(
         {
             "text": rec.text[base : rec.slots[j].end],
@@ -255,6 +278,7 @@ def crop(rec: Rec, i: int, j: int) -> Rec:
                 [s.surface, s.gold, s.ctype, s.start - base, s.end - base, s.space]
                 for s in rec.slots[i : j + 1]
             ],
+            "tail_gap": tail_gap,
         }
     )
 
@@ -297,11 +321,15 @@ def dev_fragments(recs: list[Rec]) -> list[Rec]:
     )
 
 
-def boundary_examples(recs, vocab, labels, cands) -> list[Example]:
-    """境界だけの例（読みの位置を持たない）。断片を境界の学習にだけ使うときのもの。"""
+def boundary_examples(
+    recs, vocab, labels, cands, last_gap: bool = False
+) -> list[Example]:
+    """境界だけの例（読みの位置を持たない）。断片を境界の学習にだけ使うときのもの。
+
+    last_gap なら、断片の最後の切れ目も学習に使う（make_example）。"""
     out = []
     for r in recs:
-        ex = make_example(r, vocab, labels, cands)
+        ex = make_example(r, vocab, labels, cands, last_gap=last_gap)
         if ex.bpos:
             out.append(
                 Example(ex.ids, [], [], [], [], None, ex.bpos, ex.bgold, ex.bslot)
@@ -684,4 +712,51 @@ def predict_boundary(
             n = len(exs[i].bpos)
             out[i] = prob[j : j + n]
             j += n
+    return out
+
+
+@torch.no_grad()
+def collapse_stats(
+    model: ReadingModel,
+    exs: list[Example],
+    vocab: CharVocab,
+    device: str,
+    batch_size: int = 64,
+    tol: float = 1e-2,
+) -> dict:
+    """最終層の隠れ状態が [SEP] と同じに潰れた字の割合（float32 で測る）。
+
+    BERT には、目標の無い位置の隠れ状態を [SEP] と同じにしてしまう癖がある（事前学習のままでも
+    行末の「。」などで起きる）。潰れた字どうしは出力層から区別できず、境界の出力層はそこで
+    1 つの値（潰れた切れ目のうち注釈がマスあけの割合）しか出せない。
+
+    返り値: all（全部の字）、last（[SEP] の直前の字）、inner（それ以外の字）の割合と、
+    境界の出力層があれば sep_prob（[SEP] の位置のマスあけの確率の中央値）。"""
+    model.to(device).eval()
+    n_all = c_all = n_last = c_last = 0
+    sep = []
+    order = sorted(range(len(exs)), key=lambda i: len(exs[i].ids))
+    for k in range(0, len(order), batch_size):
+        batch = [exs[i] for i in order[k : k + batch_size]]
+        ids, mask, *_ = collate(batch, vocab.pad, device)
+        h = model.encode(ids, mask).float()
+        for b, e in enumerate(batch):
+            n = len(e.ids)
+            if n < 3:
+                continue
+            same = (h[b, 1 : n - 1] - h[b, n - 1]).abs().amax(-1) < tol
+            c_all += int(same.sum())
+            n_all += n - 2
+            c_last += int(same[-1])
+            n_last += 1
+            sep.append(h[b, n - 1])
+    out = {
+        "all": c_all / max(n_all, 1),
+        "last": c_last / max(n_last, 1),
+        "inner": (c_all - c_last) / max(n_all - n_last, 1),
+    }
+    if model.boundary_head is not None and sep:
+        out["sep_prob"] = (
+            model.boundary_head(torch.stack(sep)).squeeze(-1).sigmoid().median().item()
+        )
     return out

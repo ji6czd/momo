@@ -26,6 +26,12 @@ step10_infer.py が手元の CPU で読み込める。
 --fragments N は、境界の学習に、行の途中から途中までを切り出した断片（--fragment-min〜--fragment-max 字）を
 1 行あたり平均 N 個足す。断片はエポックごとに切り直す。読みの学習には使わない（読みは行全体だけで学ぶ）。
 行全体だけで学習すると、見出し・表の欄・スクリーンリーダーが送る文の切れ端のような短い入力でマスあけを外す。
+--fragment-last-gap を付けると、断片の最後の切れ目（[SEP] の直前の字の後ろ）も元の行の注釈で学習する
+（名前は _frag_last）。推論では行末の切れ目を問わないので、使うときの動きは変わらない。
+
+各エポックの終わりに、dev の読み・境界に加えて、最終層の隠れ状態が [SEP] と同じに潰れた字の割合
+（dev の行全体、dev の断片の最後の字とそれ以外）と、[SEP] の位置のマスあけの確率を出す。
+潰れた字どうしは境界の出力層から区別できない。エポックごとの値は history.jsonl と meta.json の history に残る。
 
 学習の途中の状態を 5 分ごとと各エポックの終わりに work/finetuned/<名前>/checkpoint.pt に保存する。
 VM がプリエンプトされたら、同じコマンドを打ち直せば続きから学習する（設定かデータが違えば最初から）。
@@ -49,6 +55,7 @@ from .common import (
     Labels,
     boundary_examples,
     build_model,
+    collapse_stats,
     dev_fragments,
     fragments,
     load_jsonl,
@@ -142,6 +149,11 @@ def main() -> None:
     ap.add_argument("--fragment-min", type=int, default=2, help="断片の最小の字数")
     ap.add_argument("--fragment-max", type=int, default=20, help="断片の最大の字数")
     ap.add_argument(
+        "--fragment-last-gap",
+        action="store_true",
+        help="断片の最後の切れ目も、元の行の注釈で境界の学習に使う",
+    )
+    ap.add_argument(
         "--checkpoint-minutes",
         type=float,
         default=5.0,
@@ -164,12 +176,15 @@ def main() -> None:
         raise SystemExit(
             "--fragments は境界の学習に使うので、--boundary と一緒に指定する"
         )
+    if args.fragment_last_gap and not args.fragments:
+        raise SystemExit("--fragment-last-gap は --fragments と一緒に指定する")
 
     fit = train_recs + dev_recs if args.all_data else train_recs
     name = args.name or (
         ("smoke" if args.smoke else "full" if args.all_data else "train")
         + ("_joint" if args.boundary else "")
         + ("_frag" if args.fragments else "")
+        + ("_last" if args.fragment_last_gap else "")
     )
     out_dir = WORK / "finetuned" / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -188,7 +203,9 @@ def main() -> None:
         )
         + (
             f" / 境界に断片を 1 行平均 {args.fragments} 個"
-            f"（{args.fragment_min}〜{args.fragment_max} 字）"
+            f"（{args.fragment_min}〜{args.fragment_max} 字"
+            + ("・最後の切れ目も学習" if args.fragment_last_gap else "")
+            + "）"
             if args.fragments
             else ""
         ),
@@ -200,12 +217,8 @@ def main() -> None:
     model = build_model(args.model, len(labels), vocab, boundary=args.boundary)
     fit_exs = make_examples(fit, vocab, labels, cands)
     dev_exs = make_examples(dev_recs, vocab, labels, cands)
-    # dev の断片は決まった作り方（モデルどうしで同じもの）
-    dev_frag_exs = (
-        make_examples(dev_fragments(dev_recs), vocab, labels, cands)
-        if args.boundary
-        else []
-    )
+    # dev の断片は決まった作り方（モデルどうしで同じもの）。最後の切れ目は測らない（推論でも問わない）
+    dev_frag_exs = make_examples(dev_fragments(dev_recs), vocab, labels, cands)
     # 学習の断片はエポックごとに切り直す（再開しても同じものになるよう、乱数の種を決めておく）
     extra = (
         {
@@ -220,6 +233,7 @@ def main() -> None:
                 vocab,
                 labels,
                 cands,
+                last_gap=args.fragment_last_gap,
             )
             for epoch in range(1, args.epochs + 1)
         }
@@ -227,16 +241,36 @@ def main() -> None:
         else None
     )
 
-    def diag(_epoch: int) -> str:
+    # エポックごとの診断の記録（再開しても前のエポックの分が残るよう、ファイルに足していく）
+    history_path = out_dir / "history.jsonl"
+    if not (out_dir / "checkpoint.pt").exists():
+        history_path.unlink(missing_ok=True)
+
+    def diag(epoch: int) -> str:
         acc = dev_accuracy(model, dev_recs, dev_exs, cands, labels, vocab, args.device)
+        rec: dict = {"epoch": epoch, "dev_acc": acc}
         msg = f"dev={acc:.4f}"
         if args.boundary:
             b = dev_boundary(model, dev_exs, vocab, args.device)
             f = dev_boundary(model, dev_frag_exs, vocab, args.device)
+            rec |= {"boundary_errors": b["errors"], "fragment_errors": f["errors"]}
             msg += (
                 f" 境界F1={b['f1']:.4f}（誤り {b['errors']}）"
                 f" 断片の境界F1={f['f1']:.4f}（誤り {f['errors']}）"
             )
+        cl = collapse_stats(model, dev_exs, vocab, args.device)
+        cf = collapse_stats(model, dev_frag_exs, vocab, args.device)
+        rec |= {
+            "collapse_lines": cl["all"],
+            "collapse_fragment_last": cf["last"],
+            "collapse_fragment_inner": cf["inner"],
+        }
+        msg += f" 潰れ: 行 {cl['all']:.1%}・断片の最後 {cf['last']:.1%}・断片のほか {cf['inner']:.1%}"
+        if "sep_prob" in cl:
+            rec["sep_prob"] = cl["sep_prob"]
+            msg += f"・[SEP] の確率 {cl['sep_prob']:.2f}"
+        with open(history_path, "a", encoding="utf-8") as fp:
+            fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
         return msg
 
     # 続きから再開してよいかの照合に使う（保存先の名前・デバイス・保存間隔は学習の中身に関わらない）
@@ -311,8 +345,17 @@ def main() -> None:
         meta["fragments"] = args.fragments
         if args.fragments:
             meta["fragment_chars"] = [args.fragment_min, args.fragment_max]
+            meta["fragment_last_gap"] = args.fragment_last_gap
         meta["dev_boundary"] = bnd
         meta["dev_boundary_fragments"] = bnd_frag
+    # エポックごとの診断（再開で同じエポックが 2 度書かれていれば、後のものを使う）
+    if history_path.exists():
+        by_epoch = {}
+        for line in history_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                h = json.loads(line)
+                by_epoch[h["epoch"]] = h
+        meta["history"] = [by_epoch[e] for e in sorted(by_epoch)]
     # どの basic_raw.tsv から作ったかを残す（export_data が書いた meta。古いキットには無い）
     data_meta = DATA / "meta.json"
     if data_meta.exists():

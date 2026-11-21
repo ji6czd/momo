@@ -56,6 +56,7 @@ uv run step7_head --vectors L1_w0                    # 分類器の学習（dev 
 ```bash
 uv run make_kit                          # データを作り直し、クラウド用 work/bert_kit.zip を作る
 # クラウドで: bash train_all.sh（下の組み合わせ 6 本をまとめて回し、finetuned.tar にまとめる）
+#   bash train_all.sh collapse は、隠れ状態の潰れを確かめる 2 本（docs/bert-plan.md「隠れ状態の潰れ」）
 #   1 本ずつなら uv run step9_finetune [--all-data] [--boundary [--fragments 1]]
 #   --boundary は読みと境界の同時学習（名前は train_joint / full_joint）。
 #   --fragments は境界の学習に行の断片も足す（名前は train_joint_frag / full_joint_frag）

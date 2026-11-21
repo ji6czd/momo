@@ -33,12 +33,12 @@ STEPS = """
   unzip bert_kit.zip -d bert_kit && cd bert_kit
   curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.local/bin/env
   uv sync
-  uv run step9_finetune --smoke            # 動作確認
-  uv run step9_finetune --smoke --boundary # 動作確認（読みと境界の同時学習）
-  uv run step9_finetune                    # 読みだけ:   train で学習・dev で評価 → train
-  uv run step9_finetune --all-data         # 読みだけ:   全データで学習         → full
-  uv run step9_finetune --boundary         # 同時学習:   train で学習・dev で評価 → train_joint
-  uv run step9_finetune --all-data --boundary  #         全データで学習         → full_joint
+  uv run step9_finetune --smoke --boundary --fragments 1   # 動作確認（同時学習＋断片）
+  uv run step9_finetune --boundary --fragments 1           # train で学習・dev で評価 → train_joint_frag
+  uv run step9_finetune --all-data --boundary --fragments 1  # 全データで学習        → full_joint_frag
+ほかの組み合わせ（今回は不要）:
+  uv run step9_finetune [--all-data]             # 読みだけ        → train / full
+  uv run step9_finetune [--all-data] --boundary  # 同時学習（断片なし）→ train_joint / full_joint
 プリエンプトされたら: VM を起動し直し、同じコマンドを打ち直すと続きから学習する
 手元へ: work/finetuned/<名前>/ を momo-bert-train/work/finetuned/ に置く"""
 

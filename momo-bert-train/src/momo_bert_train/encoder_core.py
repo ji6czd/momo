@@ -18,6 +18,9 @@ step6〜11 と、クラウドのキット（step9_finetune）が使う。momo_tr
   マスをあけるか（注釈の +S）を当てる。momo の境界モデルがスロットの最後の字で問うのと同じ。
 - 行末と、原文の空白をはさむ切れ目は使わない（どちらも momo が原文どおりに扱う）。
 - 漢字の無い行も、境界の学習には使う。
+- 断片（fragments）: 行の途中から途中までを切り出したものを、境界の学習にだけ足せる（読みの学習には
+  使わない）。行全体だけで学習すると、文の続き方を手がかりにしすぎて、見出し・表の欄・スクリーン
+  リーダーが送る文の切れ端のような短い入力でマスあけを外す。切り出した中の切れ目の正解は元の行と同じ。
 """
 
 from __future__ import annotations
@@ -231,6 +234,81 @@ def make_examples(recs, vocab, labels, cands, window: int = 0) -> list[Example]:
     return [make_example(r, vocab, labels, cands, window=window) for r in recs]
 
 
+# ---------------------------------------------------------------- 断片（行の一部の切り出し）
+
+# dev の断片の作り方（モデルどうしを同じ断片で比べるため固定）
+DEV_FRAGMENTS = {
+    "seed": "dev-fragments",
+    "per_line": 1.0,
+    "min_chars": 2,
+    "max_chars": 20,
+}
+
+
+def crop(rec: Rec, i: int, j: int) -> Rec:
+    """rec.slots[i] から rec.slots[j] まで（両端を含む）を 1 行にしたもの。位置は切り出した先頭から数え直す。"""
+    base = rec.slots[i].start
+    return Rec(
+        {
+            "text": rec.text[base : rec.slots[j].end],
+            "slots": [
+                [s.surface, s.gold, s.ctype, s.start - base, s.end - base, s.space]
+                for s in rec.slots[i : j + 1]
+            ],
+        }
+    )
+
+
+def fragments(
+    recs: list[Rec],
+    rng: random.Random,
+    per_line: float,
+    min_chars: int,
+    max_chars: int,
+) -> list[Rec]:
+    """行の途中から途中までを切り出した断片。1 行あたり平均 per_line 個。
+
+    先頭のスロットを選び、min_chars〜max_chars から一様に選んだ字数に届くまでスロットを足す
+    （スロットの途中では切らない）。空白で始まる・終わる断片、行全体と同じになる断片、
+    切れ目の無い断片（1 スロットだけ）は作らない。"""
+    out = []
+    for r in recs:
+        starts = [k for k, s in enumerate(r.slots) if not s.surface.isspace()]
+        n = int(per_line) + (rng.random() < per_line % 1)
+        for _ in range(n if starts else 0):
+            i = rng.choice(starts)
+            want = rng.randint(min_chars, max_chars)
+            j = i
+            while j + 1 < len(r.slots) and r.slots[j].end - r.slots[i].start < want:
+                j += 1
+            while j > i and r.slots[j].surface.isspace():
+                j -= 1
+            if j == i or (i == 0 and j == len(r.slots) - 1):
+                continue
+            out.append(crop(r, i, j))
+    return out
+
+
+def dev_fragments(recs: list[Rec]) -> list[Rec]:
+    """dev の断片（DEV_FRAGMENTS の決まった作り方。step9_finetune と step14_boundary_eval で同じもの）。"""
+    p = DEV_FRAGMENTS
+    return fragments(
+        recs, random.Random(p["seed"]), p["per_line"], p["min_chars"], p["max_chars"]
+    )
+
+
+def boundary_examples(recs, vocab, labels, cands) -> list[Example]:
+    """境界だけの例（読みの位置を持たない）。断片を境界の学習にだけ使うときのもの。"""
+    out = []
+    for r in recs:
+        ex = make_example(r, vocab, labels, cands)
+        if ex.bpos:
+            out.append(
+                Example(ex.ids, [], [], [], [], None, ex.bpos, ex.bgold, ex.bslot)
+            )
+    return out
+
+
 # ---------------------------------------------------------------- モデル
 
 
@@ -359,17 +437,26 @@ def train(
     run_key: dict | None = None,
     checkpoint_every: float = 300.0,
     boundary_weight: float = 1.0,
+    extra: dict[int, list[Example]] | None = None,
 ) -> None:
     """checkpoint を渡すと、エポックの終わりと checkpoint_every 秒ごとに途中の状態を保存し、
     run_key が同じ保存があればその続きから学習する（クラウドの VM がプリエンプトされても、
     同じコマンドを打ち直せば続きから）。学習の結果を保存し終えたら、呼び出し側で消す。
 
     model が境界の出力層を持てば、読みと境界を同時に学習する。損失は
-    読みの交差エントロピー + boundary_weight × 境界の二値交差エントロピー（どちらも位置の平均）。"""
+    読みの交差エントロピー + boundary_weight × 境界の二値交差エントロピー（どちらも位置の平均）。
+
+    extra はエポック（1 から）ごとに exs へ足す例（断片など）。再開できるよう、呼び出し側で
+    決まった作り方にしておく。"""
     joint = model.boundary_head is not None
-    exs = [p for e in exs for p in (e.parts if e.parts is not None else [e])]
-    # 同時学習では、漢字の無い行も境界の学習に使う
-    exs = [e for e in exs if e.pos or (joint and e.bpos)]
+
+    def usable(xs: list[Example]) -> list[Example]:
+        xs = [p for e in xs for p in (e.parts if e.parts is not None else [e])]
+        # 同時学習では、漢字の無い行も境界の学習に使う
+        return [e for e in xs if e.pos or (joint and e.bpos)]
+
+    exs = usable(exs)
+    extra = {k: usable(v) for k, v in (extra or {}).items()}
     table = cands.table.to(device)
     model.to(device).train()
     no_decay = ("bias", "LayerNorm.weight")
@@ -386,11 +473,20 @@ def train(
         },
     ]
     opt = torch.optim.AdamW(params, lr=lr)
-    steps = epochs * ((len(exs) + batch_size - 1) // batch_size)
+
+    def epoch_exs(epoch: int) -> list[Example]:
+        return exs + extra.get(epoch, [])
+
+    steps = sum(
+        (len(epoch_exs(e)) + batch_size - 1) // batch_size for e in range(1, epochs + 1)
+    )
     sched = get_linear_schedule_with_warmup(opt, int(steps * warmup), steps)
     dtype, scaler = amp_mode(device)
+    n_extra = sum(len(v) for v in extra.values())
     log(
-        f"  学習 {len(exs)} 行・{steps} ステップ・精度={dtype or 'float32'}"
+        f"  学習 {len(exs)} 行"
+        + (f"＋断片など 1 エポック平均 {n_extra / epochs:.0f} 個" if n_extra else "")
+        + f"・{steps} ステップ・精度={dtype or 'float32'}"
         + (f"・読みと境界の同時学習（境界の重み {boundary_weight}）" if joint else "")
     )
 
@@ -444,10 +540,11 @@ def train(
     t0 = last_save = time.time()
     for epoch in range(start_epoch, epochs + 1):
         model.train()
-        order = list(range(len(exs)))
+        cur = epoch_exs(epoch)
+        order = list(range(len(cur)))
         random.Random(seed * 1000 + epoch).shuffle(order)
         for k in range(start_k, len(order), batch_size):
-            batch = [exs[i] for i in order[k : k + batch_size]]
+            batch = [cur[i] for i in order[k : k + batch_size]]
             ids, mask, pos_b, pos_t, rows, gold = collate(batch, vocab.pad, device)
             with torch.autocast(
                 device_type="cuda", dtype=dtype, enabled=dtype is not None

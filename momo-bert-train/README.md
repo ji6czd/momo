@@ -55,7 +55,10 @@ uv run step7_head --vectors L1_w0                    # 分類器の学習（dev 
 
 ```bash
 uv run make_kit                          # データを作り直し、クラウド用 work/bert_kit.zip を作る
-# クラウドで: uv run step9_finetune [--all-data] [--boundary]（--boundary は読みと境界の同時学習。名前は train_joint / full_joint）
+# クラウドで: uv run step9_finetune [--all-data] [--boundary [--fragments 1]]
+#   --boundary は読みと境界の同時学習（名前は train_joint / full_joint）。
+#   --fragments は境界の学習に行の断片も足す（名前は train_joint_frag / full_joint_frag）
+uv run step14_boundary_eval --fragments  # dev から切り出した断片でマスあけを比べる
 uv run step10_infer --name train "文"     # 保存したモデルで読みを表示（手元の CPU）
 uv run step11_audit                      # 全データで学習したモデルと注釈の食い違い一覧
 uv run audit_raw                         # 注釈どうしの食い違い一覧（モデルを使わない。--w7・--sudachi も）

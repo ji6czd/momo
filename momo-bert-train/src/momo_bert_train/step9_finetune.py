@@ -8,18 +8,24 @@ step10_infer.py が手元の CPU で読み込める。
     uv run python -m momo_bert_train.step9_finetune                          # train で学習し、dev で評価して保存
     uv run python -m momo_bert_train.step9_finetune --all-data --name full   # train+dev の全データで学習して保存
     uv run python -m momo_bert_train.step9_finetune --boundary               # 読みと境界（マスあけ）を同時に学習
+    uv run python -m momo_bert_train.step9_finetune --boundary --fragments 1 # 境界の学習に行の断片も足す
 
 出力: work/finetuned/<名前>/
   model.pt      ReadingModel の重み（float32。--boundary では境界の出力層も入る）
   encoder.json  BERT 本体の構成（学習済みの重みを取り直さずに読み込める）
   labels.json   読みのラベル表
   cands.json    文字 → 読み候補（ラベル番号）の辞書
-  meta.json     学習の設定と dev の一致率（--boundary では境界の誤りの数と F1 も）、学習データの meta
-                （basic_raw.tsv のハッシュ）
+  meta.json     学習の設定と dev の一致率（--boundary では境界の誤りの数と F1 も。dev の行全体と、
+                dev から決まった作り方で切り出した断片の両方）、学習データの meta（basic_raw.tsv のハッシュ）
 
-名前の既定は train / full。--boundary を付けると train_joint / full_joint。
+名前の既定は train / full。--boundary を付けると train_joint / full_joint、さらに --fragments を
+付けると train_joint_frag / full_joint_frag。
 --all-data では dev も学習に使うので、meta の dev 一致率は学習済みの文での値（評価にならない）。
 境界の dev の数字は、切れ目ごと（行末と原文の空白をはさむ切れ目を除く）に、確率 0.5 以上をマスあけとして数える。
+
+--fragments N は、境界の学習に、行の途中から途中までを切り出した断片（--fragment-min〜--fragment-max 字）を
+1 行あたり平均 N 個足す。断片はエポックごとに切り直す。読みの学習には使わない（読みは行全体だけで学ぶ）。
+行全体だけで学習すると、見出し・表の欄・スクリーンリーダーが送る文の切れ端のような短い入力でマスあけを外す。
 
 学習の途中の状態を 5 分ごとと各エポックの終わりに work/finetuned/<名前>/checkpoint.pt に保存する。
 VM がプリエンプトされたら、同じコマンドを打ち直せば続きから学習する（設定かデータが違えば最初から）。
@@ -41,7 +47,10 @@ from .common import (
     Candidates,
     CharVocab,
     Labels,
+    boundary_examples,
     build_model,
+    dev_fragments,
+    fragments,
     load_jsonl,
     make_examples,
     predict,
@@ -125,6 +134,14 @@ def main() -> None:
         help="同時学習で、読みの損失に足す境界の損失の重み",
     )
     ap.add_argument(
+        "--fragments",
+        type=float,
+        default=0.0,
+        help="境界の学習に足す、行を切り出した断片の 1 行あたりの平均の数（--boundary のとき。0 で足さない）",
+    )
+    ap.add_argument("--fragment-min", type=int, default=2, help="断片の最小の字数")
+    ap.add_argument("--fragment-max", type=int, default=20, help="断片の最大の字数")
+    ap.add_argument(
         "--checkpoint-minutes",
         type=float,
         default=5.0,
@@ -143,11 +160,16 @@ def main() -> None:
             "学習データにマスあけ（+S）が入っていない（古いデータ）。"
             "手元で make_kit を実行してキットを作り直す"
         )
+    if args.fragments and not args.boundary:
+        raise SystemExit(
+            "--fragments は境界の学習に使うので、--boundary と一緒に指定する"
+        )
 
     fit = train_recs + dev_recs if args.all_data else train_recs
     name = args.name or (
         ("smoke" if args.smoke else "full" if args.all_data else "train")
         + ("_joint" if args.boundary else "")
+        + ("_frag" if args.fragments else "")
     )
     out_dir = WORK / "finetuned" / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +185,12 @@ def main() -> None:
             f" / 読みと境界の同時学習（境界の重み {args.boundary_weight}）"
             if args.boundary
             else ""
+        )
+        + (
+            f" / 境界に断片を 1 行平均 {args.fragments} 個"
+            f"（{args.fragment_min}〜{args.fragment_max} 字）"
+            if args.fragments
+            else ""
         ),
         flush=True,
     )
@@ -172,13 +200,43 @@ def main() -> None:
     model = build_model(args.model, len(labels), vocab, boundary=args.boundary)
     fit_exs = make_examples(fit, vocab, labels, cands)
     dev_exs = make_examples(dev_recs, vocab, labels, cands)
+    # dev の断片は決まった作り方（モデルどうしで同じもの）
+    dev_frag_exs = (
+        make_examples(dev_fragments(dev_recs), vocab, labels, cands)
+        if args.boundary
+        else []
+    )
+    # 学習の断片はエポックごとに切り直す（再開しても同じものになるよう、乱数の種を決めておく）
+    extra = (
+        {
+            epoch: boundary_examples(
+                fragments(
+                    fit,
+                    random.Random(f"fragments-{args.seed}-{epoch}"),
+                    args.fragments,
+                    args.fragment_min,
+                    args.fragment_max,
+                ),
+                vocab,
+                labels,
+                cands,
+            )
+            for epoch in range(1, args.epochs + 1)
+        }
+        if args.fragments
+        else None
+    )
 
     def diag(_epoch: int) -> str:
         acc = dev_accuracy(model, dev_recs, dev_exs, cands, labels, vocab, args.device)
         msg = f"dev={acc:.4f}"
         if args.boundary:
             b = dev_boundary(model, dev_exs, vocab, args.device)
-            msg += f" 境界F1={b['f1']:.4f}（誤り {b['errors']}）"
+            f = dev_boundary(model, dev_frag_exs, vocab, args.device)
+            msg += (
+                f" 境界F1={b['f1']:.4f}（誤り {b['errors']}）"
+                f" 断片の境界F1={f['f1']:.4f}（誤り {f['errors']}）"
+            )
         return msg
 
     # 続きから再開してよいかの照合に使う（保存先の名前・デバイス・保存間隔は学習の中身に関わらない）
@@ -208,12 +266,17 @@ def main() -> None:
         run_key=run_key,
         checkpoint_every=args.checkpoint_minutes * 60,
         boundary_weight=args.boundary_weight,
+        extra=extra,
     )
     acc = dev_accuracy(model, dev_recs, dev_exs, cands, labels, vocab, args.device)
     print(f"dev 漢字スロット一致率 {acc:.4f}（{time.time() - t0:.0f} 秒）", flush=True)
     bnd = dev_boundary(model, dev_exs, vocab, args.device) if args.boundary else None
+    bnd_frag = (
+        dev_boundary(model, dev_frag_exs, vocab, args.device) if args.boundary else None
+    )
     if bnd:
         print(f"dev {boundary_summary(bnd)}", flush=True)
+        print(f"dev の断片 {boundary_summary(bnd_frag)}", flush=True)
 
     model.cpu()
     torch.save(model.state_dict(), out_dir / "model.pt")
@@ -245,7 +308,11 @@ def main() -> None:
     }
     if bnd:
         meta["boundary_weight"] = args.boundary_weight
+        meta["fragments"] = args.fragments
+        if args.fragments:
+            meta["fragment_chars"] = [args.fragment_min, args.fragment_max]
         meta["dev_boundary"] = bnd
+        meta["dev_boundary_fragments"] = bnd_frag
     # どの basic_raw.tsv から作ったかを残す（export_data が書いた meta。古いキットには無い）
     data_meta = DATA / "meta.json"
     if data_meta.exists():

@@ -6,6 +6,11 @@
     uv run step14_boundary_eval --threshold 0.4      # BERT 単体でマスをあける確率の閾値（既定 0.5）
     uv run step14_boundary_eval --onnx ""            # Rust の経路を省く
     uv run step14_boundary_eval --bert-f32           # Rust の経路で float32 版の ONNX を使う（既定は int8 版）
+    uv run step14_boundary_eval --fragments          # dev の行全体でなく、dev から切り出した断片で比べる
+
+--fragments の断片は step9_finetune が dev の断片の境界を測るのと同じもの（encoder_core.DEV_FRAGMENTS の
+決まった作り方で、dev の行の途中から途中までを 2〜20 字切り出す）。見出しや表の欄、スクリーンリーダーが
+送る文の切れ端のような短い入力での強さを見る。
 
 切れ目は step9_finetune の境界の学習と同じ（隣り合うスロットの間。行末と、原文の空白をはさむ切れ目は除く）。
 - w7 は momo 本体の推論経路（英数字ランの保証・括弧・助数詞・カスタム辞書などの規則込み）が出した空白。
@@ -14,7 +19,7 @@
   BERT が確率を付けた切れ目は BERT で、規則で決まる位置は規則で決まる。実際に配る形の数字。
 w7 は train だけで学習したもの（作り方は README）。全データで学習した w7 は dev を学習済みで比較にならない。
 
-出力: work/boundary_eval/<BERT の名前、w7 だけなら w7>/
+出力: work/boundary_eval/<BERT の名前、w7 だけなら w7>/（--fragments では名前の後ろに _fragments）
   summary.json  それぞれの誤りの数（くっつけすぎ＝注釈はあけるのに続けた・分けすぎ）、F1、
                 全部の切れ目が当たった行の割合
   by_type.tsv   切れ目の前後の文字種ごとの、切れ目の数とそれぞれの誤りの数
@@ -39,6 +44,7 @@ from .common import (
     Candidates,
     CharVocab,
     Labels,
+    dev_fragments,
     load_finetuned,
     load_jsonl,
     make_examples,
@@ -124,12 +130,18 @@ def main() -> None:
         "--bert-f32", action="store_true", help="w7+BERT で float32 版の ONNX を使う"
     )
     ap.add_argument("--threshold", type=float, default=0.5)
+    ap.add_argument(
+        "--fragments", action="store_true", help="dev から切り出した断片で比べる"
+    )
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 
     recs = load_jsonl(str(DATA / "dev_full.jsonl"))
     labels = Labels(recs)  # 読みの位置は使わない（make_example の引数を満たすだけ）
     cands = Candidates(recs, labels)
+    if args.fragments:
+        recs = dev_fragments(recs)
+        print(f"dev の断片 {len(recs)} 個", flush=True)
     vocab = CharVocab.from_model(DEFAULT_MODEL)
     exs = make_examples(recs, vocab, labels, cands)
 
@@ -233,7 +245,8 @@ def main() -> None:
             lines_ok[k] += ok[k]
 
     name = args.bert or (Path(onnx).name if onnx else "w7")
-    out = WORK / "boundary_eval" / (name if len(systems) > 1 else "w7")
+    name = name if len(systems) > 1 else "w7"
+    out = WORK / "boundary_eval" / (name + ("_fragments" if args.fragments else ""))
     out.mkdir(parents=True, exist_ok=True)
     summary = {
         "w7": args.w7,
@@ -241,6 +254,7 @@ def main() -> None:
         "onnx": onnx or None,
         "onnx_f32": args.bert_f32 if onnx else None,
         "threshold": args.threshold,
+        "fragments": args.fragments,
         "lines": len(recs),
     }
     print()

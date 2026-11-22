@@ -60,6 +60,8 @@ pub(crate) fn lookup(c: char) -> Option<(Role, Treatment)> {
         '」' => (Close, Inline),
         '『' => (Open, Inline),
         '』' => (Close, Inline),
+        '《' => (Open, Inline),
+        '》' => (Close, Inline),
         '“' => (Open, Inline),
         '”' => (Close, Inline),
         '‘' => (Open, Inline),
@@ -103,6 +105,7 @@ pub(crate) fn is_pair(open: char, close: char) -> bool {
         (open, close),
         ('「', '」')
             | ('『', '』')
+            | ('《', '》')
             | ('“', '”')
             | ('‘', '’')
             | ('（', '）')
@@ -139,7 +142,7 @@ mod tests {
 
     #[test]
     fn quotation_is_inline() {
-        for c in "「」『』“”‘’【】".chars() {
+        for c in "「」『』《》“”‘’【】".chars() {
             assert_eq!(lookup(c).map(|(_, t)| t), Some(Treatment::Inline), "{c}");
         }
     }
@@ -153,10 +156,10 @@ mod tests {
 
     #[test]
     fn roles() {
-        for c in "「『“‘（(｛【".chars() {
+        for c in "「『《“‘（(｛【".chars() {
             assert_eq!(lookup(c).map(|(r, _)| r), Some(Role::Open), "{c}");
         }
-        for c in "」』”’）)｝】".chars() {
+        for c in "」』》”’）)｝】".chars() {
             assert_eq!(lookup(c).map(|(r, _)| r), Some(Role::Close), "{c}");
         }
     }

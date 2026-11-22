@@ -42,6 +42,8 @@ _TABLE = {
     "」": (Role.CLOSE, Treatment.INLINE),
     "『": (Role.OPEN, Treatment.INLINE),
     "』": (Role.CLOSE, Treatment.INLINE),
+    "《": (Role.OPEN, Treatment.INLINE),
+    "》": (Role.CLOSE, Treatment.INLINE),
     "“": (Role.OPEN, Treatment.INLINE),  # “
     "”": (Role.CLOSE, Treatment.INLINE),  # ”
     "‘": (Role.OPEN, Treatment.INLINE),  # ‘
@@ -60,6 +62,7 @@ _TABLE = {
 _PAIRS = {
     ("「", "」"),
     ("『", "』"),
+    ("《", "》"),
     ("“", "”"),
     ("‘", "’"),
     ("（", "）"),

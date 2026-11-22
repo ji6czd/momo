@@ -3,6 +3,8 @@
 #
 #   bash train_all.sh            # 6 本: train / full（--all-data）× 読みだけ・同時学習・同時学習＋断片
 #   bash train_all.sh unit       # 2 本: 同時学習＋マスあけの単位で切った断片（train_joint_frag_unit・full_joint_frag_unit）
+#   bash train_all.sh seed       # 3 本: --seed 1 の取り直しで揺れを見る（train_joint_frag_unit_s1・
+#                                #       train_joint_s1・full_joint_frag_unit_s1）
 #   bash train_all.sh collapse   # 2 本: 隠れ状態の潰れを確かめる（語の途中でも切る free の断片で、
 #                                #       train_joint_frag の別シードと、断片の最後の切れ目も学習する版）
 #
@@ -33,6 +35,14 @@ case "${1:-all}" in
       "full_joint_frag_unit|--all-data --boundary --fragments 1"
     )
     ;;
+  seed)
+    smoke="smoke_joint_frag_unit|--smoke --boundary --fragments 1"
+    runs=(
+      "train_joint_frag_unit_s1|--boundary --fragments 1 --seed 1 --name train_joint_frag_unit_s1"
+      "train_joint_s1|--boundary --seed 1 --name train_joint_s1"
+      "full_joint_frag_unit_s1|--all-data --boundary --fragments 1 --seed 1 --name full_joint_frag_unit_s1"
+    )
+    ;;
   collapse)
     smoke="smoke_joint_frag_last|--smoke --boundary --fragments 1 --fragment-cut free --fragment-last-gap"
     runs=(
@@ -41,7 +51,7 @@ case "${1:-all}" in
     )
     ;;
   *)
-    echo "使い方: bash train_all.sh [all|unit|collapse]" >&2
+    echo "使い方: bash train_all.sh [all|unit|seed|collapse]" >&2
     exit 2
     ;;
 esac

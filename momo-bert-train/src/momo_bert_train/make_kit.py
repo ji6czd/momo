@@ -34,7 +34,11 @@ STEPS = """
   unzip bert_kit.zip -d bert_kit && cd bert_kit
   curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.local/bin/env
   uv sync
-  bash train_all.sh unit       # 今回: マスあけの単位で切った断片の 2 本（動作確認のあと）
+  bash train_all.sh seed       # 今回: --seed 1 の取り直し 3 本で揺れを見る（動作確認のあと）
+                               #   train_joint_frag_unit_s1  unit の断片（seed 0 の train_joint_frag_unit と比べる）
+                               #   train_joint_s1            断片なし（seed 0 の train_joint と比べる）
+                               #   full_joint_frag_unit_s1   全データ（回帰の「AI点訳」などの揺れ）
+  bash train_all.sh unit       # マスあけの単位で切った断片の 2 本
                                #   train_joint_frag_unit  dev で比べる用
                                #   full_joint_frag_unit   配る用（全データ）
   bash train_all.sh collapse   # 隠れ状態の潰れを確かめる 2 本（語の途中でも切る free の断片）

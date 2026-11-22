@@ -34,11 +34,14 @@ STEPS = """
   unzip bert_kit.zip -d bert_kit && cd bert_kit
   curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.local/bin/env
   uv sync
-  bash train_all.sh collapse   # 今回: 隠れ状態の潰れを確かめる 2 本（動作確認のあと）
-                               #   train_joint_frag_s1   断片あり・--seed 1（前回の train_joint_frag の取り直し）
-                               #   train_joint_frag_last 断片あり・断片の最後の切れ目も学習（--fragment-last-gap）
-  bash train_all.sh            # 6 本: train_joint_frag・full_joint_frag・train・full・train_joint・full_joint
-1 本ずつなら: uv run step9_finetune [--all-data] [--boundary [--fragments 1 [--fragment-last-gap]]]
+  bash train_all.sh unit       # 今回: マスあけの単位で切った断片の 2 本（動作確認のあと）
+                               #   train_joint_frag_unit  dev で比べる用
+                               #   full_joint_frag_unit   配る用（全データ）
+  bash train_all.sh collapse   # 隠れ状態の潰れを確かめる 2 本（語の途中でも切る free の断片）
+                               #   train_joint_frag_s1   --seed 1（前回の train_joint_frag の取り直し）
+                               #   train_joint_frag_last 断片の最後の切れ目も学習（--fragment-last-gap）
+  bash train_all.sh            # 6 本: train_joint_frag_unit・full_joint_frag_unit・train・full・train_joint・full_joint
+1 本ずつなら: uv run step9_finetune [--all-data] [--boundary [--fragments 1 [--fragment-cut free [--fragment-last-gap]]]]
 プリエンプトされたら: VM を起動し直し、同じコマンドを打ち直すと続きから学習する（済んだものは飛ばす）
 手元へ: finetuned.tar を展開し、finetuned/ の中身を momo-bert-train/work/finetuned/ に置く"""
 

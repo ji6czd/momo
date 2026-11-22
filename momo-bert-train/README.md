@@ -56,11 +56,14 @@ uv run step7_head --vectors L1_w0                    # 分類器の学習（dev 
 ```bash
 uv run make_kit                          # データを作り直し、クラウド用 work/bert_kit.zip を作る
 # クラウドで: bash train_all.sh（下の組み合わせ 6 本をまとめて回し、finetuned.tar にまとめる）
+#   bash train_all.sh unit は、マスあけの単位で切った断片の 2 本（train_joint_frag_unit・full_joint_frag_unit）
 #   bash train_all.sh collapse は、隠れ状態の潰れを確かめる 2 本（docs/bert-plan.md「隠れ状態の潰れ」）
-#   1 本ずつなら uv run step9_finetune [--all-data] [--boundary [--fragments 1]]
+#   1 本ずつなら uv run step9_finetune [--all-data] [--boundary [--fragments 1 [--fragment-cut free]]]
 #   --boundary は読みと境界の同時学習（名前は train_joint / full_joint）。
-#   --fragments は境界の学習に行の断片も足す（名前は train_joint_frag / full_joint_frag）
-uv run step14_boundary_eval --fragments  # dev から切り出した断片でマスあけを比べる
+#   --fragments は境界の学習に行の断片も足す。既定はマスあけの単位の頭から終わりまで 2 単位以上
+#   （名前は train_joint_frag_unit / full_joint_frag_unit）。--fragment-cut free は語の途中でも切る
+#   （名前は train_joint_frag / full_joint_frag）
+uv run step14_boundary_eval --fragments  # dev から切り出した断片でマスあけを比べる（--fragment-cut free も）
 uv run step10_infer --name train "文"     # 保存したモデルで読みを表示（手元の CPU）
 uv run step11_audit                      # 全データで学習したモデルと注釈の食い違い一覧
 uv run audit_raw                         # 注釈どうしの食い違い一覧（モデルを使わない。--w7・--sudachi も）

@@ -18,6 +18,7 @@ DATA = WORK / "data"
 DEFAULT_MODEL = "tohoku-nlp/bert-base-japanese-char-v3"
 
 from .encoder_core import (  # noqa: E402
+    FRAGMENT_CUTS,
     Candidates,
     CharVocab,
     Labels,
@@ -48,6 +49,7 @@ __all__ = [
     "CharVocab",
     "DATA",
     "DEFAULT_MODEL",
+    "FRAGMENT_CUTS",
     "Labels",
     "ReadingModel",
     "Rec",

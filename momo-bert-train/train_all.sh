@@ -2,8 +2,9 @@
 # キットの中で、BERT の微調整をまとめて回す（make_kit がキットに入れる）。
 #
 #   bash train_all.sh            # 6 本: train / full（--all-data）× 読みだけ・同時学習・同時学習＋断片
-#   bash train_all.sh collapse   # 2 本: 隠れ状態の潰れを確かめる（train_joint_frag の別シードと、
-#                                #       断片の最後の切れ目も学習する版）
+#   bash train_all.sh unit       # 2 本: 同時学習＋マスあけの単位で切った断片（train_joint_frag_unit・full_joint_frag_unit）
+#   bash train_all.sh collapse   # 2 本: 隠れ状態の潰れを確かめる（語の途中でも切る free の断片で、
+#                                #       train_joint_frag の別シードと、断片の最後の切れ目も学習する版）
 #
 # 終わったものは work/finetuned/<名前>/meta.json があるので飛ばす。
 # プリエンプトされたら、VM を起動し直して同じコマンドをもう一度実行すれば、途中のものは checkpoint から続ける。
@@ -15,27 +16,36 @@ mkdir -p work/logs
 
 case "${1:-all}" in
   all)
+    smoke="smoke_joint_frag_unit|--smoke --boundary --fragments 1"
     runs=(
-      "train_joint_frag|--boundary --fragments 1"
-      "full_joint_frag|--all-data --boundary --fragments 1"
+      "train_joint_frag_unit|--boundary --fragments 1"
+      "full_joint_frag_unit|--all-data --boundary --fragments 1"
       "train|"
       "full|--all-data"
       "train_joint|--boundary"
       "full_joint|--all-data --boundary"
     )
     ;;
-  collapse)
+  unit)
+    smoke="smoke_joint_frag_unit|--smoke --boundary --fragments 1"
     runs=(
-      "train_joint_frag_s1|--boundary --fragments 1 --seed 1 --name train_joint_frag_s1"
-      "train_joint_frag_last|--boundary --fragments 1 --fragment-last-gap"
+      "train_joint_frag_unit|--boundary --fragments 1"
+      "full_joint_frag_unit|--all-data --boundary --fragments 1"
+    )
+    ;;
+  collapse)
+    smoke="smoke_joint_frag_last|--smoke --boundary --fragments 1 --fragment-cut free --fragment-last-gap"
+    runs=(
+      "train_joint_frag_s1|--boundary --fragments 1 --fragment-cut free --seed 1 --name train_joint_frag_s1"
+      "train_joint_frag_last|--boundary --fragments 1 --fragment-cut free --fragment-last-gap"
     )
     ;;
   *)
-    echo "使い方: bash train_all.sh [all|collapse]" >&2
+    echo "使い方: bash train_all.sh [all|unit|collapse]" >&2
     exit 2
     ;;
 esac
-runs=("smoke_joint_frag_last|--smoke --boundary --fragments 1 --fragment-last-gap" "${runs[@]}")
+runs=("$smoke" "${runs[@]}")
 
 failed=()
 done_runs=()

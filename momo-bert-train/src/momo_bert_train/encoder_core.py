@@ -19,8 +19,12 @@ step6〜11 と、クラウドのキット（step9_finetune）が使う。momo_tr
 - 行末と、原文の空白をはさむ切れ目は使わない（どちらも momo が原文どおりに扱う）。
 - 漢字の無い行も、境界の学習には使う。
 - 断片（fragments）: 行の途中から途中までを切り出したものを、境界の学習にだけ足せる（読みの学習には
-  使わない）。行全体だけで学習すると、文の続き方を手がかりにしすぎて、見出し・表の欄・スクリーン
-  リーダーが送る文の切れ端のような短い入力でマスあけを外す。切り出した中の切れ目の正解は元の行と同じ。
+  使わない）。行全体だけで学習すると、文の続き方を手がかりにしすぎて、見出し・表の欄のような短い入力で
+  マスあけを外す。切り出した中の切れ目の正解は元の行と同じ。
+  切り出し方は 2 つ（cut）。既定の "unit" は、マスあけの単位（マスあけか原文の空白で区切ったひと続き）の
+  頭から終わりまでを 2 単位以上。断片の終わりは必ず妥当な境界になり、行全体と同じ前提（入力の終わり＝
+  行末）に立つ。"free" はスロットの切れ目ならどこでも切る（スクリーンリーダーが送る語の途中の切れ端に
+  近い。2026-11-22 にこちらは優先しないと決め、比べるために残す）。
 """
 
 from __future__ import annotations
@@ -250,7 +254,10 @@ def make_examples(recs, vocab, labels, cands, window: int = 0) -> list[Example]:
 
 # ---------------------------------------------------------------- 断片（行の一部の切り出し）
 
-# dev の断片の作り方（モデルどうしを同じ断片で比べるため固定）
+# 断片の切り出し方。unit＝マスあけの単位の頭から終わりまで（2 単位以上）、free＝スロットの切れ目ならどこでも
+FRAGMENT_CUTS = ("unit", "free")
+
+# dev の断片の作り方（モデルどうしを同じ断片で比べるため固定。切り出し方は dev_fragments の引数）
 DEV_FRAGMENTS = {
     "seed": "dev-fragments",
     "per_line": 1.0,
@@ -283,20 +290,66 @@ def crop(rec: Rec, i: int, j: int) -> Rec:
     )
 
 
+def units(rec: Rec) -> list[tuple[int, int]]:
+    """マスあけの単位。スロット番号の (先頭, 最後)（両端を含む）の並び。
+
+    注釈のマスあけ（+S）と原文の空白で区切ったひと続き。空白のスロットはどの単位にも入らない。"""
+    out = []
+    head = None
+    for k, s in enumerate(rec.slots):
+        if s.surface.isspace():
+            if head is not None:
+                out.append((head, k - 1))
+                head = None
+            continue
+        if head is None:
+            head = k
+        nxt = rec.slots[k + 1] if k + 1 < len(rec.slots) else None
+        if nxt is None or s.space or rec.text[s.end : nxt.start]:
+            out.append((head, k))
+            head = None
+    return out
+
+
 def fragments(
     recs: list[Rec],
     rng: random.Random,
     per_line: float,
     min_chars: int,
     max_chars: int,
+    cut: str = "unit",
 ) -> list[Rec]:
     """行の途中から途中までを切り出した断片。1 行あたり平均 per_line 個。
 
-    先頭のスロットを選び、min_chars〜max_chars から一様に選んだ字数に届くまでスロットを足す
-    （スロットの途中では切らない）。空白で始まる・終わる断片、行全体と同じになる断片、
-    切れ目の無い断片（1 スロットだけ）は作らない。"""
+    cut="unit": 先頭の単位（units）を選び、min_chars〜max_chars から一様に選んだ字数に届くまで単位を
+    足す。少なくとも 2 単位（中にマスあけか原文の空白を 1 つ以上含む）。断片の終わりは必ず単位の終わり
+    （元の行でもマスあけか行末）なので、最後の切れ目は学習に使わなくてよい（momo は行末の境界の
+    スペースを落とす）。単位が 2 つ以下の行からは作れない（行全体と同じになる）。
+
+    cut="free": 先頭のスロットを選び、同じく字数に届くまでスロットを足す（スロットの途中では切らない）。
+    空白で始まる・終わる断片、切れ目の無い断片（1 スロットだけ）は作らない。
+
+    どちらも、行全体と同じになる断片は作らない。"""
+    if cut not in FRAGMENT_CUTS:
+        raise ValueError(f"断片の切り出し方は {FRAGMENT_CUTS} のどれか: {cut!r}")
     out = []
     for r in recs:
+        if cut == "unit":
+            us = units(r)
+            n = int(per_line) + (rng.random() < per_line % 1)
+            for _ in range(n if len(us) > 2 else 0):
+                u = rng.randrange(len(us) - 1)
+                want = rng.randint(min_chars, max_chars)
+                v = u + 1
+                while (
+                    v + 1 < len(us)
+                    and r.slots[us[v][1]].end - r.slots[us[u][0]].start < want
+                ):
+                    v += 1
+                if u == 0 and v == len(us) - 1:
+                    continue
+                out.append(crop(r, us[u][0], us[v][1]))
+            continue
         starts = [k for k, s in enumerate(r.slots) if not s.surface.isspace()]
         n = int(per_line) + (rng.random() < per_line % 1)
         for _ in range(n if starts else 0):
@@ -313,11 +366,18 @@ def fragments(
     return out
 
 
-def dev_fragments(recs: list[Rec]) -> list[Rec]:
-    """dev の断片（DEV_FRAGMENTS の決まった作り方。step9_finetune と step14_boundary_eval で同じもの）。"""
+def dev_fragments(recs: list[Rec], cut: str = "unit") -> list[Rec]:
+    """dev の断片（DEV_FRAGMENTS の決まった作り方。step9_finetune と step14_boundary_eval で同じもの）。
+
+    cut="free" は 2026-11-22 までの dev の断片と同じもの（それまでの数字と比べられる）。"""
     p = DEV_FRAGMENTS
     return fragments(
-        recs, random.Random(p["seed"]), p["per_line"], p["min_chars"], p["max_chars"]
+        recs,
+        random.Random(p["seed"]),
+        p["per_line"],
+        p["min_chars"],
+        p["max_chars"],
+        cut=cut,
     )
 
 

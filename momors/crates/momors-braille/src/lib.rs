@@ -39,7 +39,8 @@ pub mod width;
 pub mod writer;
 
 pub use backtranslator::{
-    BackTransResult, BackTransSegment, BackTransState, BrailleBackTranslator, StepResult,
+    BackTransResult, BackTransSegment, BackTransState, BackTransUnknownCharPolicy,
+    BrailleBackTranslator, StepResult,
 };
 pub use document::{BrailleDocument, DocumentConfig, PageBreak, PageNumberStyle, Segment};
 pub use english_translator::{EnglishResult, EnglishTranslator, embedded_english_displayname};

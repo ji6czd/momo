@@ -6,6 +6,26 @@ const DECIMAL_CELL: char = '⠲'; // 数字モード中の小数点
 const COMMA_CELL: char = '⠄'; // 数字モード中の桁区切り
 
 // ============================================================
+// 逆引きできない文字の扱い
+// ============================================================
+
+/// 逆変換で、テーブルから逆引きできない文字（点字以外の文字・未知の点字セル）の扱い。
+///
+/// 順変換の [`UnknownCharPolicy`](crate::UnknownCharPolicy) と対になる。両方を
+/// `PassThrough` にすれば、順変換がそのまま残した文字が逆変換でもそのまま戻る
+/// （FFI の整数値も 1＝PassThrough で揃えている）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BackTransUnknownCharPolicy {
+    /// 出力しない（デフォルト）。逆変換の結果を使う側が、かな・数字・ラテン文字・
+    /// 記号以外を想定しなくてよい。
+    #[default]
+    Drop,
+    /// 元の文字をそのまま出力する（スクリーンリーダー用途）。順変換を PassThrough に
+    /// した点字を逆変換しても、そのまま残した文字が落ちない。
+    PassThrough,
+}
+
+// ============================================================
 // 状態
 // ============================================================
 
@@ -93,6 +113,7 @@ pub struct StepResult {
 pub struct BackTransSegment {
     /// 対応する点字セルの範囲。半開区間 `[cell_start, cell_end)`、
     /// インデックスは `braille.chars()`（点字セル単位）に対応する。
+    /// 点字以外の文字も 1 つと数える（コードポイント単位）。
     pub cell_start: usize,
     /// 範囲の終端（排他的）。
     pub cell_end: usize,
@@ -110,6 +131,9 @@ pub struct BackTransResult {
     /// - 前置 + 基底（ガ＝⠐⠡）は両セルにまたがる 1 セグメント。
     /// - モードフラグ（数符・外字符）は後続文字のセグメントに吸収される。
     /// - 記号の trailing スペースは直前のセグメントに吸収される。
+    /// - 逆引きできない文字（点字以外・未知のセル）は、
+    ///   [`BackTransUnknownCharPolicy::PassThrough`] ならその文字だけのセグメントになる。
+    ///   `Drop` なら後続文字のセグメントに吸収され、行末にあればどのセグメントにも属さない。
     pub segments: Vec<BackTransSegment>,
 }
 
@@ -127,6 +151,12 @@ pub struct BackTransResult {
 /// - **対象**: かな（清音・濁音・半濁音・拗音）、数字、grade 1 ラテン、基本的な記号、スペース。
 /// - **不可逆**: 順変換は漢字→かなで情報が落ちるため、復元できるのはかな表層まで。
 /// - **スコープ外**: 丸数字・元号などの特殊記号（順変換専用の便宜エントリ）、Grade 2／UEB。
+/// - **逆引きできない文字**: 点字以外の文字（絵文字・漢字・ASCII の空白や英字など。
+///   順変換の PassThrough で点字列に残った文字を含む）と未知の点字セルは、
+///   [`BackTransUnknownCharPolicy`] に従って読み捨てる（既定）かそのまま出す。
+///   どちらでも数字・外来語モードはそこで終わり、保留中の前置セルは単独の記号として
+///   確定する。順変換もそのまま残した文字で数字・外来語モードを終えるので、両方向を
+///   PassThrough にすれば往復が合う。
 pub struct BrailleBackTranslator {
     /// 1 セル → かな。
     kana1: HashMap<char, String>,
@@ -147,6 +177,7 @@ pub struct BrailleBackTranslator {
     foreign_flag: char,
     capital_flag: char,
     explicit_exit: char,
+    unknown_char: BackTransUnknownCharPolicy,
 }
 
 impl BrailleBackTranslator {
@@ -220,7 +251,19 @@ impl BrailleBackTranslator {
             foreign_flag: first(&table.flag_foreign_word.entry_prefix),
             capital_flag: first(&table.flag_capital.entry_prefix),
             explicit_exit: first(&table.flag_digit.explicit_exit),
+            unknown_char: BackTransUnknownCharPolicy::default(),
         }
+    }
+
+    /// 逆引きできない文字の扱いを設定する（ビルダーメソッド）。
+    pub fn with_unknown_char_policy(mut self, policy: BackTransUnknownCharPolicy) -> Self {
+        self.unknown_char = policy;
+        self
+    }
+
+    /// 逆引きできない文字の扱いをその場で変更する。
+    pub fn set_unknown_char_policy(&mut self, policy: BackTransUnknownCharPolicy) {
+        self.unknown_char = policy;
     }
 
     /// 組み込みテーブルで逆変換器を作る。
@@ -426,8 +469,11 @@ impl BrailleBackTranslator {
                 } else if let Some((sym, trailing)) = self.punct_jp_rev.get(&cell) {
                     out.push_str(sym);
                     state.skip_spaces = *trailing;
+                } else if self.unknown_char == BackTransUnknownCharPolicy::PassThrough {
+                    // 逆引きできない文字（未知セル・点字以外）はそのまま出す
+                    out.push(cell);
                 }
-                // それ以外（未知セル）は読み捨て
+                // Drop なら読み捨て
             }
             Mode::Digit => {
                 if let Some(d) = self.digit_rev.get(&cell) {
@@ -585,6 +631,77 @@ mod tests {
         assert_eq!(bt().back_translate("⠐⠀"), "・");
     }
 
+    // --- 逆引きできない文字（既定の Drop は読み捨て） ---
+
+    #[test]
+    fn non_braille_chars_are_dropped() {
+        // 絵文字（BMP 外）・漢字・ASCII の空白や英字は出力に出さない
+        assert_eq!(bt().back_translate("⠁😀⠃漢⠉ a⠋"), "アイウエ");
+    }
+
+    #[test]
+    fn non_braille_char_ends_digit_mode() {
+        // 未知のセルと同じく数字モードを終わらせる（続く ⠁ は「ア」）
+        assert_eq!(bt().back_translate("⠼⠁😀⠁"), "1ア");
+    }
+
+    #[test]
+    fn non_braille_char_settles_pending_prefix() {
+        // 前置セルは結合できず、単独の記号（・）として確定する
+        assert_eq!(bt().back_translate("⠐😀⠡"), "・カ");
+    }
+
+    // --- 逆引きできない文字（PassThrough はそのまま出す） ---
+
+    fn bt_pass() -> BrailleBackTranslator {
+        bt().with_unknown_char_policy(BackTransUnknownCharPolicy::PassThrough)
+    }
+
+    #[test]
+    fn pass_through_keeps_non_braille_chars() {
+        assert_eq!(bt_pass().back_translate("⠁😀⠃漢⠉ a⠋"), "ア😀イ漢ウ aエ");
+    }
+
+    #[test]
+    fn pass_through_keeps_unknown_cells() {
+        // テーブルにない点字セル（8 点の ⡁）もそのまま出す。既定では読み捨て
+        assert_eq!(bt_pass().back_translate("⠁⡁⠃"), "ア⡁イ");
+        assert_eq!(bt().back_translate("⠁⡁⠃"), "アイ");
+    }
+
+    #[test]
+    fn pass_through_char_ends_digit_mode() {
+        // Drop と同じく数字モードはそこで終わる（続く ⠁ は「ア」）
+        assert_eq!(bt_pass().back_translate("⠼⠁😀⠁"), "1😀ア");
+    }
+
+    #[test]
+    fn pass_through_round_trips_with_converter() {
+        // 両方向を PassThrough にすれば、順変換がそのまま残した文字が往復で落ちない
+        use crate::{JapaneseTranslator, UnknownCharPolicy};
+        let conv = JapaneseTranslator::from_embedded()
+            .unwrap()
+            .with_unknown_char_policy(UnknownCharPolicy::PassThrough);
+        let back = bt_pass();
+        for kana in [
+            "ア😀イ",
+            "😀アイウ",
+            "アイ😀",
+            "ガ😀パ",
+            "キャ😀",
+            "1😀2",
+            "NHK😀ラジオ",
+        ] {
+            let brl = conv.translate(kana).unwrap();
+            assert_eq!(
+                back.back_translate(brl.braille_text()),
+                kana,
+                "入力: {kana} 点字: {}",
+                brl.braille_text()
+            );
+        }
+    }
+
     // --- 逐次ステップ / フラッシュ ---
 
     #[test]
@@ -645,6 +762,29 @@ mod tests {
         let r = bt().back_translate_aligned("⠁⠃⠉");
         assert_eq!(r.text, "アイウ");
         assert_eq!(segs(&r), vec![(0, 1, "ア"), (1, 2, "イ"), (2, 3, "ウ")]);
+    }
+
+    #[test]
+    fn aligned_non_braille_absorbed_into_next_segment() {
+        // 読み捨てた文字のセルは後続のセグメントに含まれる（インデックスはコードポイント単位）
+        let r = bt().back_translate_aligned("⠁😀⠃");
+        assert_eq!(r.text, "アイ");
+        assert_eq!(segs(&r), vec![(0, 1, "ア"), (1, 3, "イ")]);
+    }
+
+    #[test]
+    fn aligned_trailing_non_braille_has_no_segment() {
+        let r = bt().back_translate_aligned("⠁😀");
+        assert_eq!(r.text, "ア");
+        assert_eq!(segs(&r), vec![(0, 1, "ア")]);
+    }
+
+    #[test]
+    fn aligned_pass_through_gets_own_segment() {
+        // PassThrough なら、そのまま出した文字はその文字だけのセグメントになる
+        let r = bt_pass().back_translate_aligned("⠁😀⠃");
+        assert_eq!(r.text, "ア😀イ");
+        assert_eq!(segs(&r), vec![(0, 1, "ア"), (1, 2, "😀"), (2, 3, "イ")]);
     }
 
     #[test]

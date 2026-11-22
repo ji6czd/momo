@@ -414,7 +414,9 @@ const BACK_TRANS_SEGMENT_TS: &str = r#"
 /**
  * 点字セル範囲 → 復元文字列の対応。`BackTransResult.segments` の要素。
  *
- * セル位置は `braille` の添字（点字セルはすべて BMP 内なので UTF-16 単位と一致する）。
+ * セル位置は `Array.from(braille)` の添字（コードポイント単位）。点字セルはすべて BMP 内
+ * なので、入力が点字だけなら `braille` の添字（UTF-16 単位）と一致する。点字以外の文字は
+ * 読み捨てる（出力に出ない）が、セル位置では 1 つと数える。
  */
 export interface BackTransSegment {
     /** 対応する点字セル範囲の先頭（この位置を含む）。 */

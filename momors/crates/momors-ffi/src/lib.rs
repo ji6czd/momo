@@ -105,11 +105,15 @@
 //! ```
 //!
 //! ## 逆点訳（点字 → かな表層、ガイド表示用）
-//! 逆変換器を一度作って使い回し、行ごとに逆変換する。セルインデックスは
-//! 入力点字の UTF-16 位置に対応する（点字は全て BMP のため UTF-16 と等価）。
+//! 逆変換器を一度作って使い回し、行ごとに逆変換する。逆引きできない文字（点字以外・
+//! 未知のセル）は policy に従う: 0=Drop（読み捨て・既定）, 1=PassThrough（そのまま出す）。
+//! 順変換の policy と 1＝PassThrough で揃えてあり、両方向を 1 にすれば往復で落ちない。
+//! セルインデックスは入力のコードポイント位置で、入力が点字だけなら UTF-16 位置と同じ
+//! （点字は全て BMP）。BMP 外の文字（絵文字など）を含むとずれる。
 //! ```c
 //! MomoBackTranslator momo_back_translator_new();              // 組み込みテーブル
 //! MomoBackTranslator momo_back_translator_new_from_file_w(const uint16_t* toml_path);
+//! void               momo_back_translator_set_unknown_char_policy(MomoBackTranslator, int32_t policy);
 //! void               momo_back_translator_free(MomoBackTranslator);
 //! // 逆変換: 点字 -> 結果（全文＋セグメント）
 //! MomoBackTrans momo_back_translate_w(MomoBackTranslator, const uint16_t* braille_utf16);
@@ -133,9 +137,9 @@ use momors_braille::formatter::{
 };
 use momors_braille::writer::OutputFormat;
 use momors_braille::{
-    BackTransResult, BrailleBackTranslator, BrailleResult, BrailleTranslator, EnglishTranslator,
-    JapaneseTranslator, Language, Table, UnknownCharPolicy, detect_language, embedded_table,
-    embedded_tables,
+    BackTransResult, BackTransUnknownCharPolicy, BrailleBackTranslator, BrailleResult,
+    BrailleTranslator, EnglishTranslator, JapaneseTranslator, Language, Table, UnknownCharPolicy,
+    detect_language, embedded_table, embedded_tables,
 };
 use momors_core::{PredictionResult, Predictor, PredictorConfig};
 
@@ -1757,8 +1761,10 @@ pub extern "C" fn momo_doc_write_from_paragraphs(
 // エディタの編集画面で各点字セルの下に読みを並べるガイド表示に使う。
 // 逆変換器ハンドルを一度作って使い回し、行ごとに momo_back_translate_w を呼ぶ。
 //
-// 点字セルはすべて BMP（U+2800〜）なので、セルインデックスは UTF-16 の
-// コード単位インデックスとして C# の String にそのまま対応する。
+// 点字セルはすべて BMP（U+2800〜）なので、入力が点字だけならセルインデックスは
+// UTF-16 のコード単位インデックスとして C# の String にそのまま対応する。点字以外の
+// 文字は（読み捨てでもそのまま出すのでも）インデックスでは 1 つと数える（コードポイント
+// 単位）ので、BMP 外の文字（絵文字など）を含む入力では UTF-16 位置とずれる。
 // ============================================================
 
 pub struct BackTranslatorHandle {
@@ -1822,6 +1828,21 @@ pub extern "C" fn momo_back_translator_new_from_file_w(
     match BrailleBackTranslator::from_file(&path) {
         Ok(t) => Box::into_raw(Box::new(BackTranslatorHandle { inner: t })),
         Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// 逆引きできない文字（点字以外・未知のセル）のポリシー（0=Drop, 1=PassThrough）。
+/// 範囲外の値は Drop。handle NULL なら何もしない。
+#[unsafe(no_mangle)]
+pub extern "C" fn momo_back_translator_set_unknown_char_policy(
+    handle: *mut BackTranslatorHandle,
+    policy: c_int,
+) {
+    if let Some(h) = unsafe { handle.as_mut() } {
+        h.inner.set_unknown_char_policy(match policy {
+            1 => BackTransUnknownCharPolicy::PassThrough,
+            _ => BackTransUnknownCharPolicy::Drop,
+        });
     }
 }
 
@@ -1894,7 +1915,8 @@ pub extern "C" fn momo_back_trans_segment_count(handle: *const BackTransHandle) 
 /// 各セグメントの点字セル範囲を out_start / out_end へまとめて書く。
 ///
 /// 各配列は momo_back_trans_segment_count 要素以上を確保すること。
-/// 範囲は半開区間 `[start, end)`、インデックスは入力点字の UTF-16 位置に対応する。
+/// 範囲は半開区間 `[start, end)`、インデックスは入力のコードポイント位置
+/// （入力が点字だけなら UTF-16 位置と同じ。BMP 外の文字を含むとずれる）。
 /// handle が NULL なら何もしない。片方のみ NULL なら非 NULL 側だけ書く。
 #[unsafe(no_mangle)]
 pub extern "C" fn momo_back_trans_cell_bounds(
@@ -2070,5 +2092,44 @@ mod tests {
         let (ret, msg) = validate(&dict);
         assert!(ret >= 2, "validate なら理由が取れる: {msg}");
         let _ = std::fs::remove_file(&dict);
+    }
+
+    /// 逆変換して (全文, セル範囲の列) を返す。C 側の使い方をそのままなぞる。
+    fn back_translate(bt: *const BackTranslatorHandle, braille: &str) -> (String, Vec<(i32, i32)>) {
+        let input = wide(braille);
+        let h = momo_back_translate_w(bt, input.as_ptr());
+        assert!(!h.is_null());
+        let n = momo_back_trans_text_w(h, std::ptr::null_mut(), 0);
+        let mut buf = vec![0u16; n as usize];
+        momo_back_trans_text_w(h, buf.as_mut_ptr(), n);
+        let text = String::from_utf16_lossy(&buf[..buf.len() - 1]);
+        let count = momo_back_trans_segment_count(h) as usize;
+        let (mut start, mut end) = (vec![0i32; count], vec![0i32; count]);
+        momo_back_trans_cell_bounds(h, start.as_mut_ptr(), end.as_mut_ptr());
+        momo_back_trans_free(h);
+        (text, start.into_iter().zip(end).collect())
+    }
+
+    #[test]
+    fn back_translator_unknown_char_policy() {
+        let bt = momo_back_translator_new();
+        assert!(!bt.is_null());
+        // 既定（0=Drop）は点字以外を読み捨て、そのセルは後続のセグメントに入る
+        assert_eq!(
+            back_translate(bt, "⠁😀⠃"),
+            ("アイ".to_owned(), vec![(0, 1), (1, 3)])
+        );
+        // 1=PassThrough はそのまま出し、その文字だけのセグメントにする
+        momo_back_translator_set_unknown_char_policy(bt, 1);
+        assert_eq!(
+            back_translate(bt, "⠁😀⠃"),
+            ("ア😀イ".to_owned(), vec![(0, 1), (1, 2), (2, 3)])
+        );
+        // 範囲外の値は Drop に戻る
+        momo_back_translator_set_unknown_char_policy(bt, 99);
+        assert_eq!(back_translate(bt, "⠁😀⠃").0, "アイ");
+        // NULL ハンドルは無視する
+        momo_back_translator_set_unknown_char_policy(std::ptr::null_mut(), 1);
+        momo_back_translator_free(bt);
     }
 }

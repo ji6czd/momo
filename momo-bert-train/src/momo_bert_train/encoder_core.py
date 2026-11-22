@@ -506,6 +506,17 @@ def masked_logits(logits, table, rows):
     return logits.float().masked_fill(~table[rows], NEG)
 
 
+def read_checkpoint(path: Path, log) -> dict | None:
+    """途中保存を読む。壊れていれば（中身が切れているなど）、そう表示して None（最初から学習する）。"""
+    try:
+        return torch.load(path, map_location="cpu")
+    except Exception as e:
+        log(
+            f"  {path.name} が壊れていて読めない（{type(e).__name__}: {e}）ので使わず、最初から学習する"
+        )
+        return None
+
+
 def train(
     model: ReadingModel,
     exs: list[Example],
@@ -598,15 +609,29 @@ def train(
             if torch.cuda.is_available()
             else None,
         }
-        # 書いている途中で落ちても前の保存が残るように、別名に書いてから置き換える
+        # 書いている途中で落ちても前の保存が残るように、別名に書いてから置き換える。
+        # 中身をディスクへ書き出してから置き換えないと、VM が止まったときに置き換えだけが残り、
+        # 中身の切れたファイルになることがある（プリエンプトで実際に起きた）
         tmp = checkpoint.with_suffix(".tmp")
-        torch.save(state, tmp)
+        with open(tmp, "wb") as f:
+            torch.save(state, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, checkpoint)
+        # 置き換えそのものも書き出す（Linux。Windows には O_DIRECTORY が無い）
+        if hasattr(os, "O_DIRECTORY"):
+            fd = os.open(checkpoint.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
 
     start_epoch, start_k, total, n, btotal, bn = 1, 0, 0.0, 0, 0.0, 0
     if checkpoint is not None and checkpoint.exists():
-        state = torch.load(checkpoint, map_location="cpu")
-        if state["run_key"] == run_key:
+        state = read_checkpoint(checkpoint, log)
+        if state is None:
+            pass  # 壊れていた（read_checkpoint が表示した）
+        elif state["run_key"] == run_key:
             model.load_state_dict(state["model"])
             opt.load_state_dict(state["opt"])
             sched.load_state_dict(state["sched"])

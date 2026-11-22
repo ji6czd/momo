@@ -76,6 +76,15 @@ impl PredictionResult {
 // Predictor
 // ============================================================
 
+/// 差し込んだ BERT 推論器の様子。
+#[derive(Default)]
+struct AttachedBert {
+    /// BERT のラベルのうち、読みモデルのクラスに無くて使えないもの。
+    unknown_labels: Vec<String>,
+    /// マスあけも BERT で決めるか（モデルが境界の出力を持ち、`bert_boundary` が真）。
+    boundary: bool,
+}
+
 /// BERT 読みモードの推論器を読み込んで予測器に差し込む。
 #[cfg(feature = "bert")]
 fn attach_bert(
@@ -84,7 +93,7 @@ fn attach_bert(
     f32_model: bool,
     threads: usize,
     boundary: bool,
-) -> PyResult<Vec<String>> {
+) -> PyResult<AttachedBert> {
     let options = momors_bert::BertOptions {
         int8: !f32_model,
         threads,
@@ -92,7 +101,11 @@ fn attach_bert(
     };
     let reader = momors_bert::BertReader::load(dir, &options)
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-    Ok(predictor.set_slot_reader(Box::new(reader)))
+    let boundary = reader.has_boundary();
+    Ok(AttachedBert {
+        unknown_labels: predictor.set_slot_reader(Box::new(reader)),
+        boundary,
+    })
 }
 
 #[cfg(not(feature = "bert"))]
@@ -102,7 +115,7 @@ fn attach_bert(
     _: bool,
     _: usize,
     _: bool,
-) -> PyResult<Vec<String>> {
+) -> PyResult<AttachedBert> {
     Err(PyRuntimeError::new_err(
         "この momors_py は BERT 読みモードなしでビルドされている（feature `bert`）",
     ))
@@ -120,8 +133,8 @@ fn attach_bert(
 #[pyclass]
 struct Predictor {
     inner: RustPredictor,
-    /// BERT のラベルのうち、読みモデルのクラスに無くて使えないもの。
-    bert_unknown_labels: Vec<String>,
+    /// 差し込んだ BERT 推論器の様子（BERT なしなら既定値）。
+    bert: AttachedBert,
 }
 
 #[pymethods]
@@ -173,26 +186,31 @@ impl Predictor {
         #[cfg_attr(not(feature = "bert"), allow(unused_mut))]
         let mut inner =
             RustPredictor::load(config).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        let bert_unknown_labels = match bert {
+        let bert = match bert {
             Some(dir) => attach_bert(&mut inner, dir, bert_f32, bert_threads, bert_boundary)?,
-            None => Vec::new(),
+            None => AttachedBert::default(),
         };
-        Ok(Self {
-            inner,
-            bert_unknown_labels,
-        })
+        Ok(Self { inner, bert })
     }
 
     /// BERT のラベルのうち、読みモデルのクラスに無くて使えないもの。
     #[getter]
     fn bert_unknown_labels(&self) -> Vec<String> {
-        self.bert_unknown_labels.clone()
+        self.bert.unknown_labels.clone()
     }
 
     /// BERT 読みモードが有効か。
     #[getter]
     fn has_bert(&self) -> bool {
         self.inner.has_slot_reader()
+    }
+
+    /// マスあけも BERT で決めているか。モデルが境界も学習していて
+    /// （`step9_finetune --boundary`）、`bert_boundary` が真のときだけ真。
+    /// 偽ならマスあけは境界モデルで決まる（BERT なしのときも偽）。
+    #[getter]
+    fn has_bert_boundary(&self) -> bool {
+        self.bert.boundary
     }
 
     /// テキストをカナに変換する。
@@ -249,7 +267,7 @@ impl Predictor {
             RustPredictor::load(config).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         Ok(Self {
             inner,
-            bert_unknown_labels: Vec::new(),
+            bert: AttachedBert::default(),
         })
     }
 

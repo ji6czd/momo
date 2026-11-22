@@ -59,6 +59,15 @@ class Predictor:
         ...
 
     @property
+    def has_bert_boundary(self) -> bool:
+        """マスあけも BERT で決めているか。
+
+        モデルが境界も学習していて（`step9_finetune --boundary`）、`bert_boundary` が
+        真のときだけ真。偽ならマスあけは境界モデルで決まる（BERT なしのときも偽）。
+        """
+        ...
+
+    @property
     def bert_unknown_labels(self) -> list[str]:
         """BERT のラベルのうち、読みモデルのクラスに無くて使えないもの。"""
         ...

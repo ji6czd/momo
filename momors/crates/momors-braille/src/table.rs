@@ -1005,18 +1005,18 @@ classes = ["stop", "kana"]
     #[test]
     fn embedded_transitions() {
         let table = Table::embedded().unwrap();
-        // 文字種境界
-        assert_eq!(table.transition_spaces("kana", "latin"), 1);
-        assert_eq!(table.transition_spaces("latin", "kana"), 1);
+        // 文字種境界（かな⇄英字のスペースは仮名の段階で入れるので、テーブルでは宣言しない）
+        assert_eq!(table.transition_spaces("kana", "latin"), 0);
+        assert_eq!(table.transition_spaces("latin", "kana"), 0);
         assert_eq!(
             table.transition_spaces("kana", "digit"),
             0,
             "未宣言ペアは 0"
         );
-        // 英文句読点→かな（新規: Hello.こんにちは の分割）
-        assert_eq!(table.transition_spaces("punct.latin", "kana"), 1);
+        // 英文句読点→かな（Hello.こんにちは の分割）
+        assert_eq!(table.transition_spaces("punct.latin.stop", "kana"), 1);
         assert_eq!(
-            table.transition_spaces("punct.latin", "digit"),
+            table.transition_spaces("punct.latin.stop", "digit"),
             0,
             "3.14 は分割しない"
         );

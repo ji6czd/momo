@@ -657,18 +657,18 @@ classes = ["stop", "inline"]
 
     #[test]
     fn latin_to_kana_no_space_adds_transition_space() {
-        // NHKラジオ（スペースなし）→ [transitions] "latin -> kana" でスペースが挿入される
-        // スペースあり版と同じ結果になる
+        // NHKラジオ（スペースなし）: 英字⇄かなのスペースは仮名の段階で入れる設計なので、
+        // [transitions] は何も挿入しない（"latin -> kana" は宣言していない）
         let r = conv().translate("NHKラジオ").unwrap();
-        assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅⠀⠑⠐⠳⠊");
+        assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅⠑⠐⠳⠊");
     }
 
     #[test]
     fn latin_punct_to_kana_splits() {
-        // 「a.ア」: 英文ピリオド（punct.latin）→ かな境界で "punct.latin -> kana" = 1
-        // が発火し一マスあく。⠰⠁(a) ⠲(.) ⠀(遷移スペース) ⠁(ア)
+        // 「a.ア」: 英文ピリオドは class を持たない（punct.latin.stop ではない）ので
+        // "punct.latin.stop -> kana" は発火せず、スペースは入らない。
         let r = conv().translate("a.ア").unwrap();
-        assert_eq!(r.braille_text(), "⠰⠁⠲⠀⠁");
+        assert_eq!(r.braille_text(), "⠰⠁⠲⠁");
     }
 
     #[test]
@@ -683,17 +683,17 @@ classes = ["stop", "inline"]
 
     #[test]
     fn kana_to_latin_inserts_transition_space() {
-        // かな→latin 境界: "kana -> latin" = 1 により外字符（⠰）の前を一マスあける
+        // かな→latin 境界: スペースは仮名の段階で入れる設計なので、
+        // [transitions] は挿入しない（"kana -> latin" は宣言していない）
         let r = conv().translate("アイウエオabc").unwrap();
-        assert_eq!(r.braille_text(), "⠁⠃⠉⠋⠊⠀⠰⠁⠃⠉");
+        assert_eq!(r.braille_text(), "⠁⠃⠉⠋⠊⠰⠁⠃⠉");
     }
 
     #[test]
     fn transition_space_idempotent_with_source_space() {
-        // ソース側にスペースがあってもなくても同じ出力になる
+        // ソース側のスペースはそのまま点字スペースになる（遷移スペースと二重にならない）
         let with_space = conv().translate("アイウエオ abc").unwrap();
-        let without = conv().translate("アイウエオabc").unwrap();
-        assert_eq!(with_space.braille_text(), without.braille_text());
+        assert_eq!(with_space.braille_text(), "⠁⠃⠉⠋⠊⠀⠰⠁⠃⠉");
     }
 
     #[test]
@@ -717,15 +717,6 @@ classes = ["stop", "inline"]
         // テキスト先頭では prev がないため発火しない
         let r = conv().translate("abc").unwrap();
         assert_eq!(r.braille_text(), "⠰⠁⠃⠉");
-    }
-
-    #[test]
-    fn index_with_transition_space() {
-        // アa → （⠁ + 遷移スペース⠀）+ （⠰ + ⠁）
-        // 遷移スペースは遷移前の文字（ア）の範囲に含まれる
-        let r = conv().translate("アa").unwrap();
-        assert_eq!(r.braille_text(), "⠁⠀⠰⠁");
-        assert_eq!(r.kana_to_braille(), &[0, 2]);
     }
 
     #[test]

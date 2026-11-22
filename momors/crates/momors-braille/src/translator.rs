@@ -296,8 +296,9 @@ mod tests {
     #[test]
     fn japanese_line_keeps_foreign_indicator() {
         // かな混じりの行は日本語経路。埋め込み英語は外字符 ⠰ ＋無縮約。
+        // 英字⇄かなのスペースは仮名の段階で入れるので、ここでは挿入されない。
         let r = lt().translate("NHKラジオ").expect("点訳できること");
-        assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅⠀⠑⠐⠳⠊");
+        assert_eq!(r.braille_text(), "⠰⠠⠠⠝⠓⠅⠑⠐⠳⠊");
         assert_eq!(r.language(), Language::Japanese);
     }
 

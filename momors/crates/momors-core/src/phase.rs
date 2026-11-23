@@ -22,7 +22,7 @@ pub enum Phase {
     Loop,
     /// 読みモデルのスコア計算 + argmax (`read_argmax`)。
     Read,
-    /// 境界モデルのスコア計算 (`boundary_has_split`)。
+    /// 境界モデルのスコア計算 (`boundary_split`)。
     Boundary,
     /// 末尾整形 + 原文→かなインデックス構築。
     Finalize,

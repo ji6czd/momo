@@ -110,6 +110,15 @@ impl DecisionSource {
     }
 }
 
+/// マスをあけるという判断。あけるときだけ作る。
+#[derive(Debug, Clone, Copy)]
+struct Split {
+    /// マスをあける確率。空白の自信度としてそのまま出す。
+    prob: f32,
+    /// 確率を出したもの（BERT は `Bert`・境界モデルは `Lr`）。
+    source: DecisionSource,
+}
+
 // ============================================================
 // 診断（trace / explain）結果
 // ============================================================
@@ -126,14 +135,25 @@ pub struct Contribution {
 pub struct TraceRow {
     /// 原文の1文字（複合ユニットでも先頭文字のバイト位置基準の1文字）。
     pub source: char,
-    /// この文字に対応するかな（無ければ空文字列＝スキップ）。
+    /// この文字に対応するかな（無ければ空文字列＝スキップ）。後ろのマスあけは含めない。
     pub kana: String,
     /// 決定根拠（この文字の最初のかなのタグ）。かなが無い場合は `None`。
     pub decision: Option<DecisionSource>,
     /// 自信度（この文字のかなの最小値）。かなが無い場合は `None`。
     pub confidence: Option<f32>,
+    /// この文字の後ろに入れたマスあけ。入れていなければ `None`。
+    pub split: Option<TraceSplit>,
     /// 上位特徴量寄与度（LR / LR_LOW の行のみ・`top_n>0` のとき）。
     pub contributions: Vec<Contribution>,
+}
+
+/// trace の行の後ろに入れたマスあけ。
+#[derive(Debug, Clone, Copy)]
+pub struct TraceSplit {
+    /// 確率を出したもの（BERT は `Bert`・境界モデルは `Lr`、規則で入れたものはその規則）。
+    pub decision: DecisionSource,
+    /// マスをあける確率（規則で入れたものは 1.0）。
+    pub confidence: f32,
 }
 
 /// `Predictor::trace` の結果。
@@ -245,13 +265,27 @@ impl PredictionResult {
 
     /// 各かなバイトの自信度のスライス。
     /// `len()` は `kana_text().len()` と同じ。
+    ///
+    /// マスあけの空白（原文に無い空白）は、そこでマスをあける確率（0.5 以上）。
+    /// 規則で入れたマスあけ（カスタム辞書の内部の区切り）は 1.0。
     pub fn confidences(&self) -> &[f32] {
         &self.confidences
     }
 
     /// 各かなバイトの決定根拠のスライス。`confidences()` と同じ長さ・整列。
+    ///
+    /// マスあけの空白は、その確率を出したもの（BERT は `Bert`・境界モデルは `Lr`、
+    /// 規則で入れたものはその規則）。
     pub fn decision_sources(&self) -> &[DecisionSource] {
         &self.decision_sources
+    }
+
+    /// マスあけの空白を1つ書き出す。`orig_idx` は空白を帰属させる原文の位置。
+    fn push_split(&mut self, orig_idx: usize, split: Split) {
+        self.kana_text.push(' ');
+        self.kana_to_src_index.push(orig_idx);
+        self.confidences.push(split.prob);
+        self.decision_sources.push(split.source);
     }
 
     /// 「かなのバイト位置 → 原文の UTF-8 バイト位置」のマッピング。
@@ -971,7 +1005,7 @@ impl<M: WeightModel> Predictor<M> {
             // カスタム辞書（フレーズ辞書）: マッチしたら読みを完全に上書きする
             //
             // 他のどの分岐よりも手前で判定する（辞書は完全に推論へ優先する）。
-            // エントリ内部の境界は辞書が確定済みなので boundary_has_split は
+            // エントリ内部の境界は辞書が確定済みなので boundary_split は
             // 呼ばない。末尾（次の文字との境界）だけは他の複合ユニット
             // （助数詞ラン等）と同様、通常どおり境界モデルに委ねる ─
             // 辞書は読みだけを上書きし、境界モデルの入力特徴量（実文字ベースの
@@ -990,23 +1024,20 @@ impl<M: WeightModel> Predictor<M> {
                         &mut result,
                     );
                     if k + 1 < m.readings.len() && m.forced_split_after[k] {
-                        result.kana_text.push(' ');
-                        result
-                            .kana_to_src_index
-                            .push(source_seq[idx].orig_idx as usize);
-                        result.confidences.push(1.0);
-                        result.decision_sources.push(DecisionSource::DictCustom);
+                        result.push_split(
+                            source_seq[idx].orig_idx as usize,
+                            Split {
+                                prob: 1.0,
+                                source: DecisionSource::DictCustom,
+                            },
+                        );
                     }
                 }
-                let has_split =
-                    self.boundary_has_split(&all_feat_refs[last], &source_seq, last, readings);
-                if has_split {
-                    result.kana_text.push(' ');
-                    result
-                        .kana_to_src_index
-                        .push(source_seq[last].orig_idx as usize);
-                    result.confidences.push(1.0);
-                    result.decision_sources.push(DecisionSource::DictCustom);
+                // 末尾の切れ目はモデルが決める（確率もモデルのもの）。
+                if let Some(split) =
+                    self.boundary_split(&all_feat_refs[last], &source_seq, last, readings)
+                {
+                    result.push_split(source_seq[last].orig_idx as usize, split);
                 }
 
                 parent_src_idx = Some(last);
@@ -1047,15 +1078,11 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                if !entry.ctype.skips_boundary_check() {
-                    let has_split =
-                        self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
-                    if has_split {
-                        result.kana_text.push(' ');
-                        result.kana_to_src_index.push(entry.orig_idx as usize);
-                        result.confidences.push(1.0);
-                        result.decision_sources.push(DecisionSource::Bypass);
-                    }
+                if !entry.ctype.skips_boundary_check()
+                    && let Some(split) =
+                        self.boundary_split(&all_feat_refs[i], &source_seq, i, readings)
+                {
+                    result.push_split(entry.orig_idx as usize, split);
                 }
                 continue;
             }
@@ -1076,13 +1103,10 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = false;
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split =
-                    self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
-                if has_split {
-                    result.kana_text.push(' ');
-                    result.kana_to_src_index.push(entry.orig_idx as usize);
-                    result.confidences.push(1.0);
-                    result.decision_sources.push(DecisionSource::Bypass);
+                if let Some(split) =
+                    self.boundary_split(&all_feat_refs[i], &source_seq, i, readings)
+                {
+                    result.push_split(entry.orig_idx as usize, split);
                 }
                 continue;
             }
@@ -1102,13 +1126,10 @@ impl<M: WeightModel> Predictor<M> {
                 parent_has_small_kana = entry.compound_len >= 2 && is_small_kana(entry.cp2);
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
-                let has_split =
-                    self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
-                if has_split {
-                    result.kana_text.push(' ');
-                    result.kana_to_src_index.push(entry.orig_idx as usize);
-                    result.confidences.push(1.0);
-                    result.decision_sources.push(DecisionSource::Lr);
+                if let Some(split) =
+                    self.boundary_split(&all_feat_refs[i], &source_seq, i, readings)
+                {
+                    result.push_split(entry.orig_idx as usize, split);
                 }
                 continue;
             }
@@ -1152,7 +1173,7 @@ impl<M: WeightModel> Predictor<M> {
                 };
 
                 if let Some(action) = resolve_multi(counter_cp, value, model_reading) {
-                    let has_split = self.boundary_has_split(
+                    let split = self.boundary_split(
                         &all_feat_refs[run_end],
                         &source_seq,
                         run_end,
@@ -1201,15 +1222,8 @@ impl<M: WeightModel> Predictor<M> {
                     parent_kana_byte_end = result.kana_text.len();
                     last_fallback.clear();
 
-                    if has_split {
-                        result.kana_text.push(' ');
-                        result
-                            .kana_to_src_index
-                            .push(source_seq[run_end].orig_idx as usize);
-                        result.confidences.push(1.0);
-                        result
-                            .decision_sources
-                            .push(DecisionSource::FallbackCounter);
+                    if let Some(split) = split {
+                        result.push_split(source_seq[run_end].orig_idx as usize, split);
                     }
 
                     skip_until = run_end + 1;
@@ -1237,12 +1251,8 @@ impl<M: WeightModel> Predictor<M> {
                     source_seq.get(run_end + 1).map(|e| e.cp),
                 )
             {
-                let has_split = self.boundary_has_split(
-                    &all_feat_refs[run_end],
-                    &source_seq,
-                    run_end,
-                    readings,
-                );
+                let split =
+                    self.boundary_split(&all_feat_refs[run_end], &source_seq, run_end, readings);
 
                 for (j, digit) in source_seq[i..run_end].iter().enumerate() {
                     decided[i + j] = self.read_class_id_cp(digit.cp);
@@ -1269,15 +1279,8 @@ impl<M: WeightModel> Predictor<M> {
                 parent_kana_byte_end = result.kana_text.len();
                 last_fallback.clear();
 
-                if has_split {
-                    result.kana_text.push(' ');
-                    result
-                        .kana_to_src_index
-                        .push(source_seq[run_end].orig_idx as usize);
-                    result.confidences.push(1.0);
-                    result
-                        .decision_sources
-                        .push(DecisionSource::FallbackCounter);
+                if let Some(split) = split {
+                    result.push_split(source_seq[run_end].orig_idx as usize, split);
                 }
 
                 skip_until = run_end + 1;
@@ -1352,8 +1355,8 @@ impl<M: WeightModel> Predictor<M> {
                         continue;
                     }
                     NumericFallback::Output(fallback) => {
-                        let has_split =
-                            self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
+                        let split =
+                            self.boundary_split(&all_feat_refs[i], &source_seq, i, readings);
                         decided[i] = self.read_class_id(fallback);
                         self.emit_label(
                             entry,
@@ -1368,13 +1371,8 @@ impl<M: WeightModel> Predictor<M> {
                         parent_has_small_kana = false;
                         parent_kana_byte_end = result.kana_text.len();
                         last_fallback.clear();
-                        if has_split {
-                            result.kana_text.push(' ');
-                            result.kana_to_src_index.push(entry.orig_idx as usize);
-                            result.confidences.push(conf);
-                            result
-                                .decision_sources
-                                .push(DecisionSource::FallbackNumeric);
+                        if let Some(split) = split {
+                            result.push_split(entry.orig_idx as usize, split);
                         }
                         continue;
                     }
@@ -1426,8 +1424,7 @@ impl<M: WeightModel> Predictor<M> {
                     !next_is_kun_counter
                 };
                 if revert {
-                    let has_split =
-                        self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
+                    let split = self.boundary_split(&all_feat_refs[i], &source_seq, i, readings);
                     decided[i] = self.read_class_id_cp(entry.cp);
                     self.emit_char_passthrough(
                         entry,
@@ -1441,13 +1438,8 @@ impl<M: WeightModel> Predictor<M> {
                     parent_has_small_kana = false;
                     parent_kana_byte_end = result.kana_text.len();
                     last_fallback.clear();
-                    if has_split {
-                        result.kana_text.push(' ');
-                        result.kana_to_src_index.push(entry.orig_idx as usize);
-                        result.confidences.push(conf);
-                        result
-                            .decision_sources
-                            .push(DecisionSource::FallbackNumeric);
+                    if let Some(split) = split {
+                        result.push_split(entry.orig_idx as usize, split);
                     }
                     continue;
                 }
@@ -1473,13 +1465,10 @@ impl<M: WeightModel> Predictor<M> {
                     parent_is_kanji = entry.ctype == CharType::Kanji;
                     parent_has_small_kana = false;
                     parent_kana_byte_end = result.kana_text.len();
-                    let has_split =
-                        self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
-                    if has_split {
-                        result.kana_text.push(' ');
-                        result.kana_to_src_index.push(entry.orig_idx as usize);
-                        result.confidences.push(conf);
-                        result.decision_sources.push(DecisionSource::FallbackOrphan);
+                    if let Some(split) =
+                        self.boundary_split(&all_feat_refs[i], &source_seq, i, readings)
+                    {
+                        result.push_split(entry.orig_idx as usize, split);
                     }
                     continue;
                 }
@@ -1512,13 +1501,10 @@ impl<M: WeightModel> Predictor<M> {
                 //    複合ユニット最終文字の行に付く）。ここで境界モデルを問い合わせず
                 //    単純スキップすると、学習された境界ラベルが推論から一切参照されず
                 //    「今日」「昨日」直後のマスあけが構造的に欠落する（要修正前の挙動）。
-                let has_split =
-                    self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
-                if has_split {
-                    result.kana_text.push(' ');
-                    result.kana_to_src_index.push(entry.orig_idx as usize);
-                    result.confidences.push(conf);
-                    result.decision_sources.push(pick.source());
+                if let Some(split) =
+                    self.boundary_split(&all_feat_refs[i], &source_seq, i, readings)
+                {
+                    result.push_split(entry.orig_idx as usize, split);
                 }
                 continue;
             }
@@ -1542,7 +1528,7 @@ impl<M: WeightModel> Predictor<M> {
             // ============================================================
 
             // 境界判定
-            let has_split = self.boundary_has_split(&all_feat_refs[i], &source_seq, i, readings);
+            let split = self.boundary_split(&all_feat_refs[i], &source_seq, i, readings);
 
             // 々フォールバック: 低自信度の「々」は直前漢字の読みを繰り返す
             //
@@ -1612,11 +1598,8 @@ impl<M: WeightModel> Predictor<M> {
                 last_fallback.clear();
             }
 
-            if has_split {
-                result.kana_text.push(' ');
-                result.kana_to_src_index.push(entry.orig_idx as usize);
-                result.confidences.push(conf);
-                result.decision_sources.push(dec);
+            if let Some(split) = split {
+                result.push_split(entry.orig_idx as usize, split);
             }
         }
 
@@ -1786,31 +1769,41 @@ impl<M: WeightModel> Predictor<M> {
 
     /// 位置 `i` の直後に境界スペース（マスあけ）を入れるか判定する。
     ///
-    /// マスをあける確率が閾値を超え、**かつ**英数字ラン内部でないときだけ `true`。
+    /// マスをあける確率が閾値を超え、**かつ**英数字ラン内部でないときだけ `Some`。
     /// 確率は、別推論器（BERT など、[`SlotReader`]）がこの切れ目に確率を付けていれば
-    /// それを使い、無ければ境界モデルで計算する。
+    /// それを使い、無ければ境界モデルで計算する。返す [`Split`] は、その確率と
+    /// 出どころ（空白の自信度・決定根拠として出す）。
     ///
     /// 英数字ラン内部（現在も次も英字/算用数字）を割るのは、点訳のどんな文脈でも
     /// 正しくない不変条件なので、モデル判定より優先して抑制する（`AB345` を
     /// `AB 345` にしない・`50Hz` の内部も割らない）。ランの外側（塊↔かな/漢字/記号、
     /// 助詞の前）はこれまでどおりモデルに委ねる。線形モデルは疎な文字特徴に外挿で
     /// 振り回されてラン内部を誤分割しがちなため、ここは構造で保証する。
-    fn boundary_has_split(
+    fn boundary_split(
         &self,
         feat_refs: &[VocabRef],
         source_seq: &[SourceEntry],
         i: usize,
         readings: ReadingView<'_>,
-    ) -> bool {
+    ) -> Option<Split> {
         let _g = phase::Guard::new(Phase::Boundary);
-        let prob = source_seq
+        let split = match source_seq
             .get(i + 1)
             .and_then(|next| readings.split_before(next))
-            .unwrap_or_else(|| sigmoid(self.model.compute_boundary_score_resolved(feat_refs)));
-        if prob < 0.5 {
-            return false;
+        {
+            Some(prob) => Split {
+                prob,
+                source: DecisionSource::Bert,
+            },
+            None => Split {
+                prob: sigmoid(self.model.compute_boundary_score_resolved(feat_refs)),
+                source: DecisionSource::Lr,
+            },
+        };
+        if split.prob < 0.5 || is_alnum_run_internal(source_seq, i) {
+            return None;
         }
-        !is_alnum_run_internal(source_seq, i)
+        Some(split)
     }
 
     /// 原文の `entry.cp` をそのまま結果に書き出す (bypass / 救済共通)。
@@ -1923,10 +1916,21 @@ impl<M: WeightModel> Predictor<M> {
             let kana_bytes = &pred.src_to_kana_index[b];
 
             // この原文文字に対応するかな文字と、その自信度・決定根拠を集める。
+            // 原文の空白でない文字に付いた空白はマスあけ。読みとは分けて `split` に入れる
+            // （自信度がマスあけの確率なので、読みの自信度の最小値に混ぜない）。
+            let own_space = get_char_type(ch) == CharType::Space;
             let mut kana = String::new();
             let mut min_conf: Option<f32> = None;
             let mut first_dec: Option<DecisionSource> = None;
+            let mut split: Option<TraceSplit> = None;
             for &kb in kana_bytes {
+                if !own_space && pred.kana_text.as_bytes()[kb] == b' ' {
+                    split.get_or_insert(TraceSplit {
+                        decision: pred.decision_sources[kb],
+                        confidence: pred.confidences[kb],
+                    });
+                    continue;
+                }
                 // バイト位置がかな文字の先頭のときだけ1文字取り出す。
                 if kana_char_starts.contains(&kb) {
                     kana.extend(pred.kana_text[kb..].chars().next());
@@ -1951,6 +1955,7 @@ impl<M: WeightModel> Predictor<M> {
                 kana,
                 decision: first_dec,
                 confidence: min_conf,
+                split,
                 contributions,
             });
         }
@@ -2444,7 +2449,7 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
             // 次の内容セルとの境界。モデルの判断をそのまま通す。
             if j + 1 < content.len() {
                 let next_ci = content[j + 1];
-                if cells[ci + 1..next_ci].iter().any(|c| c.space) {
+                if let Some(sp) = cells[ci + 1..next_ci].iter().find(|c| c.space) {
                     // 境界スペースは「直前に出したもの」へ帰属させる。かなの並び順と
                     // 原文位置の順序を一致させておかないと、src_to_kana から原文順に
                     // 組み立て直す format_segmented がスペースを括弧より前に見せる。
@@ -2453,7 +2458,8 @@ fn splice_atoms(result: &mut PredictionResult, text: &str, mut atoms: Vec<Atom>)
                         .and_then(|v| v.last())
                         .and_then(|a| a.srcs.last().copied())
                         .unwrap_or(cells[ci].src);
-                    push_text(&mut sink, " ", space_src, 1.0, DecisionSource::Bypass);
+                    // 自信度・決定根拠は、境界モデル（または BERT）が付けたものを引き継ぐ。
+                    push_text(&mut sink, " ", space_src, sp.conf, sp.dec);
                 }
             }
         }
@@ -3538,6 +3544,55 @@ mod tests {
         // 「（」の直前の切れ目（注釈は前の語に食いつく）の確率は、本文の切れ目には使わない。
         p.set_slot_reader(fake_reader_with_splits(&[], &[('（', 0.9)]));
         assert_eq!(p.predict("字（字）字").unwrap().kana_text(), "ジ（ジ）ジ");
+    }
+
+    /// かなの中の、マスあけの空白（原文に無い空白）の (自信度, 決定根拠) を並べる。
+    fn split_spaces(r: &PredictionResult) -> Vec<(f32, DecisionSource)> {
+        r.kana_text()
+            .char_indices()
+            .filter(|&(_, ch)| ch == ' ')
+            .map(|(b, _)| (r.confidences()[b], r.decision_sources()[b]))
+            .collect()
+    }
+
+    #[test]
+    fn split_space_carries_split_probability() {
+        let mut p = predictor_with_read_prev();
+        let reading_conf = p.predict("字字").unwrap().confidences()[0];
+        p.set_slot_reader(fake_reader_with_splits(&[], &[('字', 0.75)]));
+        let r = p.predict("字字").unwrap();
+        assert_eq!(r.kana_text(), "ジ ジ");
+        // 空白の自信度はマスあけの確率・根拠は確率を出した BERT。
+        assert_eq!(split_spaces(&r), vec![(0.75, DecisionSource::Bert)]);
+        // 読みの自信度は変わらない。
+        assert_eq!(r.confidences()[0], reading_conf);
+    }
+
+    #[test]
+    fn split_space_probability_survives_aside_splice() {
+        let mut p = predictor_with_read_prev();
+        // 注釈を差し込み直すときも、空白の確率と根拠を引き継ぐ。
+        p.set_slot_reader(fake_reader_with_splits(&[], &[('字', 0.75)]));
+        let r = p.predict("字（字）字").unwrap();
+        assert_eq!(r.kana_text(), "ジ（ジ） ジ");
+        assert_eq!(split_spaces(&r), vec![(0.75, DecisionSource::Bert)]);
+    }
+
+    #[test]
+    fn trace_shows_split_apart_from_reading() {
+        let mut p = predictor_with_read_prev();
+        p.set_slot_reader(fake_reader_with_splits(&[], &[('字', 0.75)]));
+        let pred = p.predict("字字").unwrap();
+        let t = p.trace("字字", 0).unwrap();
+        // 1 文字目の行は読みだけ。マスあけは split に分ける。
+        assert_eq!(t.rows[0].kana, "ジ");
+        assert_eq!(t.rows[0].confidence, Some(pred.confidences()[0]));
+        assert_eq!(t.rows[0].decision, Some(pred.decision_sources()[0]));
+        let split = t.rows[0].split.expect("1 文字目の後ろにマスあけ");
+        assert_eq!(split.decision, DecisionSource::Bert);
+        assert_eq!(split.confidence, 0.75);
+        // 行末にはマスあけが無い。
+        assert!(t.rows[1].split.is_none());
     }
 
     #[test]

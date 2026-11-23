@@ -78,7 +78,7 @@ mod phase_probe;
 pub use error::{Error, Result};
 pub use prediction::{
     Contribution, DecisionSource, PredictionResult, Predictor, PredictorConfig, TraceResult,
-    TraceRow,
+    TraceRow, TraceSplit,
 };
 pub use slot_reader::{LineScores, SlotReader, SlotScores, SplitScore};
 

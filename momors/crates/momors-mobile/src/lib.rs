@@ -91,7 +91,7 @@ pub struct PredictionResult {
     pub source: String,
     /// 変換後のカナ文字列。
     pub kana: String,
-    /// 各カナ文字の自信度（0.0〜1.0）。
+    /// 各カナ文字の自信度（0.0〜1.0）。マスあけの空白は、そこでマスをあける確率（0.5 以上）。
     pub confidences: Vec<f32>,
     /// 分かち書きされたカナ（`ワガハイ/ワ/ネコ/デ/アル` 形式）。
     pub segmented: String,

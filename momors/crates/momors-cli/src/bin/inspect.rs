@@ -14,7 +14,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use momors_core::{DecisionSource, FloatPredictor, Predictor, PredictorConfig, TraceResult};
+use momors_core::{
+    DecisionSource, FloatPredictor, Predictor, PredictorConfig, TraceResult, TraceSplit,
+};
 
 #[cfg(feature = "bert")]
 #[path = "../bert_args.rs"]
@@ -266,11 +268,36 @@ fn run_trace(predictor: &AnyPredictor, top_n: usize) -> ExitCode {
     }
 }
 
+/// 行の後ろに入れたマスあけを1行で書く（確率と、それを出したもの）。
+fn write_split(out: &mut impl Write, split: &TraceSplit, use_color: bool) {
+    let line = format!(
+        "        マスあけ [{:<13}] {} {:.3}",
+        split.decision.as_str(),
+        confidence_bar(split.confidence),
+        split.confidence
+    );
+    if use_color {
+        writeln!(
+            out,
+            "{}{}{}",
+            decision_color(split.decision),
+            line,
+            ANSI_RESET
+        )
+        .ok();
+    } else {
+        writeln!(out, "{line}").ok();
+    }
+}
+
 fn write_trace(out: &mut impl Write, result: &TraceResult, use_color: bool) {
     for row in &result.rows {
         // かなが無い文字はスキップ表示。
         let Some(dec) = row.decision else {
             writeln!(out, "  {}  →  (skip)", row.source).ok();
+            if let Some(split) = &row.split {
+                write_split(out, split, use_color);
+            }
             continue;
         };
         let conf = row.confidence.unwrap_or(0.0);
@@ -302,6 +329,9 @@ fn write_trace(out: &mut impl Write, result: &TraceResult, use_color: bool) {
             } else {
                 writeln!(out, "{cline}").ok();
             }
+        }
+        if let Some(split) = &row.split {
+            write_split(out, split, use_color);
         }
     }
 }

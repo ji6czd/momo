@@ -6,9 +6,9 @@ class PredictionResult:
     kana: str
     """変換後のカナ文字列"""
     confidences: list[float]
-    """各カナ文字の自信度（0.0〜1.0）"""
+    """各カナ文字の自信度（0.0〜1.0）。マスあけの空白は、そこでマスをあける確率（0.5 以上）"""
     decisions: list[str]
-    """各カナ文字の決定根拠（`LR`・`BERT`・`FALLBACK_NUM` など）"""
+    """各カナ文字の決定根拠（`LR`・`BERT`・`FALLBACK_NUM` など）。マスあけの空白は、確率を出したもの（`BERT` か境界モデルの `LR`）"""
     segmented: str
     """分かち書きされたカナ（例: `ワガハイ/ワ/ネコ/デ/アル`）"""
     source_segmented: str

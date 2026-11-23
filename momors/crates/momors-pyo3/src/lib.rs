@@ -19,9 +19,10 @@ struct PredictionResult {
     source: String,
     /// 変換後のカナ文字列
     kana: String,
-    /// 各カナ文字の自信度（0.0〜1.0）
+    /// 各カナ文字の自信度（0.0〜1.0）。マスあけの空白は、そこでマスをあける確率（0.5 以上）
     confidences: Vec<f32>,
-    /// 各カナ文字の決定根拠（`LR`・`BERT`・`FALLBACK_NUM` など）
+    /// 各カナ文字の決定根拠（`LR`・`BERT`・`FALLBACK_NUM` など）。
+    /// マスあけの空白は、確率を出したもの（`BERT` か境界モデルの `LR`）
     decisions: Vec<String>,
     /// 分かち書きされたカナ（`ワガハイ/ワ/ネコ/デ/アル` 形式）
     segmented: String,

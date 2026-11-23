@@ -1,5 +1,12 @@
 name: Release
 
+# 流れ:
+#   test/x.y.z[-suffix] の push … 学習とビルドを一式行い、成果物を artifact に
+#     残してドラフトリリースを作る。
+#   release/x.y.z の push … 学習もビルドもしない。同じコミットで成功した
+#     test/* の実行を探し(resolve)、その成果物をそのまま使ってドラフトリリースを
+#     作り、承認を待って PyPI に公開する。test で確かめたものそのものが出る。
+#     先に同じコミットへ test/* タグを付けて成功させておくこと。
 on:
   push:
     tags:
@@ -11,13 +18,18 @@ on:
 
 permissions:
   contents: write
+  # release/* で test/* の実行の artifact を取り込むために必要。
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  # release/* では学習とビルドを行わない(test/* の成果物を使う)。
+  # windows/macos/linux はこのジョブに依存しているので、一緒に飛ばされる。
   train:
+    if: ${{ !startsWith(github.ref, 'refs/tags/release/') }}
     runs-on: ubuntu-latest
     env:
       PYTHONUTF8: "1"
@@ -33,20 +45,14 @@ jobs:
           cargoVersion=$(grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           tagName="${{ github.ref_name }}"
 
-          if [[ "$tagName" == release/* ]]; then
-            tagVersion="${tagName#release/}"
-            if [[ "$tagVersion" != "$cargoVersion" ]]; then
-              echo "::error::Tag version ($tagVersion) does not match momors/Cargo.toml version ($cargoVersion)"
-              exit 1
-            fi
-          elif [[ "$tagName" == test/* ]]; then
+          if [[ "$tagName" == test/* ]]; then
             tagVersion="${tagName#test/}"
             if [[ "$tagVersion" != "$cargoVersion" && "$tagVersion" != "$cargoVersion"-* ]]; then
               echo "::error::Test tag version ($tagVersion) does not match momors/Cargo.toml version ($cargoVersion) (expected exactly '$cargoVersion' or '$cargoVersion-<suffix>')"
               exit 1
             fi
           else
-            echo "::error::Tag '$tagName' does not match the expected 'release/' or 'test/' prefix"
+            echo "::error::Tag '$tagName' does not match the expected 'test/' prefix"
             exit 1
           fi
 
@@ -269,27 +275,92 @@ jobs:
             dist/*.whl
             dist/*.zip
 
+  # release/* のときだけ動く。同じコミットで成功した test/* の実行を探し、
+  # その run id を後続(release, publish-pypi)へ渡す。見つからなければここで止まる
+  # (学習もビルドもしていないので、数十秒で失敗がわかる)。
+  resolve:
+    if: startsWith(github.ref, 'refs/tags/release/')
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.find.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify tag matches momors/Cargo.toml version
+        shell: bash
+        run: |
+          cargoVersion=$(grep '^version' momors/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          tagVersion="${GITHUB_REF_NAME#release/}"
+          if [[ "$tagVersion" != "$cargoVersion" ]]; then
+            echo "::error::Tag version ($tagVersion) does not match momors/Cargo.toml version ($cargoVersion)"
+            exit 1
+          fi
+
+      - name: Find successful test run for this commit
+        id: find
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 同じコミットで成功した test/* の push 実行のうち、いちばん新しいもの。
+          run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/runs?head_sha=${GITHUB_SHA}&event=push&status=success&per_page=100" \
+            --jq '[.workflow_runs[] | select(.head_branch | startswith("test/"))] | sort_by(.created_at) | last // empty | "\(.id) \(.head_branch)"')
+          if [[ -z "$run" ]]; then
+            echo "::error::No successful test/* run found for commit ${GITHUB_SHA}. Push a test/* tag to this commit and let it succeed first."
+            exit 1
+          fi
+          read -r runId testTag <<< "$run"
+
+          # artifact の保存期間(90日)切れも、ここで先に確かめておく。
+          available=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${runId}/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")')
+          for name in windows-dist macos-dist linux-dist; do
+            if [[ " $available " != *" $name "* ]]; then
+              echo "::error::Artifact '$name' is missing or expired in test run $runId ($testTag)"
+              exit 1
+            fi
+          done
+
+          echo "run_id=$runId" >> "$GITHUB_OUTPUT"
+          echo "Using artifacts from ${testTag}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${runId}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # test/* と手動実行では、この実行でビルドした成果物を使う。
+  # release/* では、resolve が見つけた test/* の実行の成果物を使う。
+  # どちらの場合も依存先の一部が skipped になるので、結果を明示して判定する。
   release:
-    needs: [train, windows, macos, linux]
+    needs: [windows, macos, linux, resolve]
+    if: >-
+      ${{ !cancelled() &&
+          (needs.resolve.result == 'success' ||
+           (needs.windows.result == 'success' &&
+            needs.macos.result == 'success' &&
+            needs.linux.result == 'success')) }}
     runs-on: ubuntu-latest
     steps:
+      # github-token が空なら、この実行の artifact を取る(download-artifact の仕様)。
       - name: download windows artifacts
         uses: actions/download-artifact@v4
         with:
           name: windows-dist
           path: dist
+          run-id: ${{ needs.resolve.outputs.run_id || github.run_id }}
+          github-token: ${{ needs.resolve.outputs.run_id && github.token || '' }}
 
       - name: download macos artifacts
         uses: actions/download-artifact@v4
         with:
           name: macos-dist
           path: dist
+          run-id: ${{ needs.resolve.outputs.run_id || github.run_id }}
+          github-token: ${{ needs.resolve.outputs.run_id && github.token || '' }}
 
       - name: download linux artifacts
         uses: actions/download-artifact@v4
         with:
           name: linux-dist
           path: dist
+          run-id: ${{ needs.resolve.outputs.run_id || github.run_id }}
+          github-token: ${{ needs.resolve.outputs.run_id && github.token || '' }}
 
       - name: Create draft release
         if: startsWith(github.ref, 'refs/tags/')
@@ -309,33 +380,46 @@ jobs:
   # pypi environment には承認者(Required reviewers)を設定してあり、このジョブは
   # 承認待ちで止まる。release に依存させているのは、ドラフトリリースが出来てから
   # 承認待ちに入り、中身を確かめてから承認できるようにするため。
+  # 祖先の train/windows/macos/linux が skipped なので、既定の success() では
+  # 飛ばされてしまう。結果を明示して判定する。
   publish-pypi:
-    needs: [windows, macos, linux, release]
-    if: startsWith(github.ref, 'refs/tags/release/')
+    needs: [resolve, release]
+    if: >-
+      ${{ !cancelled() &&
+          startsWith(github.ref, 'refs/tags/release/') &&
+          needs.resolve.result == 'success' &&
+          needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/p/momors-py
     permissions:
       id-token: write
+      actions: read
     steps:
       - name: download windows artifacts
         uses: actions/download-artifact@v4
         with:
           name: windows-dist
           path: artifacts/windows
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: download macos artifacts
         uses: actions/download-artifact@v4
         with:
           name: macos-dist
           path: artifacts/macos
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: download linux artifacts
         uses: actions/download-artifact@v4
         with:
           name: linux-dist
           path: artifacts/linux
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Collect wheels
         run: |

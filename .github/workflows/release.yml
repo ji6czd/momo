@@ -258,11 +258,15 @@ jobs:
       - name: Generate Rust tables
         run: task rust:gen_tables
 
+      # manylinux_2_28（AlmaLinux 8・glibc 2.28 以上）で作る。manylinux2014 は C++ 標準
+      # ライブラリが古く、ONNX Runtime が使う locale の facet（std::__cxx11::collate）が
+      # .so に自前で埋め込まれ、システムの libstdc++ が登録したものと id が食い違って
+      # BERT の初期化（std::regex）で segfault していた。版は auto にせず明示する。
       - name: Build manylinux wheel
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist --manifest-path momors/crates/momors-pyo3/Cargo.toml
-          manylinux: auto
+          manylinux: 2_28
 
       - name: Build Linux C++ SDK
         run: task sdk:zip:cpp

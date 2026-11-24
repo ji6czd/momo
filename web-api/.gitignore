@@ -11,4 +11,6 @@ artifacts/
 .venv
 # Dataset
 dataset/
+# BERT モデル（task bert が dataset/momo-bert から写す）
+momo-bert/
 

@@ -1,11 +1,14 @@
 import gc
+import os
 import signal
 import threading
 import sys
+from pathlib import Path
 from types import FrameType
 from importlib.metadata import version
 from flask import Flask, request, abort
 from markupsafe import escape
+import momors_py
 from momors_py import Predictor, PredictionResult, BrailleTranslator, BrailleResult
 
 app = Flask(__name__)
@@ -25,15 +28,34 @@ footer = f"""<div class="footer">
 _semaphore = threading.Semaphore(1)
 
 
-# モデル名とウィンドーサイズの対応表
+# BERT モデル（配布用 zip を展開した momo-bert/）の場所。デプロイ前に Taskfile の
+# bert タスクが dataset/momo-bert から main.py の隣へ写す。無ければ BERT の選択肢を出さない。
+_BERT_DIR = Path(os.environ.get("MOMO_BERT_DIR", Path(__file__).parent / "momo-bert"))
+# ONNX Runtime の演算スレッド数。Cloud Run は 1 vCPU なので既定は 1。
+_BERT_THREADS = int(os.environ.get("MOMO_BERT_THREADS", "1"))
+_HAS_BERT = (_BERT_DIR / "reading_bert.int8.onnx").is_file()
+
+# モデル名 → (ウィンドーサイズ, BERT を使うか, フォームの表示名)
 _models = {
-    "small": 4,
-    "medium": 5,
-    "large": 7,
+    "small": (4, False, "Small (約3.2MB)"),
+    "medium": (5, False, "Medium (約7.0MB)"),
+    "large": (7, False, "Large (約9.8MB)"),
 }
+if _HAS_BERT:
+    # Large に BERT（読みとマスあけ）を足したもの。精度は上がるが重い。
+    _models["bert"] = (7, True, "BERT (約120MB、Large＋BERT)")
 # 現在キャッシュしているモデル（同時に1つだけ保持）
 _current_model: str = ""
 _current_predictor: Predictor | None = None
+
+
+def _load_predictor(model: str) -> Predictor:
+    window, use_bert, _ = _models[model]
+    if not use_bert:
+        return Predictor.from_bundled(window=window)
+    # from_bundled は BERT を受けないので、同梱の .mbm をパスで渡す。
+    mbm = Path(momors_py.__file__).parent / f"basic_data_{window}.mbm"
+    return Predictor(str(mbm), bert=str(_BERT_DIR), bert_threads=_BERT_THREADS)
 
 
 def _get_predictor(model: str = "large") -> Predictor:
@@ -42,7 +64,7 @@ def _get_predictor(model: str = "large") -> Predictor:
         # 別モデルへの切り替え: 古いインスタンスを解放してからロード
         _current_predictor = None
         gc.collect()
-        _current_predictor = Predictor.from_bundled(window=_models[model])
+        _current_predictor = _load_predictor(model)
         _current_model = model
     return _current_predictor
 
@@ -62,19 +84,20 @@ _braille_font_face = f"""<style>
 </style>"""
 
 
-def make_form(source: str = "") -> str:
+def make_form(source: str = "", model: str = "large") -> str:
     """
-    点訳フォームのHTMLを作る。source は入力欄の初期値（escape 済みの文字列）。
+    点訳フォームのHTMLを作る。source は入力欄の初期値（escape 済みの文字列）、
+    model は選んでおくモデル（`_models` のキー）。
     """
+    radios = "".join(
+        f"""
+        <input type="radio" id="{name}" name="model" value="{name}"{" checked" if name == model else ""}>
+        <label for="{name}">{label}</label><br>"""
+        for name, (_, _, label) in _models.items()
+    )
     return f"""<form action="/predict" method="get">
         <label for="source">点訳したい文章を入力してね：</label><br>
-        <input type="text" id="source" value="{source}" name="source" required><br>
-        <input type="radio" id="small" name="model" value="small">
-        <label for="small">Small (約3.2MB)</label><br>
-        <input type="radio" id="medium" name="model" value="medium">
-        <label for="medium">Medium (約7.0MB)</label><br>
-        <input type="radio" id="large" name="model" value="large" checked>
-        <label for="large">Large (約9.8MB)</label><br>
+        <input type="text" id="source" value="{source}" name="source" required><br>{radios}
         <input type="submit" value="点訳">
     </form>"""
 
@@ -156,6 +179,8 @@ def predict() -> str:
         abort(400, "source パラメータが必要です")
 
     model = request.args.get("model", "large")
+    if model not in _models:
+        abort(400, "model パラメータが不正です")
     with _semaphore:
         prd = _get_predictor(model)
         res = prd.predict(source)
@@ -165,7 +190,7 @@ def predict() -> str:
 
     return predict_page.format(
         braille_font_face=_braille_font_face,
-        form=make_form(escape(source)),
+        form=make_form(escape(source), model),
         source=escape(source),
         result=res.kana,
         confidences_table=make_characters_table(res),

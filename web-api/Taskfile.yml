@@ -2,9 +2,32 @@ version: "3"
 
 vars:
   DATASET_DIR: "{{.TASKFILE_DIR}}/../dataset"
+  # BERT モデルを置く場所（main.py の隣。--source=. でそのままアップロードされる）
+  BERT_DST: "{{.TASKFILE_DIR}}/momo-bert"
 
 tasks:
   default:
     desc: Deploy the web API to Google Cloud Run
     cmds:
-      - gcloud run deploy neomomo --region=asia-northeast1 --memory=128Mi --concurrency=1 --source=. --set-build-env-vars=GOOGLE_PYTHON_PACKAGE_MANAGER=uv
+      - task: bert
+      # BERT 付きの予測器は約 210MB 使う（Large だけなら約 65MB）
+      - gcloud run deploy neomomo --region=asia-northeast1 --memory=512Mi --concurrency=1 --source=. --set-build-env-vars=GOOGLE_PYTHON_PACKAGE_MANAGER=uv
+
+  bert:
+    desc: Copy the BERT model (dataset/momo-bert/) next to main.py for the BERT option
+    vars:
+      # momo-bert-*.zip を dataset/ に展開したもの（momo --bert の既定の場所と同じ）
+      SRC: "{{.DATASET_DIR}}/momo-bert"
+    preconditions:
+      - sh: '[ -f "{{.SRC}}/reading_bert.int8.onnx" ]'
+        msg: "{{.SRC}} に BERT モデルがありません（momo-bert-*.zip を dataset/ に展開してください）"
+    cmds:
+      - mkdir -p "{{.BERT_DST}}"
+      # float32 版（reading_bert.onnx）は大きいので入れない
+      - cp "{{.SRC}}/reading_bert.int8.onnx" "{{.BERT_DST}}/"
+      - cp "{{.SRC}}/labels.json"            "{{.BERT_DST}}/"
+      - cp "{{.SRC}}/cands.json"             "{{.BERT_DST}}/"
+      - cp "{{.SRC}}/vocab.txt"              "{{.BERT_DST}}/"
+      - cp "{{.SRC}}/meta.json"              "{{.BERT_DST}}/"
+      - cp "{{.SRC}}/LICENSE.txt"            "{{.BERT_DST}}/"
+      - cp "{{.SRC}}/NOTICE.txt"             "{{.BERT_DST}}/"

@@ -42,6 +42,11 @@ collapse_free_fragment_* は free。2026-11-22 より前のモデルの fragment
 学習の途中の状態を 5 分ごとと各エポックの終わりに work/finetuned/<名前>/checkpoint.pt に保存する。
 VM がプリエンプトされたら、同じコマンドを打ち直せば続きから学習する（設定かデータが違えば最初から）。
 保存し終えたら消える。meta の秒数は、再開したときは再開してからの時間。
+
+--model で元のモデルを替えられる（既定は char-v3。BERT で、語彙が文字単位の vocab.txt のもの）。
+--no-weights は重み（model.pt）を保存しない。dev の数字だけを比べる取り直し（学習率・シード）で、
+VM のディスクと持ち帰る量を減らす（large の重みは 1 本 1.2GB 余り）。重みの無いモデルは
+step10_infer・export_onnx では読めない。
 """
 
 import argparse
@@ -172,6 +177,11 @@ def main() -> None:
         default=5.0,
         help="途中の状態を保存する間隔（分）",
     )
+    ap.add_argument(
+        "--no-weights",
+        action="store_true",
+        help="重み（model.pt）を保存しない（dev の数字だけを比べる取り直し用）",
+    )
     args = ap.parse_args()
 
     train_recs = load_jsonl(str(DATA / "train_full.jsonl"))
@@ -208,7 +218,7 @@ def main() -> None:
     out_dir = WORK / "finetuned" / name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 語彙は char-v3 のもの（tiny はこれを借りる）
+    # 語彙は元のモデルのもの（tiny は char-v3 のものを借りる）
     vocab = CharVocab.from_model(DEFAULT_MODEL if args.model == "tiny" else args.model)
     labels = Labels(fit)
     cands = Candidates(fit, labels)
@@ -312,14 +322,14 @@ def main() -> None:
             fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
         return msg
 
-    # 続きから再開してよいかの照合に使う（保存先の名前・デバイス・保存間隔は学習の中身に関わらない）
+    # 続きから再開してよいかの照合に使う（保存先の名前・デバイス・保存間隔・重みを残すかは学習の中身に関わらない）
     digest = hashlib.sha256()
     for f in ("train_full.jsonl", "dev_full.jsonl"):
         digest.update((DATA / f).read_bytes())
     run_key = {
         k: v
         for k, v in vars(args).items()
-        if k not in ("name", "device", "checkpoint_minutes")
+        if k not in ("name", "device", "checkpoint_minutes", "no_weights")
     } | {"data": digest.hexdigest()}
     checkpoint = out_dir / "checkpoint.pt"
 
@@ -356,7 +366,11 @@ def main() -> None:
         print(f"dev の free の断片 {boundary_summary(bnd_free)}", flush=True)
 
     model.cpu()
-    torch.save(model.state_dict(), out_dir / "model.pt")
+    if args.no_weights:
+        # 前に同じ名前で保存した重みが残っていると、この meta と食い違うので消す
+        (out_dir / "model.pt").unlink(missing_ok=True)
+    else:
+        torch.save(model.state_dict(), out_dir / "model.pt")
     (out_dir / "encoder.json").write_text(
         model.encoder.config.to_json_string(), encoding="utf-8"
     )
@@ -382,6 +396,7 @@ def main() -> None:
         "dev_is_heldout": not args.all_data,
         "seconds": round(time.time() - t0),
         "boundary": args.boundary,
+        "weights_saved": not args.no_weights,
     }
     if bnd:
         meta["boundary_weight"] = args.boundary_weight

@@ -336,3 +336,28 @@ unit の dev の断片（1,064 個・切れ目 11,245、平均 11.5 字・3.1 �
 - `train_joint_frag` で、dev の行全体と断片の両方で w7 に勝つかを見る。読みが落ちていないかも見る。
 - 配る版（`full_joint_frag`）を `export_onnx` で zip にし、`eval/run_regression.sh` を BERT モードで通す。
 - 読みの低下が揺れかどうか：`--boundary-weight 0.5` か別のシードでもう1本。
+
+## 大きいモデルとの比較（2026-11-24 キット作成）
+
+元のモデルを大きくすると読み・マスあけが良くなるかを、`tohoku-nlp/bert-large-japanese-char-v2` で確かめる。
+
+- 選んだ理由：char-v3 と語彙（7027 字、ファイルも同じ）・事前学習のデータ（CC-100＋Wikipedia）が同じ BERT なので、違いが大きさだけになる。Apache-2.0。1024×24 層・FFN 4096・3.1 億パラメータ。
+- 文字単位の ModernBERT（KoichiYasuoka/modernbert-*-japanese-char）は事前学習が Wikipedia＋青空文庫だけで、比べると大きさとデータの違いが混ざるので後に回す。
+- 手元の確認：`build_model` で欠けた重みなく読め、同時学習の 3 ステップが通った。CPU（PyTorch・14 スレッド）で 100 字の 1 行が char-v3 52.9ms／large 192.9ms（3.6 倍）。
+- 直る余地の上限：前回の誤りの分析では、候補の中で外したものが約 1.6pt、正解が候補に無いもの（どのモデルでも直らない）が約 0.7pt。
+- 測れないもの：文脈で読み分ける力。`dataset/eval_context.tsv` は new 行 0・cue が全部空欄のままなので、この比較で見えるのは知識の差だけ。
+
+`bash train_all.sh large`（9 本・設定は本命の `train_joint_frag_unit` と同じ `--boundary --fragments 1`）：
+
+| 名前 | 元のモデル | 学習率 | シード | 重み |
+|---|---|---|---|---|
+| `large_train_joint_frag_unit` | large | 2e-5 | 0 | あり |
+| `train_joint_frag_unit` | char-v3 | 5e-5 | 0 | あり（今のデータで取り直し） |
+| `large_train_joint_frag_unit_lr1e-5` / `_lr3e-5` | large | 1e-5 / 3e-5 | 0 | なし |
+| `large_train_joint_frag_unit_s1` / `_s2` | large | 2e-5 | 1 / 2 | なし |
+| `train_joint_frag_unit_s1` / `_s2` | char-v3 | 5e-5 | 1 / 2 | なし |
+| `large_full_joint_frag_unit` | large | 2e-5 | 0（全データ） | あり |
+
+- 見るもの：dev の漢字スロット一致率と境界の誤り（行全体・unit の断片）を 3 シードの平均と幅で。`large_train` を `export_onnx` して int8 の落ち方と Rust の速さ、`large_full` で回帰 60 件。
+- 判断の目安：dev 漢字で +0.5pt 程度、または境界の誤りがはっきり減るなら、エディタ向け（文脈で吟味する系統）に large を採る検討へ。差がわずかなら char-v3 のままにして、データを増やす作業に戻る。
+- 費用：推論は 3.5 倍前後（1 字 1〜2ms の見込み）、int8 で 300MB 余り。SR の常駐と web-api には載せない。

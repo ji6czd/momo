@@ -10,7 +10,7 @@
 境界も学習したモデル（step9_finetune --boundary）は、出力 boundary_logits [B, T]（float32。その文字の
 後ろでマスをあける logit）も持つ。Rust はこの出力があればマスあけも BERT で決める。
 int8 版は onnxruntime の動的量子化（重みだけ int8、活性は実行時に量子化）。出力層と、最後の 2 層の
-FFN 出力（3072→768）は float32 のまま残す。全部を int8 にすると dev が 97.78% → 97.43% に落ちるが、
+FFN 出力（base では 3072→768、large では 4096→1024）は float32 のまま残す。全部を int8 にすると dev が 97.78% → 97.43% に落ちるが、
 これらを残すと 97.77% に戻る（GELU の後の外れ値に弱いのは後ろの層。前の層を残しても戻らない）。
 
 出力: work/onnx/<名前>/
@@ -45,7 +45,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from .common import DATA, DEFAULT_MODEL, WORK, load_jsonl
+from .common import DATA, WORK, load_jsonl
 from .export_data import raw_digest
 from .step10_infer import FineTunedReader, is_kanji
 
@@ -67,10 +67,14 @@ ZIP_FILES = [
     "vocab.txt",
     "meta.json",
 ]
-NOTICE = f"""momo BERT reading model
 
-This model is a fine-tuned derivative of {DEFAULT_MODEL}
-(https://huggingface.co/{DEFAULT_MODEL}),
+
+def notice(base_model: str) -> str:
+    """配布用 zip の NOTICE.txt。元のモデル（微調整の meta の base_model）を名指す。"""
+    return f"""momo BERT reading model
+
+This model is a fine-tuned derivative of {base_model}
+(https://huggingface.co/{base_model}),
 licensed under the Apache License, Version 2.0
 (https://www.apache.org/licenses/LICENSE-2.0). A copy of the license is in LICENSE.txt.
 
@@ -78,6 +82,8 @@ Modifications: fine-tuned to predict the readings (kana) of kanji for the momo
 Japanese braille translation project, and converted to ONNX (float32 / int8).
 See meta.json for the training data and the evaluation.
 """
+
+
 # Apache License 2.0 の本文（https://www.apache.org/licenses/LICENSE-2.0.txt のまま）
 LICENSE = Path(__file__).with_name("LICENSE-Apache-2.0.txt")
 
@@ -152,14 +158,14 @@ def export_int8(src: Path, dst: Path, num_layers: int, boundary: bool) -> None:
     pre.unlink()
 
 
-def write_zip(out: Path, name: str, with_f32: bool) -> Path:
+def write_zip(out: Path, name: str, with_f32: bool, base_model: str) -> Path:
     """配布用の zip（中は momo-bert/ の下）を work/onnx/ に作る。"""
     path = out.parent / f"momo-bert-{name}.zip"
     files = ZIP_FILES + (["reading_bert.onnx"] if with_f32 else [])
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         for f in files:
             z.write(out / f, f"{ZIP_DIR}/{f}")
-        z.writestr(f"{ZIP_DIR}/NOTICE.txt", NOTICE)
+        z.writestr(f"{ZIP_DIR}/NOTICE.txt", notice(base_model))
         z.write(LICENSE, f"{ZIP_DIR}/LICENSE.txt")
     return path
 
@@ -290,7 +296,7 @@ def main() -> None:
         shutil.copyfile(src / name, out / name)
     from huggingface_hub import hf_hub_download
 
-    shutil.copyfile(hf_hub_download(DEFAULT_MODEL, "vocab.txt"), out / "vocab.txt")
+    shutil.copyfile(hf_hub_download(reader.base_model, "vocab.txt"), out / "vocab.txt")
 
     sess_f32 = session(f32, args.threads)
     sess_i8 = session(i8, args.threads)
@@ -367,7 +373,7 @@ def main() -> None:
     )
     print(f"保存先: {out}")
     if not args.no_zip:
-        z = write_zip(out, args.name, args.zip_f32)
+        z = write_zip(out, args.name, args.zip_f32, reader.base_model)
         print(f"配布用: {z}（{z.stat().st_size / 2**20:.0f} MiB）")
 
 

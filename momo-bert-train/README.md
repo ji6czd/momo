@@ -59,7 +59,9 @@ uv run make_kit                          # データを作り直し、クラウ�
 #   bash train_all.sh unit は、マスあけの単位で切った断片の 2 本（train_joint_frag_unit・full_joint_frag_unit）
 #   bash train_all.sh seed は、--seed 1 の取り直し 3 本（train_joint_frag_unit_s1・train_joint_s1・full_joint_frag_unit_s1）
 #   bash train_all.sh collapse は、隠れ状態の潰れを確かめる 2 本（docs/bert-plan.md「隠れ状態の潰れ」）
-#   1 本ずつなら uv run step9_finetune [--all-data] [--boundary [--fragments 1 [--fragment-cut free]]]
+#   bash train_all.sh large は、tohoku-nlp/bert-large-japanese-char-v2 を char-v3 と同じデータで比べる 9 本
+#   （docs/bert-plan.md「大きいモデルとの比較」。学習率とシードの取り直しは --no-weights で重みを残さない）
+#   1 本ずつなら uv run step9_finetune [--model 元のモデル] [--all-data] [--boundary [--fragments 1 [--fragment-cut free]]]
 #   --boundary は読みと境界の同時学習（名前は train_joint / full_joint）。
 #   --fragments は境界の学習に行の断片も足す。既定はマスあけの単位の頭から終わりまで 2 単位以上
 #   （名前は train_joint_frag_unit / full_joint_frag_unit）。--fragment-cut free は語の途中でも切る

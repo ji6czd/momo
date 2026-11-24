@@ -20,9 +20,21 @@ def is_kanji(ch: str) -> bool:
     return ch in "々〇" or "CJK UNIFIED" in unicodedata.name(ch, "")
 
 
+def base_model_of(d) -> str:
+    """微調整の元のモデル（meta.json の base_model）。記録の無い古いモデルと tiny は char-v3。"""
+    meta = d / "meta.json"
+    base = (
+        json.loads(meta.read_text(encoding="utf-8")).get("base_model")
+        if meta.exists()
+        else None
+    )
+    return base if base and base != "tiny" else DEFAULT_MODEL
+
+
 class FineTunedReader:
-    def __init__(self, name: str, vocab_model: str = DEFAULT_MODEL):
+    def __init__(self, name: str, vocab_model: str | None = None):
         d = WORK / "finetuned" / name
+        self.base_model = vocab_model or base_model_of(d)
         self.labels: list[str] = json.loads(
             (d / "labels.json").read_text(encoding="utf-8")
         )
@@ -30,7 +42,7 @@ class FineTunedReader:
             (d / "cands.json").read_text(encoding="utf-8")
         )["chars"]
         self.model = load_finetuned(d, len(self.labels))
-        self.vocab = CharVocab.from_model(vocab_model)
+        self.vocab = CharVocab.from_model(self.base_model)
         self.max_chars = self.model.encoder.config.max_position_embeddings - 2
 
     @torch.no_grad()

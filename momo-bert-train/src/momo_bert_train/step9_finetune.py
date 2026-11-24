@@ -39,7 +39,8 @@ unit の断片の最後の切れ目は元の行で必ずマスあけなので、
 dev の断片は unit と free の両方で測る（history の fragment_* と collapse_fragment_* は unit、free_fragment_* と
 collapse_free_fragment_* は free。2026-11-22 より前のモデルの fragment_* と dev_boundary_fragments は free のもの）。
 
-学習の途中の状態を 5 分ごとと各エポックの終わりに work/finetuned/<名前>/checkpoint.pt に保存する。
+学習の途中の状態を 2 分ごとと各エポックの終わりに work/finetuned/<名前>/checkpoint.pt に保存する
+（CPU に写しを取ってから別のスレッドで書くので、学習はほとんど止まらない）。
 VM がプリエンプトされたら、同じコマンドを打ち直せば続きから学習する（設定かデータが違えば最初から）。
 保存し終えたら消える。meta の秒数は、再開したときは再開してからの時間。
 
@@ -174,7 +175,7 @@ def main() -> None:
     ap.add_argument(
         "--checkpoint-minutes",
         type=float,
-        default=5.0,
+        default=2.0,
         help="途中の状態を保存する間隔（分）",
     )
     ap.add_argument(

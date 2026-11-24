@@ -58,8 +58,7 @@ case "${1:-all}" in
     # 大きさだけが違う比較（語彙・事前学習のデータは char-v3 と同じ）。設定は本命の train_joint_frag_unit。
     # 役に立つ順に並べる（途中で止めても、先の分だけで比べられる）
     smoke="smoke_joint_frag_unit|--smoke --boundary --fragments 1"
-    # large の途中保存は重みと AdamW の状態で 3.7GB ほどあり、書くのに 30 秒近くかかるので 10 分ごとにする
-    L="--model tohoku-nlp/bert-large-japanese-char-v2 --boundary --fragments 1 --checkpoint-minutes 10"
+    L="--model tohoku-nlp/bert-large-japanese-char-v2 --boundary --fragments 1"
     V3="--boundary --fragments 1"
     runs=(
       "large_train_joint_frag_unit|$L --lr 2e-5 --name large_train_joint_frag_unit"

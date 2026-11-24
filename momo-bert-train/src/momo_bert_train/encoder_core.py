@@ -33,6 +33,7 @@ import collections
 import json
 import os
 import random
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -517,6 +518,65 @@ def read_checkpoint(path: Path, log) -> dict | None:
         return None
 
 
+def snapshot(x):
+    """途中保存に書く値の写し。学習を続けても変わらないよう、テンソルは CPU へ複製する
+    （CPU にあるもの、たとえば AdamW の step も、その場で書き換わるので複製する）。
+    state_dict の _metadata も引き継ぐ。"""
+    if isinstance(x, torch.Tensor):
+        return x.detach().to("cpu", copy=True)
+    if isinstance(x, dict):
+        y = type(x)((k, snapshot(v)) for k, v in x.items())
+        if hasattr(x, "_metadata"):
+            y._metadata = x._metadata
+        return y
+    if isinstance(x, (list, tuple)):
+        return type(x)(snapshot(v) for v in x)
+    return x
+
+
+class CheckpointWriter:
+    """途中保存を別のスレッドで書く。学習は書き終わるのを待たずに続ける
+    （large では 1 回 3.7GB ほどあり、待つと 30 秒近く止まる）。
+
+    書くのは一度に 1 つだけ。前のが書き終わっていなければ、次の写しを取る前に待つ
+    （写しを 2 つ同時にメモリへ持たない）。書くのに失敗しても学習は止めない（表示だけ）。"""
+
+    def __init__(self, path: Path, log):
+        self.path, self.log = path, log
+        self.thread: threading.Thread | None = None
+
+    def wait(self) -> None:
+        if self.thread is not None:
+            self.thread.join()
+            self.thread = None
+
+    def submit(self, state: dict) -> None:
+        self.wait()
+        self.thread = threading.Thread(target=self._write, args=(state,))
+        self.thread.start()
+
+    def _write(self, state: dict) -> None:
+        # 書いている途中で落ちても前の保存が残るように、別名に書いてから置き換える。
+        # 中身をディスクへ書き出してから置き換えないと、VM が止まったときに置き換えだけが残り、
+        # 中身の切れたファイルになることがある（プリエンプトで実際に起きた）
+        try:
+            tmp = self.path.with_suffix(".tmp")
+            with open(tmp, "wb") as f:
+                torch.save(state, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.path)
+            # 置き換えそのものも書き出す（Linux。Windows には O_DIRECTORY が無い）
+            if hasattr(os, "O_DIRECTORY"):
+                fd = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        except OSError as e:  # ディスクがいっぱい、など
+            self.log(f"  途中保存に失敗した（{type(e).__name__}: {e}）。学習は続ける")
+
+
 def train(
     model: ReadingModel,
     exs: list[Example],
@@ -534,13 +594,14 @@ def train(
     log=lambda s: print(s, flush=True),
     checkpoint: Path | None = None,
     run_key: dict | None = None,
-    checkpoint_every: float = 300.0,
+    checkpoint_every: float = 120.0,
     boundary_weight: float = 1.0,
     extra: dict[int, list[Example]] | None = None,
 ) -> None:
     """checkpoint を渡すと、エポックの終わりと checkpoint_every 秒ごとに途中の状態を保存し、
     run_key が同じ保存があればその続きから学習する（クラウドの VM がプリエンプトされても、
     同じコマンドを打ち直せば続きから）。学習の結果を保存し終えたら、呼び出し側で消す。
+    保存は CPU に写しを取ってから別のスレッドで書くので、学習が止まるのは写しを取るあいだだけ。
 
     model が境界の出力層を持てば、読みと境界を同時に学習する。損失は
     読みの交差エントロピー + boundary_weight × 境界の二値交差エントロピー（どちらも位置の平均）。
@@ -589,9 +650,12 @@ def train(
         + (f"・読みと境界の同時学習（境界の重み {boundary_weight}）" if joint else "")
     )
 
+    writer = CheckpointWriter(checkpoint, log) if checkpoint is not None else None
+
     def save(
         epoch: int, k: int, total: float, n: int, btotal: float = 0.0, bn: int = 0
     ) -> None:
+        writer.wait()  # 前の写しを書き終えてから次の写しを取る（写しは 1 つだけ持つ）
         state = {
             "run_key": run_key,
             "epoch": epoch,  # この epoch の k 番目の例から続ける
@@ -609,22 +673,8 @@ def train(
             if torch.cuda.is_available()
             else None,
         }
-        # 書いている途中で落ちても前の保存が残るように、別名に書いてから置き換える。
-        # 中身をディスクへ書き出してから置き換えないと、VM が止まったときに置き換えだけが残り、
-        # 中身の切れたファイルになることがある（プリエンプトで実際に起きた）
-        tmp = checkpoint.with_suffix(".tmp")
-        with open(tmp, "wb") as f:
-            torch.save(state, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, checkpoint)
-        # 置き換えそのものも書き出す（Linux。Windows には O_DIRECTORY が無い）
-        if hasattr(os, "O_DIRECTORY"):
-            fd = os.open(checkpoint.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
+        # 写しを取るあいだだけ学習を止め、ファイルへは別のスレッドで書く
+        writer.submit(snapshot(state))
 
     start_epoch, start_k, total, n, btotal, bn = 1, 0, 0.0, 0, 0.0, 0
     if checkpoint is not None and checkpoint.exists():
@@ -651,71 +701,82 @@ def train(
         del state
 
     t0 = last_save = time.time()
-    for epoch in range(start_epoch, epochs + 1):
-        model.train()
-        cur = epoch_exs(epoch)
-        order = list(range(len(cur)))
-        random.Random(seed * 1000 + epoch).shuffle(order)
-        for k in range(start_k, len(order), batch_size):
-            batch = [cur[i] for i in order[k : k + batch_size]]
-            ids, mask, pos_b, pos_t, rows, gold = collate(batch, vocab.pad, device)
-            with torch.autocast(
-                device_type="cuda", dtype=dtype, enabled=dtype is not None
-            ):
-                if joint:
-                    bpos_b, bpos_t, bgold = collate_boundary(batch, device)
-                    logits, blogits = model.forward_joint(
-                        ids, mask, pos_b, pos_t, bpos_b, bpos_t
+    try:
+        for epoch in range(start_epoch, epochs + 1):
+            model.train()
+            cur = epoch_exs(epoch)
+            order = list(range(len(cur)))
+            random.Random(seed * 1000 + epoch).shuffle(order)
+            for k in range(start_k, len(order), batch_size):
+                batch = [cur[i] for i in order[k : k + batch_size]]
+                ids, mask, pos_b, pos_t, rows, gold = collate(batch, vocab.pad, device)
+                with torch.autocast(
+                    device_type="cuda", dtype=dtype, enabled=dtype is not None
+                ):
+                    if joint:
+                        bpos_b, bpos_t, bgold = collate_boundary(batch, device)
+                        logits, blogits = model.forward_joint(
+                            ids, mask, pos_b, pos_t, bpos_b, bpos_t
+                        )
+                    else:
+                        logits = model(ids, mask, pos_b, pos_t)
+                # 漢字の無い行だけのバッチ（同時学習のときだけ起こりうる）は、読みの損失を 0 にする
+                loss = (
+                    nn.functional.cross_entropy(
+                        masked_logits(logits, table, rows), gold
                     )
-                else:
-                    logits = model(ids, mask, pos_b, pos_t)
-            # 漢字の無い行だけのバッチ（同時学習のときだけ起こりうる）は、読みの損失を 0 にする
-            loss = (
-                nn.functional.cross_entropy(masked_logits(logits, table, rows), gold)
-                if len(gold)
-                else logits.float().sum() * 0.0
-            )
-            objective = loss
-            if joint:
-                bloss = (
-                    nn.functional.binary_cross_entropy_with_logits(
-                        blogits.float(), bgold
-                    )
-                    if len(bgold)
-                    else blogits.float().sum() * 0.0
+                    if len(gold)
+                    else logits.float().sum() * 0.0
                 )
-                objective = loss + boundary_weight * bloss
-            opt.zero_grad(set_to_none=True)
-            if scaler:
-                scaler.scale(objective).backward()
-                scaler.unscale_(opt)
-                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                scaler.step(opt)
-                scaler.update()
-            else:
-                objective.backward()
-                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                opt.step()
-            sched.step()
-            total += loss.item() * len(gold)
-            n += len(gold)
+                objective = loss
+                if joint:
+                    bloss = (
+                        nn.functional.binary_cross_entropy_with_logits(
+                            blogits.float(), bgold
+                        )
+                        if len(bgold)
+                        else blogits.float().sum() * 0.0
+                    )
+                    objective = loss + boundary_weight * bloss
+                opt.zero_grad(set_to_none=True)
+                if scaler:
+                    scaler.scale(objective).backward()
+                    scaler.unscale_(opt)
+                    nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    scaler.step(opt)
+                    scaler.update()
+                else:
+                    objective.backward()
+                    nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    opt.step()
+                sched.step()
+                total += loss.item() * len(gold)
+                n += len(gold)
+                if joint:
+                    btotal += bloss.item() * len(bgold)
+                    bn += len(bgold)
+                if (
+                    checkpoint is not None
+                    and time.time() - last_save >= checkpoint_every
+                ):
+                    save(epoch, k + batch_size, total, n, btotal, bn)
+                    last_save = time.time()
+            msg = f"  epoch {epoch}/{epochs} loss={total / max(n, 1):.4f}"
             if joint:
-                btotal += bloss.item() * len(bgold)
-                bn += len(bgold)
-            if checkpoint is not None and time.time() - last_save >= checkpoint_every:
-                save(epoch, k + batch_size, total, n, btotal, bn)
+                msg += f" 境界 loss={btotal / max(bn, 1):.4f}"
+            msg += f"（{time.time() - t0:.0f} 秒）"
+            if on_epoch:
+                msg += " " + on_epoch(epoch)
+            log(msg)
+            start_k, total, n, btotal, bn = 0, 0.0, 0, 0.0, 0
+            if checkpoint is not None:
+                save(epoch + 1, 0, 0.0, 0)
                 last_save = time.time()
-        msg = f"  epoch {epoch}/{epochs} loss={total / max(n, 1):.4f}"
-        if joint:
-            msg += f" 境界 loss={btotal / max(bn, 1):.4f}"
-        msg += f"（{time.time() - t0:.0f} 秒）"
-        if on_epoch:
-            msg += " " + on_epoch(epoch)
-        log(msg)
-        start_k, total, n, btotal, bn = 0, 0.0, 0, 0.0, 0
-        if checkpoint is not None:
-            save(epoch + 1, 0, 0.0, 0)
-            last_save = time.time()
+    finally:
+        # 書きかけの途中保存を待つ。例外で抜けるときも、書き終えてから抜ける
+        # （呼び出し側は、戻ったあとで途中保存を消したり読み直したりしてよい）
+        if writer is not None:
+            writer.wait()
 
 
 @torch.no_grad()

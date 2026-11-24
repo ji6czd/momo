@@ -74,7 +74,7 @@ uv run audit_raw                         # 注釈どうしの食い違い一覧�
 
 `pyproject.toml` の `[project.scripts]` に登録してあるので、`uv run <名前>` で呼べる。
 
-step9_finetune は、5 分ごと（`--checkpoint-minutes`）と各エポックの終わりに途中の状態を
+step9_finetune は、2 分ごと（`--checkpoint-minutes`）と各エポックの終わりに途中の状態を
 `work/finetuned/<名前>/checkpoint.pt`（重みと AdamW の状態で 1GB 余り）へ保存する。VM がプリエンプトされたら、VM を起動し直して
 同じコマンドを打ち直せば続きから学習する。設定かデータが違えば使わずに最初から学習する。終われば消える。
 

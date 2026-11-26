@@ -13,6 +13,17 @@ vars:
       dir="${ESP_TARGET_DIR:-{{.ROOT_DIR}}/momors/target}"
       if command -v cygpath >/dev/null 2>&1; then cygpath -m "$dir"; else echo "$dir"; fi
 
+  # momors-esp32 のビルド中だけ使う libclang の場所（esp-idf-sys の bindgen が ESP-IDF のヘッダを読むのに使う）。
+  # ESP32-P4 は RISC-V なので上流の LLVM で足りる（Espressif 版 esp-clang が要るのは Xtensa のチップだけ）。
+  # システム全体の LIBCLANG_PATH は変えず、esp:build / esp:benchbuild の cargo にだけ渡す。
+  # 既定: Windows は LLVM の既定のインストール先、それ以外は空（＝渡さず clang-sys の自動検出に任せる）。
+  # 別の場所に入れた場合は環境変数 ESP_LIBCLANG_PATH で上書きする。
+  ESP_LIBCLANG_PATH:
+    sh: |
+      if [ -n "${ESP_LIBCLANG_PATH:-}" ]; then echo "$ESP_LIBCLANG_PATH"
+      elif [ "{{OS}}" = "windows" ]; then echo "C:/Program Files/LLVM/bin"
+      fi
+
   # SDK zip 名に埋め込むプラットフォーム名（OS/ARCH は Task 組み込み = Go の GOOS/GOARCH）。
   # 例: windows-amd64 / linux-amd64 / linux-arm64 / macos-arm64
   PLATFORM: '{{if eq OS "darwin"}}macos{{else}}{{OS}}{{end}}-{{ARCH}}'
@@ -89,7 +100,8 @@ tasks:
     env:
       CARGO_TARGET_DIR: "{{.ESP_TARGET_DIR}}"
     cmds:
-      - cargo build --release
+      # 空の LIBCLANG_PATH を渡すと clang-sys が空のパスだけを探して失敗するため、値があるときだけ付ける
+      - '{{if .ESP_LIBCLANG_PATH}}LIBCLANG_PATH="{{.ESP_LIBCLANG_PATH}}" {{end}}cargo build --release'
 
   esp:benchbuild:
     desc: Build ESP32-P4 firmware with bench-tools feature enabled
@@ -97,7 +109,7 @@ tasks:
     env:
       CARGO_TARGET_DIR: "{{.ESP_TARGET_DIR}}"
     cmds:
-      - cargo build --release --features bench-tools
+      - '{{if .ESP_LIBCLANG_PATH}}LIBCLANG_PATH="{{.ESP_LIBCLANG_PATH}}" {{end}}cargo build --release --features bench-tools'
 
   esp:flash:
     desc: Flash ESP32-P4 firmware

@@ -77,9 +77,13 @@ espflash monitor                                      # 115200 bps、1 行入力
 
 通常のビルドに加えて次が必要です。
 
-- Rust nightly と `rust-src`（`rustup toolchain install nightly --component rust-src`。
-  クレート内の `rust-toolchain.toml` が自動で選択します）
+- 日付を固定した Rust nightly と `rust-src`（`rustup toolchain install nightly-2026-10-19 --component rust-src`。
+  クレート内の `rust-toolchain.toml` が自動で選択します。日付を固定している理由は同ファイルのコメント参照）
 - `cargo install ldproxy espflash`
+- libclang（esp-idf-sys の bindgen が使います）。ESP32-P4 は RISC-V なので上流の LLVM で足ります
+  （espup の esp-clang は不要）。Windows では LLVM を既定の場所（`C:\Program Files\LLVM`）に入れてください。
+  `task esp:build` がビルド中だけ `LIBCLANG_PATH` をそこへ向けます（システムの環境変数は変えません）。
+  別の場所に入れた場合は環境変数 `ESP_LIBCLANG_PATH` で指定します
 - Python 3、git、CMake、Ninja が PATH にあること（ESP-IDF のビルドに使います）
 - 初回ビルド時に ESP-IDF v5.5.5 とツールチェーンが `~/.espressif` に自動取得されます
   （数 GB・時間がかかります。プロキシ環境では git と pip の設定が必要です）

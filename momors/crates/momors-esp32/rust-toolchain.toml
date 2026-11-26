@@ -1,3 +1,9 @@
+# espidf ターゲットは rustup 配布の std がなく -Zbuild-std が要るため nightly を使う。
+# 日付を固定しているのは、上流の std が espidf 向けに壊れる期間があるため（2026-11 時点）:
+#   - 2026-08 の nightly と 1.99 stable: std が libc::AT_FDCWD を参照して失敗（1.100 で修正済み）
+#   - 2026-10-20 以降: libc 0.2.191 で stat の st_*time が消えて失敗（rust-lang/rust#164555, 未修正）
+# 上げるときは https://does-it-build.noratrieb.dev/target?target=riscv32imafc-esp-espidf&mode=std
+# で通っている日付を確かめてから、実際にビルドする。
 [toolchain]
-channel = "stable"
+channel = "nightly-2026-10-19"
 components = ["rust-src"]

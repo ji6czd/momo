@@ -1,13 +1,17 @@
 //! 正本 [`BrailleDocument`] をファイル形式のバイト列へ直列化する。
 //!
 //! - `Mbr`: 論理ドキュメントをそのまま MBR テキストへ（[`BrailleDocument::to_mbr`]）。
+//! - `UnformattedText`: 論理ドキュメントの段落を 1 行ずつ書く（ページ書式なし）。
 //! - `Bes` / `Base` / `BrailleText`: [`render`] で印刷イメージへ導出してから符号化する。
 
-use crate::document::BrailleDocument;
+use crate::document::{BrailleDocument, ParagraphEntry};
 use crate::formatter::{FormattedDocument, render};
 use crate::nabcc::{NabccCase, braille_to_nabcc};
 
-/// [`OutputFormat::BrailleText`] のセルの符号化。
+/// 点字のスペース（U+2800）。
+const BLANK: char = '⠀';
+
+/// [`OutputFormat::BrailleText`] / [`OutputFormat::UnformattedText`] のセルの符号化。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellEncoding {
     /// NABCC で ASCII 1 バイトに符号化する。英字のケースは [`NabccCase`] で選ぶ
@@ -40,6 +44,14 @@ pub enum OutputFormat {
         encoding: CellEncoding,
         separation: PageSeparation,
     },
+    /// ページ書式を持たない点字テキスト。拡張子: `.brl`
+    ///
+    /// 1 段落を 1 行にし、段落の間を LF で区切る（空の段落は空行）。折返しも段落内の
+    /// 強制改行も持たず、強制改行は点字スペース（U+2800）1 マスに置き換える（つなぎ目の
+    /// どちらかが既にスペースなら足さない＝BES の折返しで行末に残ったスペースを二重にしない）。
+    /// ページヘッダ・改ページ・フォームフィードは書かない。行末の点字スペースは落とす。
+    /// セルの符号化は [`CellEncoding`] で選ぶ（[`BrailleText`](Self::BrailleText) と同じ）。
+    UnformattedText { encoding: CellEncoding },
     /// PC-9801 用の点字ファイル形式。ヘッダとページデータを含む。拡張子: `.bse`
     Base,
     /// IBM 点字編集システム形式。独自バイナリ。拡張子: `.bes`
@@ -57,6 +69,7 @@ impl OutputFormat {
                 encoding,
                 separation,
             } => write_braille_text(&render(doc), *encoding, *separation),
+            OutputFormat::UnformattedText { encoding } => write_unformatted_text(doc, *encoding),
             OutputFormat::Base => write_base_file(&render(doc)),
             OutputFormat::Bes => write_bes_file(&render(doc)),
         }
@@ -76,14 +89,7 @@ fn write_braille_text(
         }
         for line in page.iter() {
             // 行末の点字スペースを落とす（line_width 超過と印刷時の余分な折返しを防ぐ）。
-            let content = line.content.as_str().trim_end_matches('⠀');
-            match encoding {
-                CellEncoding::Nabcc(case) => {
-                    out.extend(content.chars().map(|c| braille_to_nabcc(c, case)));
-                }
-                CellEncoding::Unicode => out.extend_from_slice(content.as_bytes()),
-            }
-            out.push(b'\n');
+            write_cells_line(&mut out, &line.content, encoding);
         }
         if separation == PageSeparation::Padding {
             out.extend(std::iter::repeat_n(
@@ -93,6 +99,51 @@ fn write_braille_text(
         }
     }
     out
+}
+
+fn write_unformatted_text(doc: &BrailleDocument, encoding: CellEncoding) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    // 段落は logical_end のセグメントで終わる。BES の読み込みでは段落の途中に改ページが
+    // 入ることがある（Break の前後に段落が分かれる）ので、エントリをまたいでつなぐ。
+    let mut line = String::new();
+    let mut pending = false;
+    for entry in &doc.paragraphs {
+        let ParagraphEntry::Text(segments) = entry else {
+            continue; // 改ページは書かない
+        };
+        for seg in segments {
+            let joins_with_blank = !line.is_empty()
+                && !seg.content.is_empty()
+                && !line.ends_with(BLANK)
+                && !seg.content.starts_with(BLANK);
+            if joins_with_blank {
+                line.push(BLANK);
+            }
+            line.push_str(&seg.content);
+            pending = true;
+            if seg.logical_end {
+                write_cells_line(&mut out, &line, encoding);
+                line.clear();
+                pending = false;
+            }
+        }
+    }
+    if pending {
+        write_cells_line(&mut out, &line, encoding);
+    }
+    out
+}
+
+/// 1 行分のセルを符号化して LF で終える。行末の点字スペースは落とす。
+fn write_cells_line(out: &mut Vec<u8>, cells: &str, encoding: CellEncoding) {
+    let content = cells.trim_end_matches(BLANK);
+    match encoding {
+        CellEncoding::Nabcc(case) => {
+            out.extend(content.chars().map(|c| braille_to_nabcc(c, case)));
+        }
+        CellEncoding::Unicode => out.extend_from_slice(content.as_bytes()),
+    }
+    out.push(b'\n');
 }
 
 /// BASE 形式。NABCC は大文字固定（JBCC 由来のため小文字の揺れはない）。
@@ -217,7 +268,7 @@ fn write_bes_file(doc: &FormattedDocument) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{DocumentConfig, PageNumberStyle};
+    use crate::document::{DocumentConfig, PageBreak, PageNumberStyle, Segment};
 
     fn config(page_header: bool) -> DocumentConfig {
         DocumentConfig {
@@ -362,6 +413,64 @@ mod tests {
         }
         .write(&d);
         assert_eq!(out, b"A\nB\nC\nD\n\n\n");
+    }
+
+    fn brl(d: &BrailleDocument, encoding: CellEncoding) -> Vec<u8> {
+        OutputFormat::UnformattedText { encoding }.write(d)
+    }
+
+    fn text(segments: &[(&str, bool)]) -> ParagraphEntry {
+        ParagraphEntry::Text(
+            segments
+                .iter()
+                .map(|&(c, end)| Segment::new(c, end))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn unformatted_text_one_paragraph_per_line() {
+        // ページヘッダあり・行幅 3 でも、.brl は折返しもヘッダも書かない。
+        let cfg = DocumentConfig {
+            line_width: 3,
+            ..config(true)
+        };
+        let paras: Vec<String> = ["⠁⠃⠀⠉⠙⠀⠑⠋", "", "⠛"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let d = BrailleDocument::from_paragraphs(&paras, cfg);
+        assert_eq!(
+            String::from_utf8(brl(&d, CellEncoding::Unicode)).unwrap(),
+            "⠁⠃⠀⠉⠙⠀⠑⠋\n\n⠛\n"
+        );
+        assert_eq!(
+            brl(&d, CellEncoding::Nabcc(NabccCase::Lower)),
+            b"ab cd ef\n\ng\n"
+        );
+    }
+
+    #[test]
+    fn unformatted_text_joins_line_breaks_with_one_blank() {
+        let d = BrailleDocument {
+            paragraphs: vec![
+                // 段落内の強制改行 → 点字スペース 1 マス。
+                text(&[("⠁⠃", false), ("⠉", true)]),
+                // つなぎ目に既にスペースがあれば足さない（BES の折返しの行末スペース）。
+                text(&[("⠙⠀", false), ("⠑", false), ("⠀⠋", true)]),
+                // 段落の途中の改ページはまたいでつなぐ。改ページそのものは書かない。
+                text(&[("⠛", false)]),
+                ParagraphEntry::Break(PageBreak::default()),
+                text(&[("⠓", true)]),
+                // 段落末尾のスペースは落とす。
+                text(&[("⠊⠀⠀", true)]),
+            ],
+            config: config(true),
+        };
+        assert_eq!(
+            String::from_utf8(brl(&d, CellEncoding::Unicode)).unwrap(),
+            "⠁⠃⠀⠉\n⠙⠀⠑⠀⠋\n⠛⠀⠓\n⠊\n"
+        );
     }
 
     #[test]

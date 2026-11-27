@@ -108,27 +108,28 @@ struct Cli {
     output: Option<PathBuf>,
 
     /// 1行あたりのマス数（ファイル整形モード、省略時 32）。
-    /// 点字ファイルの入力では、省略するとファイルの設定を使う
+    /// 点字ファイルの入力では、省略するとファイルの設定を使う。.brl 出力に指定するとエラー
     #[arg(long)]
     line_width: Option<usize>,
 
     /// 1ページあたりの行数（ファイル整形モード、省略時 22）。
-    /// 点字ファイルの入力では、省略するとファイルの設定を使う
+    /// 点字ファイルの入力では、省略するとファイルの設定を使う。.brl 出力に指定するとエラー
     #[arg(long)]
     lines_per_page: Option<usize>,
 
     /// ページヘッダのタイトル（日本語テキスト、ファイル整形モード）。
-    /// 点字ファイルの入力では、指定したときだけ差し替える（点訳に読みのモデルを使う）
+    /// 点字ファイルの入力では、指定したときだけ差し替える（点訳に読みのモデルを使う）。
+    /// .brl 出力に指定するとエラー
     #[arg(long)]
     title: Option<String>,
 
-    /// .brf の NABCC 英字ケース（upper: 規格どおり／lower: 点字ディスプレイで直接読む用）。
-    /// .brf 以外の出力形式に指定するとエラー
+    /// .brf / .brl の NABCC 英字ケース（upper: 規格どおり／lower: 点字ディスプレイで直接読む用）。
+    /// .brf / .brl 以外の出力形式に指定するとエラー
     #[arg(long, default_value = "upper")]
     nabcc_case: NabccCaseArg,
 
-    /// .brf を NABCC でなく Unicode 点字（UTF-8）で書き出す。
-    /// NABCC 関連のオプション（--nabcc-case）とは併用できない。.brf 以外の出力形式に指定するとエラー
+    /// .brf / .brl を NABCC でなく Unicode 点字（UTF-8）で書き出す。
+    /// NABCC 関連のオプション（--nabcc-case）とは併用できない。.brf / .brl 以外の出力形式に指定するとエラー
     #[arg(long, conflicts_with = "nabcc_case")]
     unicode: bool,
 
@@ -363,19 +364,21 @@ fn run_format(cli: &Cli) -> Result<(), String> {
         .as_ref()
         .and_then(|p| p.extension())
         .and_then(|e| e.to_str());
+    let encoding = if cli.unicode {
+        CellEncoding::Unicode
+    } else {
+        CellEncoding::Nabcc(cli.nabcc_case.into())
+    };
     let braille_format = match ext {
         Some("brf") => Some(OutputFormat::BrailleText {
-            encoding: if cli.unicode {
-                CellEncoding::Unicode
-            } else {
-                CellEncoding::Nabcc(cli.nabcc_case.into())
-            },
+            encoding,
             separation: if cli.no_form_feed {
                 PageSeparation::Padding
             } else {
                 PageSeparation::FormFeed
             },
         }),
+        Some("brl") => Some(OutputFormat::UnformattedText { encoding }),
         Some("bse") => Some(OutputFormat::Base),
         Some("bes") => Some(OutputFormat::Bes),
         Some("mbr") => Some(OutputFormat::Mbr),
@@ -385,14 +388,22 @@ fn run_format(cli: &Cli) -> Result<(), String> {
     // 効かない指定を黙って無視すると「指定したつもり」の事故になるので弾く。
     // （--unicode と --nabcc-case の併用は clap の conflicts_with で弾いている）
     let is_brf = matches!(braille_format, Some(OutputFormat::BrailleText { .. }));
-    if cli.nabcc_case != NabccCaseArg::Upper && !is_brf {
-        return Err("--nabcc-case は .brf 出力にのみ指定できます".to_string());
+    let is_brl = matches!(braille_format, Some(OutputFormat::UnformattedText { .. }));
+    if cli.nabcc_case != NabccCaseArg::Upper && !(is_brf || is_brl) {
+        return Err("--nabcc-case は .brf / .brl 出力にのみ指定できます".to_string());
     }
-    if cli.unicode && !is_brf {
-        return Err("--unicode は .brf 出力にのみ指定できます".to_string());
+    if cli.unicode && !(is_brf || is_brl) {
+        return Err("--unicode は .brf / .brl 出力にのみ指定できます".to_string());
     }
     if cli.no_form_feed && !is_brf {
         return Err("--no-form-feed は .brf 出力にのみ指定できます".to_string());
+    }
+    if is_brl && (cli.line_width.is_some() || cli.lines_per_page.is_some() || cli.title.is_some()) {
+        return Err(
+            "--line-width / --lines-per-page / --title は .brl 出力には指定できません\
+             （.brl はページの書式を持たない）"
+                .to_string(),
+        );
     }
 
     let out = match read_braille_file(input)? {
@@ -400,7 +411,7 @@ fn run_format(cli: &Cli) -> Result<(), String> {
         Some(mut doc) => {
             let Some(format) = braille_format else {
                 return Err("点字ファイル（.mbr / .bes / .bet）の入力は、\
-                            点字の形式（.brf / .bse / .bes / .mbr）にしか書き出せません"
+                            点字の形式（.brf / .brl / .bse / .bes / .mbr）にしか書き出せません"
                     .to_string());
             };
             apply_layout_overrides(&mut doc, cli)?;

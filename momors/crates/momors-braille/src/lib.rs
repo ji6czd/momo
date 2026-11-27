@@ -53,4 +53,4 @@ pub use table::{Table, embedded_table, embedded_tables};
 pub use translator::{
     BrailleResult, BrailleTranslator, Language, detect_language, is_japanese_char,
 };
-pub use writer::{CellEncoding, OutputFormat};
+pub use writer::{CellEncoding, OutputFormat, PageSeparation};

@@ -17,16 +17,29 @@ pub enum CellEncoding {
     Unicode,
 }
 
+/// [`OutputFormat::BrailleText`] のページの区切り方。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageSeparation {
+    /// ページの間にフォームフィード (`\x0C`) だけの行を入れる。
+    FormFeed,
+    /// フォームフィードを使わず、各ページを 1 ページの行数（`lines_per_page`）まで
+    /// 空行で埋める（BASE と同じく最後のページも埋める）。FF を扱えない環境向け。
+    Padding,
+}
+
 /// ドキュメントの出力形式。
 pub enum OutputFormat {
-    /// ページ間をフォームフィード (`\x0C`) で区切った点字テキスト。拡張子: `.brf`
+    /// ページごとに区切った点字テキスト。拡張子: `.brf`
     ///
-    /// 各セルの符号化は [`CellEncoding`] で選ぶ（NABCC ASCII か Unicode 点字か）。
+    /// 各セルの符号化は [`CellEncoding`] で、ページの区切り方は [`PageSeparation`] で選ぶ。
     /// 各行の末尾点字スペース (`⠀` U+2800) は落とす。これにより 1 行が必ず
     /// `line_width` マス以内になり、プリンタ印刷時に行幅超過で意図しない折返しが
     /// 入るのを防ぐ。代償として、この出力からは折返し位置（行末スペース）を
     /// 厳密には再現できない（印刷専用の非可逆形式であり読み戻しもしない）。
-    BrailleText { encoding: CellEncoding },
+    BrailleText {
+        encoding: CellEncoding,
+        separation: PageSeparation,
+    },
     /// PC-9801 用の点字ファイル形式。ヘッダとページデータを含む。拡張子: `.bse`
     Base,
     /// IBM 点字編集システム形式。独自バイナリ。拡張子: `.bes`
@@ -40,17 +53,25 @@ impl OutputFormat {
     pub fn write(&self, doc: &BrailleDocument) -> Vec<u8> {
         match self {
             OutputFormat::Mbr => doc.to_mbr().into_bytes(),
-            OutputFormat::BrailleText { encoding } => write_braille_text(&render(doc), *encoding),
+            OutputFormat::BrailleText {
+                encoding,
+                separation,
+            } => write_braille_text(&render(doc), *encoding, *separation),
             OutputFormat::Base => write_base_file(&render(doc)),
             OutputFormat::Bes => write_bes_file(&render(doc)),
         }
     }
 }
 
-fn write_braille_text(doc: &FormattedDocument, encoding: CellEncoding) -> Vec<u8> {
+fn write_braille_text(
+    doc: &FormattedDocument,
+    encoding: CellEncoding,
+    separation: PageSeparation,
+) -> Vec<u8> {
+    let lines_per_page = doc.lines_per_page();
     let mut out: Vec<u8> = Vec::new();
     for (i, page) in doc.pages().iter().enumerate() {
-        if i > 0 {
+        if i > 0 && separation == PageSeparation::FormFeed {
             out.extend_from_slice(b"\x0C\n");
         }
         for line in page.iter() {
@@ -63,6 +84,12 @@ fn write_braille_text(doc: &FormattedDocument, encoding: CellEncoding) -> Vec<u8
                 CellEncoding::Unicode => out.extend_from_slice(content.as_bytes()),
             }
             out.push(b'\n');
+        }
+        if separation == PageSeparation::Padding {
+            out.extend(std::iter::repeat_n(
+                b'\n',
+                lines_per_page.saturating_sub(page.len()),
+            ));
         }
     }
     out
@@ -211,6 +238,7 @@ mod tests {
     fn brf(d: &BrailleDocument, case: NabccCase) -> Vec<u8> {
         OutputFormat::BrailleText {
             encoding: CellEncoding::Nabcc(case),
+            separation: PageSeparation::FormFeed,
         }
         .write(d)
     }
@@ -218,6 +246,7 @@ mod tests {
     fn brf_unicode(d: &BrailleDocument) -> String {
         let bytes = OutputFormat::BrailleText {
             encoding: CellEncoding::Unicode,
+            separation: PageSeparation::FormFeed,
         }
         .write(d);
         String::from_utf8(bytes).unwrap()
@@ -314,6 +343,25 @@ mod tests {
         assert_eq!(upper.lines().next().unwrap(), "ABC");
         let lower = String::from_utf8(brf(&d, NabccCase::Lower)).unwrap();
         assert_eq!(lower.lines().next().unwrap(), "abc");
+    }
+
+    #[test]
+    fn braille_text_padding_fills_pages_without_form_feed() {
+        // lines_per_page=3、ヘッダなし、4段落 → 1ページ目 3行・2ページ目 1行。
+        // FF は出さず、2ページ目（最後のページ）も空行で 3行に埋める。
+        let cfg = DocumentConfig {
+            lines_per_page: 3,
+            page_header: false,
+            ..config(false)
+        };
+        let paras: Vec<String> = ["⠁", "⠃", "⠉", "⠙"].iter().map(|s| s.to_string()).collect();
+        let d = BrailleDocument::from_paragraphs(&paras, cfg);
+        let out = OutputFormat::BrailleText {
+            encoding: CellEncoding::Nabcc(NabccCase::Upper),
+            separation: PageSeparation::Padding,
+        }
+        .write(&d);
+        assert_eq!(out, b"A\nB\nC\nD\n\n\n");
     }
 
     #[test]

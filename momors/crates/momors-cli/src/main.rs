@@ -10,7 +10,8 @@ use std::process::ExitCode;
 use clap::{Parser, ValueEnum};
 use momors_braille::{
     BrailleDocument, BrailleResult, BrailleTranslator, CellEncoding, DocumentConfig,
-    EnglishTranslator, JapaneseTranslator, NabccCase, OutputFormat, read_bes, read_bet,
+    EnglishTranslator, JapaneseTranslator, NabccCase, OutputFormat, PageSeparation, read_bes,
+    read_bet,
 };
 use momors_core::{FloatPredictor, PredictionResult, Predictor, PredictorConfig};
 
@@ -130,6 +131,11 @@ struct Cli {
     /// NABCC 関連のオプション（--nabcc-case）とは併用できない。.brf 以外の出力形式に指定するとエラー
     #[arg(long, conflicts_with = "nabcc_case")]
     unicode: bool,
+
+    /// .brf のページの区切りにフォームフィード (FF) を使わず、各ページを 1ページの行数まで
+    /// 空行で埋める（最後のページも埋める）。.brf 以外の出力形式に指定するとエラー
+    #[arg(long)]
+    no_form_feed: bool,
 
     #[cfg(feature = "bert")]
     #[command(flatten)]
@@ -364,6 +370,11 @@ fn run_format(cli: &Cli) -> Result<(), String> {
             } else {
                 CellEncoding::Nabcc(cli.nabcc_case.into())
             },
+            separation: if cli.no_form_feed {
+                PageSeparation::Padding
+            } else {
+                PageSeparation::FormFeed
+            },
         }),
         Some("bse") => Some(OutputFormat::Base),
         Some("bes") => Some(OutputFormat::Bes),
@@ -379,6 +390,9 @@ fn run_format(cli: &Cli) -> Result<(), String> {
     }
     if cli.unicode && !is_brf {
         return Err("--unicode は .brf 出力にのみ指定できます".to_string());
+    }
+    if cli.no_form_feed && !is_brf {
+        return Err("--no-form-feed は .brf 出力にのみ指定できます".to_string());
     }
 
     let out = match read_braille_file(input)? {

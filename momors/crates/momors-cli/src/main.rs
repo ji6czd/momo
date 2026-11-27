@@ -9,8 +9,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
 use momors_braille::{
-    BrailleDocument, BrailleResult, BrailleTranslator, DocumentConfig, EnglishTranslator,
-    JapaneseTranslator, NabccCase, OutputFormat,
+    BrailleDocument, BrailleResult, BrailleTranslator, CellEncoding, DocumentConfig,
+    EnglishTranslator, JapaneseTranslator, NabccCase, OutputFormat,
 };
 use momors_core::{FloatPredictor, PredictionResult, Predictor, PredictorConfig};
 
@@ -120,6 +120,11 @@ struct Cli {
     /// .brf 以外の出力形式に指定するとエラー
     #[arg(long, default_value = "upper")]
     nabcc_case: NabccCaseArg,
+
+    /// .brf を NABCC でなく Unicode 点字（UTF-8）で書き出す。
+    /// NABCC 関連のオプション（--nabcc-case）とは併用できない。.brf 以外の出力形式に指定するとエラー
+    #[arg(long, conflicts_with = "nabcc_case")]
+    unicode: bool,
 
     #[cfg(feature = "bert")]
     #[command(flatten)]
@@ -336,7 +341,11 @@ fn run_format(cli: &Cli, predictor: &AnyPredictor) -> Result<(), String> {
         .and_then(|e| e.to_str());
     let braille_format = match ext {
         Some("brf") => Some(OutputFormat::BrailleText {
-            case: cli.nabcc_case.into(),
+            encoding: if cli.unicode {
+                CellEncoding::Unicode
+            } else {
+                CellEncoding::Nabcc(cli.nabcc_case.into())
+            },
         }),
         Some("bse") => Some(OutputFormat::Base),
         Some("bes") => Some(OutputFormat::Bes),
@@ -345,10 +354,13 @@ fn run_format(cli: &Cli, predictor: &AnyPredictor) -> Result<(), String> {
     };
 
     // 効かない指定を黙って無視すると「指定したつもり」の事故になるので弾く。
-    if cli.nabcc_case != NabccCaseArg::Upper
-        && !matches!(braille_format, Some(OutputFormat::BrailleText { .. }))
-    {
+    // （--unicode と --nabcc-case の併用は clap の conflicts_with で弾いている）
+    let is_brf = matches!(braille_format, Some(OutputFormat::BrailleText { .. }));
+    if cli.nabcc_case != NabccCaseArg::Upper && !is_brf {
         return Err("--nabcc-case は .brf 出力にのみ指定できます".to_string());
+    }
+    if cli.unicode && !is_brf {
+        return Err("--unicode は .brf 出力にのみ指定できます".to_string());
     }
 
     let text = std::fs::read_to_string(cli.input.as_ref().unwrap())

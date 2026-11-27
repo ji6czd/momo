@@ -135,7 +135,7 @@ use momors_braille::document::{
 use momors_braille::formatter::{
     FormattedDocument, PageInfo, PhysicalLine, RenderedLine, render, wrap_line, wrap_suffix,
 };
-use momors_braille::writer::OutputFormat;
+use momors_braille::writer::{CellEncoding, OutputFormat};
 use momors_braille::{
     BackTransResult, BackTransUnknownCharPolicy, BrailleBackTranslator, BrailleResult,
     BrailleTranslator, EnglishTranslator, JapaneseTranslator, Language, Table, UnknownCharPolicy,
@@ -1329,10 +1329,10 @@ fn output_format_from_code(format: c_int) -> Option<OutputFormat> {
         1 => Some(OutputFormat::Bes),
         3 => Some(OutputFormat::Base),
         4 => Some(OutputFormat::BrailleText {
-            case: NabccCase::Upper,
+            encoding: CellEncoding::Nabcc(NabccCase::Upper),
         }),
         5 => Some(OutputFormat::BrailleText {
-            case: NabccCase::Lower,
+            encoding: CellEncoding::Nabcc(NabccCase::Lower),
         }),
         _ => None,
     }

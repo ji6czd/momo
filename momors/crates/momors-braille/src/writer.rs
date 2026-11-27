@@ -7,17 +7,26 @@ use crate::document::BrailleDocument;
 use crate::formatter::{FormattedDocument, render};
 use crate::nabcc::{NabccCase, braille_to_nabcc};
 
+/// [`OutputFormat::BrailleText`] のセルの符号化。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellEncoding {
+    /// NABCC で ASCII 1 バイトに符号化する。英字のケースは [`NabccCase`] で選ぶ
+    /// （既定は規格どおりの大文字。点字ディスプレイで直接読む用途では小文字）。
+    Nabcc(NabccCase),
+    /// Unicode 点字（U+2800..=U+28FF）のまま UTF-8 で書く。
+    Unicode,
+}
+
 /// ドキュメントの出力形式。
 pub enum OutputFormat {
-    /// ページ間をフォームフィード (`\x0C`) で区切った NABCC ASCII テキスト。拡張子: `.brf`
+    /// ページ間をフォームフィード (`\x0C`) で区切った点字テキスト。拡張子: `.brf`
     ///
-    /// 各セルは NABCC で ASCII 1 バイトに符号化する。英字のケースは [`NabccCase`] で選ぶ
-    /// （既定は規格どおりの大文字。点字ディスプレイで直接読む用途では小文字）。
+    /// 各セルの符号化は [`CellEncoding`] で選ぶ（NABCC ASCII か Unicode 点字か）。
     /// 各行の末尾点字スペース (`⠀` U+2800) は落とす。これにより 1 行が必ず
     /// `line_width` マス以内になり、プリンタ印刷時に行幅超過で意図しない折返しが
     /// 入るのを防ぐ。代償として、この出力からは折返し位置（行末スペース）を
     /// 厳密には再現できない（印刷専用の非可逆形式であり読み戻しもしない）。
-    BrailleText { case: NabccCase },
+    BrailleText { encoding: CellEncoding },
     /// PC-9801 用の点字ファイル形式。ヘッダとページデータを含む。拡張子: `.bse`
     Base,
     /// IBM 点字編集システム形式。独自バイナリ。拡張子: `.bes`
@@ -31,14 +40,14 @@ impl OutputFormat {
     pub fn write(&self, doc: &BrailleDocument) -> Vec<u8> {
         match self {
             OutputFormat::Mbr => doc.to_mbr().into_bytes(),
-            OutputFormat::BrailleText { case } => write_braille_text(&render(doc), *case),
+            OutputFormat::BrailleText { encoding } => write_braille_text(&render(doc), *encoding),
             OutputFormat::Base => write_base_file(&render(doc)),
             OutputFormat::Bes => write_bes_file(&render(doc)),
         }
     }
 }
 
-fn write_braille_text(doc: &FormattedDocument, case: NabccCase) -> Vec<u8> {
+fn write_braille_text(doc: &FormattedDocument, encoding: CellEncoding) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::new();
     for (i, page) in doc.pages().iter().enumerate() {
         if i > 0 {
@@ -47,7 +56,12 @@ fn write_braille_text(doc: &FormattedDocument, case: NabccCase) -> Vec<u8> {
         for line in page.iter() {
             // 行末の点字スペースを落とす（line_width 超過と印刷時の余分な折返しを防ぐ）。
             let content = line.content.as_str().trim_end_matches('⠀');
-            out.extend(content.chars().map(|c| braille_to_nabcc(c, case)));
+            match encoding {
+                CellEncoding::Nabcc(case) => {
+                    out.extend(content.chars().map(|c| braille_to_nabcc(c, case)));
+                }
+                CellEncoding::Unicode => out.extend_from_slice(content.as_bytes()),
+            }
             out.push(b'\n');
         }
     }
@@ -195,7 +209,18 @@ mod tests {
     }
 
     fn brf(d: &BrailleDocument, case: NabccCase) -> Vec<u8> {
-        OutputFormat::BrailleText { case }.write(d)
+        OutputFormat::BrailleText {
+            encoding: CellEncoding::Nabcc(case),
+        }
+        .write(d)
+    }
+
+    fn brf_unicode(d: &BrailleDocument) -> String {
+        let bytes = OutputFormat::BrailleText {
+            encoding: CellEncoding::Unicode,
+        }
+        .write(d);
+        String::from_utf8(bytes).unwrap()
     }
 
     #[test]
@@ -289,6 +314,30 @@ mod tests {
         assert_eq!(upper.lines().next().unwrap(), "ABC");
         let lower = String::from_utf8(brf(&d, NabccCase::Lower)).unwrap();
         assert_eq!(lower.lines().next().unwrap(), "abc");
+    }
+
+    #[test]
+    fn braille_text_unicode_keeps_cells() {
+        let d = doc(&["⠁⠃⠉"], false);
+        assert_eq!(brf_unicode(&d).lines().next().unwrap(), "⠁⠃⠉");
+    }
+
+    #[test]
+    fn braille_text_unicode_trims_trailing_space_and_separates_pages() {
+        // NABCC と同じく行末の点字スペースを落とし、ページ間はフォームフィードで区切る。
+        let cfg = DocumentConfig {
+            line_width: 5,
+            lines_per_page: 1,
+            page_header: false,
+            ..config(false)
+        };
+        let d = BrailleDocument::from_paragraphs(&["⠁⠁⠁⠁⠀⠃⠃".to_string()], cfg);
+        let out = brf_unicode(&d);
+        assert!(out.contains('\x0C'));
+        for line in out.split('\n') {
+            assert!(!line.ends_with('⠀'), "行末スペースが残っている: {:?}", line);
+            assert!(line.chars().count() <= 5, "line_width を超過: {:?}", line);
+        }
     }
 
     #[test]

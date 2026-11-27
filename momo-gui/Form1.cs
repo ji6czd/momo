@@ -4,8 +4,10 @@ public partial class MainForm : Form
 {
     /// <summary>出力形式の選択肢。表示名・拡張子・ダイアログフィルタ・FFI 形式コードを1件にまとめる。</summary>
     /// <remarks>
-    /// .brf は大文字と小文字の2件がある（拡張子は同じ）。Braille ASCII の規格は大文字のみだが、
-    /// 大文字のまま点字ディスプレイで読むと全セルに dot7 が付くため、その用途では小文字を選ぶ。
+    /// .brf は NABCC 大文字・NABCC 小文字・Unicode 点字の3件がある（拡張子は同じ）。
+    /// Braille ASCII の規格は大文字のみだが、大文字のまま点字ディスプレイで読むと全セルに
+    /// dot7 が付くため、その用途では小文字を選ぶ。Unicode は NABCC を使わず点字セルを
+    /// UTF-8 のまま書く。
     /// </remarks>
     private sealed record OutputFormatItem(string DisplayName, string Extension, string Filter, int FfiCode);
 
@@ -19,6 +21,8 @@ public partial class MainForm : Form
             "点字テキストファイル (*.brf)|*.brf", MomoFfi.FormatBrf),
         new("点字テキストファイル 小文字NABCC (.brf)", ".brf",
             "点字テキストファイル (*.brf)|*.brf", MomoFfi.FormatBrfLower),
+        new("点字テキストファイル Unicode点字 (.brf)", ".brf",
+            "点字テキストファイル (*.brf)|*.brf", MomoFfi.FormatBrfUnicode),
     ];
 
     private OutputFormatItem SelectedOutputFormat => OutputFormats[cmbOutputFormat.SelectedIndex];

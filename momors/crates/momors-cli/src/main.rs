@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use clap::{Parser, ValueEnum};
 use momors_braille::{
     BrailleDocument, BrailleResult, BrailleTranslator, CellEncoding, DocumentConfig,
-    EnglishTranslator, JapaneseTranslator, NabccCase, OutputFormat,
+    EnglishTranslator, JapaneseTranslator, NabccCase, OutputFormat, read_bes, read_bet,
 };
 use momors_core::{FloatPredictor, PredictionResult, Predictor, PredictorConfig};
 
@@ -96,7 +96,9 @@ struct Cli {
     brl_src_index: bool,
 
     // ---- ファイル整形モード専用 ------------------------------------
-    /// 入力ファイル（指定するとファイル整形モードに切り替わる）
+    /// 入力ファイル（指定するとファイル整形モードに切り替わる）。
+    /// 拡張子が .mbr / .bes / .bet なら点字ファイルとして読み、出力の点字形式へ書き直す
+    /// （読みのモデルは使わない）。それ以外は漢字かな交じり文のテキストとして読む
     #[arg(long, short)]
     input: Option<PathBuf>,
 
@@ -104,15 +106,18 @@ struct Cli {
     #[arg(long, short)]
     output: Option<PathBuf>,
 
-    /// 1行あたりのマス数（ファイル整形モード）
-    #[arg(long, default_value_t = 32)]
-    line_width: usize,
+    /// 1行あたりのマス数（ファイル整形モード、省略時 32）。
+    /// 点字ファイルの入力では、省略するとファイルの設定を使う
+    #[arg(long)]
+    line_width: Option<usize>,
 
-    /// 1ページあたりの行数（ファイル整形モード）
-    #[arg(long, default_value_t = 22)]
-    lines_per_page: usize,
+    /// 1ページあたりの行数（ファイル整形モード、省略時 22）。
+    /// 点字ファイルの入力では、省略するとファイルの設定を使う
+    #[arg(long)]
+    lines_per_page: Option<usize>,
 
-    /// ページヘッダのタイトル（日本語テキスト、ファイル整形モード）
+    /// ページヘッダのタイトル（日本語テキスト、ファイル整形モード）。
+    /// 点字ファイルの入力では、指定したときだけ差し替える（点訳に読みのモデルを使う）
     #[arg(long)]
     title: Option<String>,
 
@@ -191,6 +196,23 @@ impl AnyPredictor {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
+    // 読みのモデルは要るときだけ読み込む（点字ファイルから点字ファイルへの書き直しでは使わない）。
+    let result = if cli.input.is_some() {
+        run_format(&cli).map(|()| ExitCode::SUCCESS)
+    } else {
+        load_predictor(&cli).map(|predictor| run_stdin(&cli, &predictor))
+    };
+    match result {
+        Ok(code) => code,
+        Err(msg) => {
+            eprintln!("{msg}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// 読みのモデル（と、指定があれば辞書・BERT）を読み込む。
+fn load_predictor(cli: &Cli) -> Result<AnyPredictor, String> {
     let model_path = if let Some(ref path) = cli.model_file {
         PathBuf::from(path)
     } else {
@@ -203,8 +225,10 @@ fn main() -> ExitCode {
     if let Some(ref path) = cli.single_dict {
         let p = PathBuf::from(path);
         if !p.exists() {
-            eprintln!("単一文字辞書ファイルが見つかりません: {}", p.display());
-            return ExitCode::FAILURE;
+            return Err(format!(
+                "単一文字辞書ファイルが見つかりません: {}",
+                p.display()
+            ));
         }
         config = config.with_single_char_dict_path(&p);
     }
@@ -213,44 +237,24 @@ fn main() -> ExitCode {
     if let Some(ref path) = cli.custom_dict {
         let p = PathBuf::from(path);
         if !p.exists() {
-            eprintln!("カスタム辞書ファイルが見つかりません: {}", p.display());
-            return ExitCode::FAILURE;
+            return Err(format!(
+                "カスタム辞書ファイルが見つかりません: {}",
+                p.display()
+            ));
         }
         config = config.with_custom_dict_path(&p);
     }
 
     #[cfg_attr(not(feature = "bert"), allow(unused_mut))]
-    let mut predictor = match AnyPredictor::load(config) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("モデル読み込みエラー: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let mut predictor =
+        AnyPredictor::load(config).map_err(|e| format!("モデル読み込みエラー: {e}"))?;
 
     #[cfg(feature = "bert")]
-    match cli.bert.load(&data_dir()) {
-        Ok(Some(reader)) => {
-            bert_args::warn_unknown_labels(&predictor.set_slot_reader(Box::new(reader)));
-        }
-        Ok(None) => {}
-        Err(msg) => {
-            eprintln!("{msg}");
-            return ExitCode::FAILURE;
-        }
+    if let Some(reader) = cli.bert.load(&data_dir())? {
+        bert_args::warn_unknown_labels(&predictor.set_slot_reader(Box::new(reader)));
     }
 
-    if cli.input.is_some() {
-        match run_format(&cli, &predictor) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(msg) => {
-                eprintln!("{msg}");
-                ExitCode::FAILURE
-            }
-        }
-    } else {
-        run_stdin(&cli, &predictor)
-    }
+    Ok(predictor)
 }
 
 // ============================================================
@@ -274,6 +278,16 @@ fn to_kana(text: &str, predictor: &AnyPredictor) -> Result<PredictionResult, Str
 fn to_braille(pred: &PredictionResult, lt: &BrailleTranslator) -> Result<BrailleResult, String> {
     lt.translate(pred.kana_text())
         .map_err(|e| format!("点訳エラー: {e}"))
+}
+
+/// 漢字かな交じり文を点字にする（to_kana → to_braille）。
+fn text_to_braille(
+    text: &str,
+    predictor: &AnyPredictor,
+    lt: &BrailleTranslator,
+) -> Result<String, String> {
+    let pred = to_kana(text, predictor)?;
+    to_braille(&pred, lt).map(|r| r.braille_text().to_owned())
 }
 
 /// 点字文字 → 原文文字の対応。
@@ -333,7 +347,11 @@ fn write_confidences(out: &mut impl Write, confidences: &[f32]) {
 // ファイル整形モード
 // ============================================================
 
-fn run_format(cli: &Cli, predictor: &AnyPredictor) -> Result<(), String> {
+fn run_format(cli: &Cli) -> Result<(), String> {
+    let input = cli
+        .input
+        .as_deref()
+        .expect("ファイル整形モードは --input があるときだけ");
     let ext = cli
         .output
         .as_ref()
@@ -363,39 +381,18 @@ fn run_format(cli: &Cli, predictor: &AnyPredictor) -> Result<(), String> {
         return Err("--unicode は .brf 出力にのみ指定できます".to_string());
     }
 
-    let text = std::fs::read_to_string(cli.input.as_ref().unwrap())
-        .map_err(|e| format!("ファイル読み込みエラー: {e}"))?;
-    let paragraphs: Vec<String> = text.lines().map(str::to_owned).collect();
-
-    let out = match braille_format {
-        Some(format) => {
-            let lt = make_line_translator(cli.table.as_ref())?;
-            let to_braille_text = |p: &str| -> Result<String, String> {
-                let pred = to_kana(p, predictor)?;
-                to_braille(&pred, &lt).map(|r| r.braille_text().to_owned())
+    let out = match read_braille_file(input)? {
+        // 点字ファイル → 点字ファイル。かなへの逆変換はしないので、出力も点字の形式に限る。
+        Some(mut doc) => {
+            let Some(format) = braille_format else {
+                return Err("点字ファイル（.mbr / .bes / .bet）の入力は、\
+                            点字の形式（.brf / .bse / .bes / .mbr）にしか書き出せません"
+                    .to_string());
             };
-            let braille_list: Vec<String> = paragraphs
-                .iter()
-                .map(|p| to_braille_text(p))
-                .collect::<Result<_, _>>()?;
-            let title_braille = cli.title.as_ref().map(|t| to_braille_text(t)).transpose()?;
-            let config = DocumentConfig {
-                line_width: cli.line_width,
-                lines_per_page: cli.lines_per_page,
-                page_header: true,
-                title: title_braille,
-                ..DocumentConfig::default()
-            };
-            let doc = BrailleDocument::from_paragraphs(&braille_list, config);
+            apply_layout_overrides(&mut doc, cli)?;
             format.write(&doc)
         }
-        None => {
-            let kana_lines: Vec<String> = paragraphs
-                .iter()
-                .map(|p| to_kana(p, predictor).map(|r| r.kana_text().to_owned()))
-                .collect::<Result<_, _>>()?;
-            (kana_lines.join("\n") + "\n").into_bytes()
-        }
+        None => format_text(cli, input, braille_format)?,
     };
 
     match &cli.output {
@@ -409,6 +406,88 @@ fn run_format(cli: &Cli, predictor: &AnyPredictor) -> Result<(), String> {
                 .map_err(|e| format!("標準出力エラー: {e}"))
         }
     }
+}
+
+/// 入力の拡張子が点字ファイルの形式（.mbr / .bes / .bet。大文字小文字は問わない）なら、
+/// その形式で読んで正本ドキュメントを返す。点字ファイルの形式でなければ `None`
+/// （漢字かな交じり文のテキストとして扱う）。
+fn read_braille_file(path: &Path) -> Result<Option<BrailleDocument>, String> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let read: fn(&[u8]) -> Option<BrailleDocument> = match ext.as_deref() {
+        Some("mbr") => |b| std::str::from_utf8(b).ok().map(BrailleDocument::parse_mbr),
+        Some("bes") => read_bes,
+        Some("bet") => read_bet,
+        _ => return Ok(None),
+    };
+    let bytes = std::fs::read(path).map_err(|e| format!("ファイル読み込みエラー: {e}"))?;
+    read(&bytes).map(Some).ok_or_else(|| {
+        format!(
+            "点字ファイルとして読めません（壊れているか、形式が違います）: {}",
+            path.display()
+        )
+    })
+}
+
+/// 点字ファイルから読んだドキュメントに、指定のあったページ設定だけを上書きする。
+/// 省略した設定はファイルのまま。タイトルは日本語テキストなので、指定したときだけ
+/// 読みのモデルを読み込んで点訳する。
+fn apply_layout_overrides(doc: &mut BrailleDocument, cli: &Cli) -> Result<(), String> {
+    if let Some(width) = cli.line_width {
+        doc.config.line_width = width;
+    }
+    if let Some(lines) = cli.lines_per_page {
+        doc.config.lines_per_page = lines;
+    }
+    if let Some(title) = &cli.title {
+        let predictor = load_predictor(cli)?;
+        let lt = make_line_translator(cli.table.as_ref())?;
+        doc.config.title = Some(text_to_braille(title, &predictor, &lt)?);
+    }
+    Ok(())
+}
+
+/// 漢字かな交じり文のテキストファイルを、点字の形式（`braille_format`）か、
+/// 点字の形式でなければかなテキストに変換したバイト列にする。
+fn format_text(
+    cli: &Cli,
+    input: &Path,
+    braille_format: Option<OutputFormat>,
+) -> Result<Vec<u8>, String> {
+    let text =
+        std::fs::read_to_string(input).map_err(|e| format!("ファイル読み込みエラー: {e}"))?;
+    let paragraphs: Vec<&str> = text.lines().collect();
+    let predictor = load_predictor(cli)?;
+
+    let Some(format) = braille_format else {
+        let kana_lines: Vec<String> = paragraphs
+            .iter()
+            .map(|p| to_kana(p, &predictor).map(|r| r.kana_text().to_owned()))
+            .collect::<Result<_, _>>()?;
+        return Ok((kana_lines.join("\n") + "\n").into_bytes());
+    };
+
+    let lt = make_line_translator(cli.table.as_ref())?;
+    let braille_list: Vec<String> = paragraphs
+        .iter()
+        .map(|p| text_to_braille(p, &predictor, &lt))
+        .collect::<Result<_, _>>()?;
+    let title = cli
+        .title
+        .as_deref()
+        .map(|t| text_to_braille(t, &predictor, &lt))
+        .transpose()?;
+    let defaults = DocumentConfig::default();
+    let config = DocumentConfig {
+        line_width: cli.line_width.unwrap_or(defaults.line_width),
+        lines_per_page: cli.lines_per_page.unwrap_or(defaults.lines_per_page),
+        page_header: true,
+        title,
+        ..defaults
+    };
+    Ok(format.write(&BrailleDocument::from_paragraphs(&braille_list, config)))
 }
 
 // ============================================================

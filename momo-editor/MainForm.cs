@@ -8,6 +8,10 @@ namespace MomoEditor;
 public partial class MainForm : Form
 {
     private string? _filePath;
+    // _filePath に書き出す形式コード。「名前を付けて保存」で選んだファイルの種類を覚えておき、
+    // 上書き保存でも同じ形式で書く（.brf は拡張子だけでは NABCC と Unicode 点字を区別できない）。
+    // null なら拡張子で決める（FormatForPath）。
+    private int? _fileFormat;
     private bool _isModified;
     private bool _suppressModified;
     private BrailleDocument _document = BrailleDocument.NewEmpty();
@@ -473,6 +477,7 @@ public partial class MainForm : Form
         _document = BrailleDocument.NewEmpty();
         LoadDocumentToEditor();
         _filePath = null;
+        _fileFormat = null;
         IsModified = false;
     }
 
@@ -566,6 +571,7 @@ public partial class MainForm : Form
                 _document.Entries.Add(new TextSegment("", true));
             LoadDocumentToEditor();
             _filePath = filePath;
+            _fileFormat = null;
             IsModified = modified;
             // 実ファイルを読み込んだ場合のみ最近使ったファイルに記録する。
             // 漢字かな交じり文からの取り込み（.mbr への拡張子付け替え）は
@@ -583,26 +589,56 @@ public partial class MainForm : Form
     private void SaveMenuItem_Click(object? sender, EventArgs e)
     {
         if (_filePath == null) { SaveAsMenuItem_Click(sender, e); return; }
-        SaveToFile(_filePath);
+        SaveToFile(_filePath, _fileFormat ?? FormatForPath(_filePath));
     }
+
+    // 「名前を付けて保存」のファイルの種類。.brf は NABCC（大文字）と Unicode 点字の2件があり
+    // （拡張子は同じ）、どちらで書くかはダイアログで選んだ種類で決める。
+    private sealed record SaveFormat(string Filter, string Extension, int FfiCode);
+
+    private static readonly SaveFormat[] SaveFormats =
+    [
+        new("Momo点字ファイル (*.mbr)|*.mbr", ".mbr", MomoFfi.FormatMbr),
+        new("点字ファイル NABCC (*.brf)|*.brf", ".brf", MomoFfi.FormatBrf),
+        new("点字ファイル Unicode点字 (*.brf)|*.brf", ".brf", MomoFfi.FormatBrfUnicode),
+        new("BASEファイル (*.bse)|*.bse", ".bse", MomoFfi.FormatBase),
+    ];
 
     private void SaveAsMenuItem_Click(object? sender, EventArgs e)
     {
+        // いまのファイルの形式をファイルの種類の初期値にする（見つからなければ先頭の .mbr）。
+        int? current = _filePath != null ? _fileFormat ?? FormatForPath(_filePath) : null;
+        int index = Array.FindIndex(SaveFormats, f => f.FfiCode == current);
         using var dialog = new SaveFileDialog
         {
-            Filter = "Momo点字ファイル (*.mbr)|*.mbr|点字ファイル (*.brf)|*.brf|BASEファイル (*.bse)|*.bse",
+            Filter = string.Join("|", SaveFormats.Select(f => f.Filter)),
+            FilterIndex = Math.Max(index, 0) + 1, // FilterIndex は 1 始まり
             FileName = _filePath != null ? Path.GetFileName(_filePath) : "untitled.mbr",
         };
         if (dialog.ShowDialog() != DialogResult.OK) return;
-        SaveToFile(dialog.FileName);
+
+        // 選んだ種類の拡張子どおりの名前ならその種類で書く。別の拡張子を打ち込んだときは
+        // 拡張子で決める（例: 種類が .mbr のまま foo.brf と打てば NABCC の .brf）。
+        var path = dialog.FileName;
+        int? format = FormatForPath(path);
+        if (dialog.FilterIndex >= 1 && dialog.FilterIndex <= SaveFormats.Length)
+        {
+            var chosen = SaveFormats[dialog.FilterIndex - 1];
+            if (string.Equals(Path.GetExtension(path), chosen.Extension, StringComparison.OrdinalIgnoreCase))
+                format = chosen.FfiCode;
+        }
+        SaveToFile(path, format);
     }
 
-    private void SaveToFile(string path)
+    /// <summary>
+    /// ドキュメントを <paramref name="path"/> へ書き出す。<paramref name="format"/> は点字形式コードで、
+    /// null なら点字形式でないとみなしてセグメントの論理テキストを書く。
+    /// </summary>
+    private void SaveToFile(string path, int? format)
     {
         try
         {
             SyncEditorToDocument();
-            int? format = FormatForPath(path);
             if (format is int fmt)
             {
                 // 点字形式（MBR/BES/BASE/BRF）は Rust の writer でバイト列を生成する。
@@ -622,6 +658,7 @@ public partial class MainForm : Form
                 File.WriteAllText(path, LogicalFallbackText(), Encoding.UTF8);
             }
             _filePath = path;
+            _fileFormat = format;
             IsModified = false;
             _settings.AddRecentFile(path);
             RebuildRecentFilesMenu();
@@ -636,6 +673,7 @@ public partial class MainForm : Form
     // ---- ドキュメントモデルとエディタの同期 ----
 
     // 拡張子に対応する点字形式コード（読み書き共通）。点字形式でなければ null。
+    // .brf は拡張子だけなら NABCC（大文字）。Unicode 点字は「名前を付けて保存」の種類で選ぶ。
     private static int? FormatForPath(string path) =>
         Path.GetExtension(path).ToLowerInvariant() switch
         {

@@ -120,8 +120,6 @@ partial class MainForm
             new ToolStripSeparator(),
             selectAllMenuItem,
             brailleInputMenuItem,
-            new ToolStripSeparator(),
-            tableMenu,
         });
 
         undoMenuItem.Text = "元に戻す(&U)";
@@ -178,25 +176,10 @@ partial class MainForm
         brailleInputMenuItem.Visible = false;
         brailleInputMenuItem.Click += BrailleInputMenuItem_Click;
 
-        // 英語点字: 英字だけの行に使う UEB のグレードを切り替える（日本語行は常に日本語１級）。
-        // 表示名（ラベル）は実行時に FFI から取得して設定する（MainForm コンストラクタ）。
-        tableMenu.Text = "英語点字(&E)";
-        tableMenu.DropDownItems.AddRange(new ToolStripItem[] {
-            tableGrade1MenuItem,
-            tableGrade2MenuItem,
-        });
-
-        tableGrade1MenuItem.Text = "&1 UEB English (Grade 1)";
-        tableGrade1MenuItem.Checked = true; // 既定は Grade 1（無縮約）
-        tableGrade1MenuItem.Click += TableGrade1MenuItem_Click;
-
-        tableGrade2MenuItem.Text = "&2 UEB English (Grade 2)";
-        tableGrade2MenuItem.Click += TableGrade2MenuItem_Click;
-
         // translateMenu
         // 点訳: 漢字かな交じり文を点字にするとき（テキストファイルを開く・変換して貼り付け）の設定。
         translateMenu.Text = "点訳(&T)";
-        translateMenu.DropDownItems.AddRange(new ToolStripItem[] { modelMenu });
+        translateMenu.DropDownItems.AddRange(new ToolStripItem[] { modelMenu, tableMenu });
 
         // 読みのモデル。BERT は Large に BERT 読みモードを足したもの。選択は settings.json に残す。
         // 使えるかどうか（モデルのファイルがあるか）は実行時に調べて、無いものは選べなくする。
@@ -219,6 +202,21 @@ partial class MainForm
 
         modelBertMenuItem.Text = "&4 BERT";
         modelBertMenuItem.Click += (_, _) => SelectModel(ModelBert);
+
+        // 英語点字: 英字だけの行に使う UEB のグレードを切り替える（日本語行は常に日本語１級）。
+        // 表示名（ラベル）は実行時に FFI から取得して設定する（MainForm コンストラクタ）。
+        tableMenu.Text = "英語点字(&E)";
+        tableMenu.DropDownItems.AddRange(new ToolStripItem[] {
+            tableGrade1MenuItem,
+            tableGrade2MenuItem,
+        });
+
+        tableGrade1MenuItem.Text = "&1 UEB English (Grade 1)";
+        tableGrade1MenuItem.Checked = true; // 既定は Grade 1（無縮約）
+        tableGrade1MenuItem.Click += TableGrade1MenuItem_Click;
+
+        tableGrade2MenuItem.Text = "&2 UEB English (Grade 2)";
+        tableGrade2MenuItem.Click += TableGrade2MenuItem_Click;
 
         // formatMenu
         formatMenu.Text = "書式(&O)";

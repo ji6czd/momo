@@ -85,7 +85,7 @@
 //! MomoDoc momo_doc_read(const uint8_t* bytes, int32_t len, int32_t format);
 //! void    momo_doc_free(MomoDoc);
 //! // 設定・エントリの getter（momo_doc_line_width / _entry_count / _entry_kind / _line_w など）
-//! // 保存: ビルダーで組み立て -> momo_doc_write でバイト列取得（format: 0=MBR,1=BES,3=BASE,4=BRF）
+//! // 保存: ビルダーで組み立て -> momo_doc_write でバイト列取得（format: 0=MBR,1=BES,3=BASE,4=BRF大文字,5=BRF小文字,6=BRF Unicode）
 //! MomoDocBuilder momo_doc_builder_new(int32_t lw, int32_t lpp, bool header, int32_t number_start, int32_t number_style, const uint16_t* title);
 //! void           momo_doc_builder_add_line(MomoDocBuilder, const uint16_t* content, bool logical_end); // テキスト行を追加
 //! void           momo_doc_builder_add_page_break(MomoDocBuilder, const uint16_t* marker); // 改ページエントリを追加（marker は NULL/空でプレーン）
@@ -1322,7 +1322,7 @@ pub struct ByteBuffer {
 /// 出力形式コード → [`OutputFormat`]。不正なコードは `None`。
 ///
 /// 0=MBR, 1=BES, 3=BASE(.bse), 4=BrailleText 大文字 NABCC(.brf),
-/// 5=BrailleText 小文字 NABCC(.brf)。
+/// 5=BrailleText 小文字 NABCC(.brf), 6=BrailleText Unicode 点字 UTF-8(.brf)。
 fn output_format_from_code(format: c_int) -> Option<OutputFormat> {
     match format {
         0 => Some(OutputFormat::Mbr),
@@ -1333,6 +1333,9 @@ fn output_format_from_code(format: c_int) -> Option<OutputFormat> {
         }),
         5 => Some(OutputFormat::BrailleText {
             encoding: CellEncoding::Nabcc(NabccCase::Lower),
+        }),
+        6 => Some(OutputFormat::BrailleText {
+            encoding: CellEncoding::Unicode,
         }),
         _ => None,
     }
@@ -2005,6 +2008,30 @@ mod tests {
         momo_custom_dict_validate_w(p.as_ptr(), buf.as_mut_ptr(), needed);
         let text = String::from_utf16_lossy(&buf[..buf.len() - 1]);
         (needed, text)
+    }
+
+    /// 形式コード → バイト列（C 側の momo_doc_write → bytes_len/copy/free をなぞる）。
+    fn write_doc(doc: *const BrailleDocHandle, format: c_int) -> Vec<u8> {
+        let buf = momo_doc_write(doc, format);
+        assert!(!buf.is_null(), "形式コード {format} は書き出せること");
+        let mut out = vec![0u8; momo_bytes_len(buf) as usize];
+        momo_bytes_copy(buf, out.as_mut_ptr());
+        momo_bytes_free(buf);
+        out
+    }
+
+    #[test]
+    fn doc_write_brf_codes_select_cell_encoding() {
+        // ⠁⠃⠉ の 1 段落、ヘッダなし。4=大文字 / 5=小文字 / 6=Unicode。
+        let builder = momo_doc_builder_new(32, 22, false, 1, 0, std::ptr::null());
+        let line = wide("⠁⠃⠉");
+        momo_doc_builder_add_line(builder, line.as_ptr(), true);
+        let doc = momo_doc_builder_build(builder);
+        assert_eq!(write_doc(doc, 4), b"ABC\n");
+        assert_eq!(write_doc(doc, 5), b"abc\n");
+        assert_eq!(write_doc(doc, 6), "⠁⠃⠉\n".as_bytes());
+        assert!(momo_doc_write(doc, 7).is_null(), "未定義のコードは NULL");
+        momo_doc_free(doc as *mut _);
     }
 
     #[test]

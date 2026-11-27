@@ -7,6 +7,12 @@ class AppSettings
     public List<string> RecentFiles { get; set; } = [];
     public int UndoStackSize { get; set; } = 64;
 
+    /// <summary>
+    /// 点訳に使うモデル（"small" / "medium" / "large" / "bert"）。既定は BERT。
+    /// 選んだモデルが無い環境では、起動時に使えるものへ切り替える（この値は書き換えない）。
+    /// </summary>
+    public string Model { get; set; } = "bert";
+
     private const int MaxRecentFiles = 10;
 
     private static string SettingsPath => Path.Combine(

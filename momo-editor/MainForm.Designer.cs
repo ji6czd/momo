@@ -36,6 +36,12 @@ partial class MainForm
         tableMenu = new ToolStripMenuItem();
         tableGrade1MenuItem = new ToolStripMenuItem();
         tableGrade2MenuItem = new ToolStripMenuItem();
+        translateMenu = new ToolStripMenuItem();
+        modelMenu = new ToolStripMenuItem();
+        modelSmallMenuItem = new ToolStripMenuItem();
+        modelMediumMenuItem = new ToolStripMenuItem();
+        modelLargeMenuItem = new ToolStripMenuItem();
+        modelBertMenuItem = new ToolStripMenuItem();
         formatMenu = new ToolStripMenuItem();
         pageSectionMenuItem = new ToolStripMenuItem();
         viewMenu = new ToolStripMenuItem();
@@ -53,7 +59,7 @@ partial class MainForm
         SuspendLayout();
 
         // menuStrip
-        menuStrip.Items.AddRange(new ToolStripItem[] { fileMenu, editMenu, formatMenu, viewMenu, helpMenu });
+        menuStrip.Items.AddRange(new ToolStripItem[] { fileMenu, editMenu, translateMenu, formatMenu, viewMenu, helpMenu });
         menuStrip.TabStop = false;
 
         // fileMenu
@@ -187,6 +193,33 @@ partial class MainForm
         tableGrade2MenuItem.Text = "&2 UEB English (Grade 2)";
         tableGrade2MenuItem.Click += TableGrade2MenuItem_Click;
 
+        // translateMenu
+        // 点訳: 漢字かな交じり文を点字にするとき（テキストファイルを開く・変換して貼り付け）の設定。
+        translateMenu.Text = "点訳(&T)";
+        translateMenu.DropDownItems.AddRange(new ToolStripItem[] { modelMenu });
+
+        // 読みのモデル。BERT は Large に BERT 読みモードを足したもの。選択は settings.json に残す。
+        // 使えるかどうか（モデルのファイルがあるか）は実行時に調べて、無いものは選べなくする。
+        modelMenu.Text = "モデル(&M)";
+        modelMenu.DropDownItems.AddRange(new ToolStripItem[] {
+            modelSmallMenuItem,
+            modelMediumMenuItem,
+            modelLargeMenuItem,
+            modelBertMenuItem,
+        });
+
+        modelSmallMenuItem.Text = "&1 Small";
+        modelSmallMenuItem.Click += (_, _) => SelectModel(ModelSmall);
+
+        modelMediumMenuItem.Text = "&2 Medium";
+        modelMediumMenuItem.Click += (_, _) => SelectModel(ModelMedium);
+
+        modelLargeMenuItem.Text = "&3 Large";
+        modelLargeMenuItem.Click += (_, _) => SelectModel(ModelLarge);
+
+        modelBertMenuItem.Text = "&4 BERT";
+        modelBertMenuItem.Click += (_, _) => SelectModel(ModelBert);
+
         // formatMenu
         formatMenu.Text = "書式(&O)";
         formatMenu.DropDownItems.AddRange(new ToolStripItem[] { pageSectionMenuItem });
@@ -299,6 +332,12 @@ partial class MainForm
     private ToolStripMenuItem tableMenu;
     private ToolStripMenuItem tableGrade1MenuItem;
     private ToolStripMenuItem tableGrade2MenuItem;
+    private ToolStripMenuItem translateMenu;
+    private ToolStripMenuItem modelMenu;
+    private ToolStripMenuItem modelSmallMenuItem;
+    private ToolStripMenuItem modelMediumMenuItem;
+    private ToolStripMenuItem modelLargeMenuItem;
+    private ToolStripMenuItem modelBertMenuItem;
     private ToolStripMenuItem helpMenu;
     private ToolStripMenuItem aboutMenuItem;
 }

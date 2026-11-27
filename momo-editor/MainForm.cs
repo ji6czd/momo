@@ -68,6 +68,8 @@ public partial class MainForm : Form
         };
         // 英語点字メニューのラベルを実データの表示名に更新する。
         InitTableMenu();
+        // 読みのモデルを設定から選び、使えないモデルはメニューで選べなくする。
+        InitModelMenu();
         RebuildRecentFilesMenu();
 
         // 新規ドキュメントで起動
@@ -724,6 +726,7 @@ public partial class MainForm : Form
     {
         var predictor = MomoFfi.GetPredictor();
         if (predictor == null) return null;
+        WarnIfBertFailed();
 
         _translator ??= MomoFfi.CreateTranslator(
             MomoFfi.TableJapaneseGrade1,
@@ -942,6 +945,88 @@ public partial class MainForm : Form
 
         Announce($"英語点字 {(grade2 ? _grade2Name : _grade1Name)}",
             AutomationNotificationProcessing.ImportantMostRecent);
+    }
+
+    // ---- 読みのモデル（点訳メニュー） ----
+
+    // settings.json の Model に書く名前。
+    private const string ModelSmall = "small";
+    private const string ModelMedium = "medium";
+    private const string ModelLarge = "large";
+    private const string ModelBert = "bert";
+
+    // モデル名 → (.mbm のファイル名, メニューに出す名前)。BERT は Large の .mbm に BERT を足す。
+    private static readonly Dictionary<string, (string File, string DisplayName)> Models = new()
+    {
+        [ModelSmall] = ("basic_data_4.mbm", "Small"),
+        [ModelMedium] = ("basic_data_5.mbm", "Medium"),
+        [ModelLarge] = ("basic_data_7.mbm", "Large"),
+        [ModelBert] = ("basic_data_7.mbm", "BERT"),
+    };
+
+    // 起動時に一度だけ調べる BERT モデルのフォルダ（使えなければ null）。
+    private string? _bertDir;
+
+    // BERT を読み込めなかったことを知らせたか（モデルを選び直すまで繰り返さない）。
+    private bool _bertFailureShown;
+
+    private ToolStripMenuItem ModelMenuItem(string model) => model switch
+    {
+        ModelSmall => modelSmallMenuItem,
+        ModelMedium => modelMediumMenuItem,
+        ModelLarge => modelLargeMenuItem,
+        _ => modelBertMenuItem,
+    };
+
+    private bool IsModelAvailable(string model) =>
+        MomoFfi.FindDataFile(Models[model].File) != null && (model != ModelBert || _bertDir != null);
+
+    /// <summary>
+    /// 使えるモデルだけを選べるようにし、設定のモデルを選ぶ。設定のモデルが使えない環境では
+    /// Large → Medium → Small の順に使えるものへ切り替える（設定の値は書き換えないので、
+    /// あとでモデルを置けば元に戻る）。どれも無ければ選択なし（点訳時にエラーを出す）。
+    /// </summary>
+    private void InitModelMenu()
+    {
+        _bertDir = MomoFfi.FindBertDir();
+        foreach (var model in Models.Keys)
+            ModelMenuItem(model).Enabled = IsModelAvailable(model);
+
+        var preferred = Models.ContainsKey(_settings.Model) ? _settings.Model : ModelBert;
+        var effective = new[] { preferred, ModelLarge, ModelMedium, ModelSmall }
+            .FirstOrDefault(IsModelAvailable);
+        if (effective != null) ApplyModel(effective);
+    }
+
+    /// <summary>メニューから選んだモデルに切り替えて、設定に残す。</summary>
+    private void SelectModel(string model)
+    {
+        _settings.Model = model;
+        _settings.Save();
+        ApplyModel(model);
+        richTextBox.Focus();
+        Announce($"モデル {Models[model].DisplayName}", AutomationNotificationProcessing.ImportantMostRecent);
+    }
+
+    /// <summary>モデルのチェックを付け替え、次の点訳から使う予測器を切り替える。</summary>
+    private void ApplyModel(string model)
+    {
+        foreach (var m in Models.Keys)
+            ModelMenuItem(m).Checked = m == model;
+        // 予測器は次の点訳のときに読み込む（MomoFfi が持つ 1 つを使い回す）。
+        MomoFfi.ModelPath = MomoFfi.FindDataFile(Models[model].File);
+        MomoFfi.BertDir = model == ModelBert ? _bertDir : null;
+        _bertFailureShown = false;
+    }
+
+    /// <summary>BERT を選んでいるのに読み込めなかったら、Large だけで点訳することを一度知らせる。</summary>
+    private void WarnIfBertFailed()
+    {
+        if (MomoFfi.BertDir == null || MomoFfi.PredictorUsesBert || _bertFailureShown) return;
+        _bertFailureShown = true;
+        MessageBox.Show(
+            "BERT モデルを読み込めなかったため、Large で点訳します。",
+            "BERT", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
     // ---- 編集操作（セグメントモデルを通じて行う） ----

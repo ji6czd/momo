@@ -798,10 +798,54 @@ public static class MomoFfi
         {
             if (_customDictPath == value) return;
             _customDictPath = value;
-            _predictor?.Dispose();
-            _predictor = null;
-            _predictorLoaded = false;
+            ResetPredictor();
         }
+    }
+
+    static string? _modelPath;
+    static string? _bertDir;
+
+    /// <summary>
+    /// <see cref="GetPredictor"/> が読む .mbm のパス。null なら既定（.mbm を探す場所の
+    /// Large → Medium → Small の順で最初に見つかったもの）。
+    /// </summary>
+    /// <remarks>値を変えたときの扱いは <see cref="CustomDictPath"/> と同じ。</remarks>
+    public static string? ModelPath
+    {
+        get => _modelPath;
+        set
+        {
+            if (_modelPath == value) return;
+            _modelPath = value;
+            ResetPredictor();
+        }
+    }
+
+    /// <summary>
+    /// <see cref="GetPredictor"/> が差し込む BERT モデルのディレクトリ。null なら BERT なし。
+    /// 読み込めなかったときは BERT なしの予測器になる（<see cref="PredictorUsesBert"/> で分かる）。
+    /// </summary>
+    /// <remarks>値を変えたときの扱いは <see cref="CustomDictPath"/> と同じ。</remarks>
+    public static string? BertDir
+    {
+        get => _bertDir;
+        set
+        {
+            if (_bertDir == value) return;
+            _bertDir = value;
+            ResetPredictor();
+        }
+    }
+
+    /// <summary><see cref="GetPredictor"/> が返した予測器に BERT が入っているか。</summary>
+    public static bool PredictorUsesBert { get; private set; }
+
+    static void ResetPredictor()
+    {
+        _predictor?.Dispose();
+        _predictor = null;
+        _predictorLoaded = false;
+        PredictorUsesBert = false;
     }
 
     /// <summary>
@@ -813,9 +857,10 @@ public static class MomoFfi
         if (_predictorLoaded) return _predictor;
         _predictorLoaded = true;
 
-        var modelPath = FindModelPath();
+        var modelPath = _modelPath ?? FindModelPath();
         if (modelPath == null) return null;
         _predictor = CreatePredictor(modelPath, _customDictPath);
+        PredictorUsesBert = _predictor != null && _bertDir != null && _predictor.SetBert(_bertDir);
         return _predictor;
     }
 
@@ -878,17 +923,19 @@ public static class MomoFfi
         catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
     }
 
+    // .mbm と BERT モデルを探す場所。MOMO_DATASET_DIR 環境変数、次に実行ファイルと同じディレクトリ。
+    static IEnumerable<string> DataDirs()
+    {
+        var env = Environment.GetEnvironmentVariable("MOMO_DATASET_DIR");
+        if (!string.IsNullOrEmpty(env)) yield return env;
+        yield return AppContext.BaseDirectory;
+    }
+
     // モデルファイル (.mbm) を探す。large→medium→small の順に優先する。
-    // 探索場所は MOMO_DATASET_DIR 環境変数、次に実行ファイルと同じディレクトリ。
     static string? FindModelPath()
     {
         string[] models = ["basic_data_7.mbm", "basic_data_5.mbm", "basic_data_4.mbm"];
-        var dirs = new List<string>();
-        var env = Environment.GetEnvironmentVariable("MOMO_DATASET_DIR");
-        if (!string.IsNullOrEmpty(env)) dirs.Add(env);
-        dirs.Add(AppContext.BaseDirectory);
-
-        foreach (var dir in dirs)
+        foreach (var dir in DataDirs())
             foreach (var model in models)
             {
                 var path = Path.Combine(dir, model);
@@ -896,6 +943,20 @@ public static class MomoFfi
             }
         return null;
     }
+
+    /// <summary>
+    /// .mbm を探す場所（MOMO_DATASET_DIR、次に実行ファイルのフォルダ）から
+    /// <paramref name="fileName"/> を探す。見つからなければ null。
+    /// </summary>
+    public static string? FindDataFile(string fileName) =>
+        DataDirs().Select(dir => Path.Combine(dir, fileName)).FirstOrDefault(File.Exists);
+
+    /// <summary>
+    /// BERT が使えるなら、そのモデルのフォルダ（.mbm を探す場所の下の <see cref="BertDirName"/>）。
+    /// DLL が BERT なし・モデルが無いときは null。
+    /// </summary>
+    public static string? FindBertDir() =>
+        DataDirs().Select(dir => Path.Combine(dir, BertDirName)).FirstOrDefault(IsBertAvailable);
 
     // ---- 逆点訳（ガイド表示用）公開 API ----
 

@@ -85,7 +85,7 @@
 //! MomoDoc momo_doc_read(const uint8_t* bytes, int32_t len, int32_t format);
 //! void    momo_doc_free(MomoDoc);
 //! // 設定・エントリの getter（momo_doc_line_width / _entry_count / _entry_kind / _line_w など）
-//! // 保存: ビルダーで組み立て -> momo_doc_write でバイト列取得（format: 0=MBR,1=BES,3=BASE,4=BRF大文字,5=BRF小文字,6=BRF Unicode）
+//! // 保存: ビルダーで組み立て -> momo_doc_write でバイト列取得（format: 0=MBR,1=BES,3=BASE,4=BRF大文字,5=BRF小文字,6=BRF Unicode,7=BRL大文字,8=BRL小文字,9=BRL Unicode）
 //! MomoDocBuilder momo_doc_builder_new(int32_t lw, int32_t lpp, bool header, int32_t number_start, int32_t number_style, const uint16_t* title);
 //! void           momo_doc_builder_add_line(MomoDocBuilder, const uint16_t* content, bool logical_end); // テキスト行を追加
 //! void           momo_doc_builder_add_page_break(MomoDocBuilder, const uint16_t* marker); // 改ページエントリを追加（marker は NULL/空でプレーン）
@@ -969,7 +969,8 @@ pub struct BrailleDocHandle {
 }
 
 /// バイト列を点字ドキュメントへ読み込む。format: 0=MBR, 1=BES, 2=BET。
-/// 失敗時（破損・不正 UTF-8・NULL）は NULL を返す。
+/// 失敗時（破損・不正 UTF-8・NULL・読み込めない形式コード）は NULL を返す。
+/// 書き出し専用の形式（3=BASE, 4〜6=BRF, 7〜9=BRL）は読み込めない。
 #[unsafe(no_mangle)]
 pub extern "C" fn momo_doc_read(
     bytes: *const u8,
@@ -989,10 +990,12 @@ pub extern "C" fn momo_doc_read(
             Some(d) => d,
             None => return std::ptr::null_mut(),
         },
-        _ => match std::str::from_utf8(slice) {
+        0 => match std::str::from_utf8(slice) {
             Ok(t) => BrailleDocument::parse_mbr(t),
             Err(_) => return std::ptr::null_mut(),
         },
+        // 書き出し専用の形式や未定義のコードを MBR として読むと、壊れた文書になる。
+        _ => return std::ptr::null_mut(),
     };
     Box::into_raw(Box::new(BrailleDocHandle { doc }))
 }
@@ -1322,7 +1325,9 @@ pub struct ByteBuffer {
 /// 出力形式コード → [`OutputFormat`]。不正なコードは `None`。
 ///
 /// 0=MBR, 1=BES, 3=BASE(.bse), 4=BrailleText 大文字 NABCC(.brf),
-/// 5=BrailleText 小文字 NABCC(.brf), 6=BrailleText Unicode 点字 UTF-8(.brf)。
+/// 5=BrailleText 小文字 NABCC(.brf), 6=BrailleText Unicode 点字 UTF-8(.brf),
+/// 7=UnformattedText 大文字 NABCC(.brl), 8=UnformattedText 小文字 NABCC(.brl),
+/// 9=UnformattedText Unicode 点字 UTF-8(.brl)。.brl の 7〜9 は .brf の 4〜6 と同じ並び。
 fn output_format_from_code(format: c_int) -> Option<OutputFormat> {
     match format {
         0 => Some(OutputFormat::Mbr),
@@ -1339,6 +1344,15 @@ fn output_format_from_code(format: c_int) -> Option<OutputFormat> {
         6 => Some(OutputFormat::BrailleText {
             encoding: CellEncoding::Unicode,
             separation: PageSeparation::FormFeed,
+        }),
+        7 => Some(OutputFormat::UnformattedText {
+            encoding: CellEncoding::Nabcc(NabccCase::Upper),
+        }),
+        8 => Some(OutputFormat::UnformattedText {
+            encoding: CellEncoding::Nabcc(NabccCase::Lower),
+        }),
+        9 => Some(OutputFormat::UnformattedText {
+            encoding: CellEncoding::Unicode,
         }),
         _ => None,
     }
@@ -2033,7 +2047,40 @@ mod tests {
         assert_eq!(write_doc(doc, 4), b"ABC\n");
         assert_eq!(write_doc(doc, 5), b"abc\n");
         assert_eq!(write_doc(doc, 6), "⠁⠃⠉\n".as_bytes());
-        assert!(momo_doc_write(doc, 7).is_null(), "未定義のコードは NULL");
+        assert!(momo_doc_write(doc, 10).is_null(), "未定義のコードは NULL");
+        momo_doc_free(doc as *mut _);
+    }
+
+    #[test]
+    fn doc_read_rejects_write_only_codes() {
+        // ASCII（NABCC の .brf）も UTF-8 として正しいが、MBR として読んではいけない。
+        let bytes = b"ABC\n";
+        for code in [3, 4, 5, 6, 7, 8, 9, 10, -1] {
+            assert!(
+                momo_doc_read(bytes.as_ptr(), bytes.len() as c_int, code).is_null(),
+                "形式コード {code} は読み込めない"
+            );
+        }
+        let mbr = "line_width = 32\nlines_per_page = 22\npage_header = true\n---\n⠁⠃⠉\n";
+        let doc = momo_doc_read(mbr.as_ptr(), mbr.len() as c_int, 0);
+        assert!(!doc.is_null(), "0=MBR は読める");
+        momo_doc_free(doc);
+    }
+
+    #[test]
+    fn doc_write_brl_codes_drop_page_format() {
+        // ヘッダあり・行幅 3。段落1は行幅を超える（.brf なら折り返す）、
+        // 段落2は強制改行を含む。.brl は見出しも折返しも書かず、強制改行は点字スペースに。
+        // 7=大文字 / 8=小文字 / 9=Unicode（.brf の 4〜6 と同じ並び）。
+        let builder = momo_doc_builder_new(3, 22, true, 1, 0, std::ptr::null());
+        for (content, logical_end) in [("⠁⠃⠀⠉⠙", true), ("⠑", false), ("⠋", true)] {
+            let line = wide(content);
+            momo_doc_builder_add_line(builder, line.as_ptr(), logical_end);
+        }
+        let doc = momo_doc_builder_build(builder);
+        assert_eq!(write_doc(doc, 7), b"AB CD\nE F\n");
+        assert_eq!(write_doc(doc, 8), b"ab cd\ne f\n");
+        assert_eq!(write_doc(doc, 9), "⠁⠃⠀⠉⠙\n⠑⠀⠋\n".as_bytes());
         momo_doc_free(doc as *mut _);
     }
 

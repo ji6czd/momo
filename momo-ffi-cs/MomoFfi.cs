@@ -25,6 +25,11 @@ public static class MomoFfi
     public const int FormatBrf  = 4;   // 書き出しのみ（NABCC 大文字。Braille ASCII の規格どおり）
     public const int FormatBrfLower = 5; // 書き出しのみ（NABCC 小文字。点字ディスプレイで直接読む用）
     public const int FormatBrfUnicode = 6; // 書き出しのみ（Unicode 点字 UTF-8。NABCC を使わない）
+    // .brl: ページの書式を持たない点字テキスト（1段落1行。見出し・折返し・改ページ・FF なし）。
+    // 7〜9 は .brf の 4〜6 と同じ並び。
+    public const int FormatBrl = 7;        // 書き出しのみ（NABCC 大文字）
+    public const int FormatBrlLower = 8;   // 書き出しのみ（NABCC 小文字）
+    public const int FormatBrlUnicode = 9; // 書き出しのみ（Unicode 点字 UTF-8）
 
     // 読み込み時の別名（可読性のため）。
     public const int ReadMbr = FormatMbr;

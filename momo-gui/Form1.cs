@@ -8,6 +8,8 @@ public partial class MainForm : Form
     /// Braille ASCII の規格は大文字のみだが、大文字のまま点字ディスプレイで読むと全セルに
     /// dot7 が付くため、その用途では小文字を選ぶ。Unicode は NABCC を使わず点字セルを
     /// UTF-8 のまま書く。
+    /// .brl（ページの書式を持たない点字テキスト。1段落1行で、見出し・折返し・改ページなし）も
+    /// 同じ3件を持つ。
     /// </remarks>
     private sealed record OutputFormatItem(string DisplayName, string Extension, string Filter, int FfiCode);
 
@@ -23,6 +25,12 @@ public partial class MainForm : Form
             "点字テキストファイル (*.brf)|*.brf", MomoFfi.FormatBrfLower),
         new("点字テキストファイル Unicode点字 (.brf)", ".brf",
             "点字テキストファイル (*.brf)|*.brf", MomoFfi.FormatBrfUnicode),
+        new("書式なし点字テキスト 大文字NABCC (.brl)", ".brl",
+            "書式なし点字テキスト (*.brl)|*.brl", MomoFfi.FormatBrl),
+        new("書式なし点字テキスト 小文字NABCC (.brl)", ".brl",
+            "書式なし点字テキスト (*.brl)|*.brl", MomoFfi.FormatBrlLower),
+        new("書式なし点字テキスト Unicode点字 (.brl)", ".brl",
+            "書式なし点字テキスト (*.brl)|*.brl", MomoFfi.FormatBrlUnicode),
     ];
 
     private OutputFormatItem SelectedOutputFormat => OutputFormats[cmbOutputFormat.SelectedIndex];

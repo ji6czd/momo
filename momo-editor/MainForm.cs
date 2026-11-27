@@ -541,6 +541,14 @@ public partial class MainForm : Form
 
             if (FormatForPath(path) is int fmt)
             {
+                // .brf / .brl / .bse は書き出し専用（読み込む処理がまだない）。
+                if (!IsReadableFormat(fmt))
+                {
+                    MessageBox.Show(
+                        $"{Path.GetExtension(path)} は書き出し専用の形式のため、開けません。",
+                        "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
                 // 点字ファイル（MBR / BES / BET）は Rust の reader で正本ドキュメントへ復元する。
                 var doc = MomoFfi.ReadDocument(File.ReadAllBytes(path), fmt);
                 if (doc == null)
@@ -592,8 +600,9 @@ public partial class MainForm : Form
         SaveToFile(_filePath, _fileFormat ?? FormatForPath(_filePath));
     }
 
-    // 「名前を付けて保存」のファイルの種類。.brf は NABCC（大文字）と Unicode 点字の2件があり
-    // （拡張子は同じ）、どちらで書くかはダイアログで選んだ種類で決める。
+    // 「名前を付けて保存」のファイルの種類。.brf と .brl（ページの書式を持たない点字テキスト）は
+    // それぞれ NABCC（大文字）と Unicode 点字の2件があり（拡張子は同じ）、どちらで書くかは
+    // ダイアログで選んだ種類で決める。
     private sealed record SaveFormat(string Filter, string Extension, int FfiCode);
 
     private static readonly SaveFormat[] SaveFormats =
@@ -601,6 +610,8 @@ public partial class MainForm : Form
         new("Momo点字ファイル (*.mbr)|*.mbr", ".mbr", MomoFfi.FormatMbr),
         new("点字ファイル NABCC (*.brf)|*.brf", ".brf", MomoFfi.FormatBrf),
         new("点字ファイル Unicode点字 (*.brf)|*.brf", ".brf", MomoFfi.FormatBrfUnicode),
+        new("書式なし点字ファイル NABCC (*.brl)|*.brl", ".brl", MomoFfi.FormatBrl),
+        new("書式なし点字ファイル Unicode点字 (*.brl)|*.brl", ".brl", MomoFfi.FormatBrlUnicode),
         new("BASEファイル (*.bse)|*.bse", ".bse", MomoFfi.FormatBase),
     ];
 
@@ -641,7 +652,7 @@ public partial class MainForm : Form
             SyncEditorToDocument();
             if (format is int fmt)
             {
-                // 点字形式（MBR/BES/BASE/BRF）は Rust の writer でバイト列を生成する。
+                // 点字形式（MBR/BES/BASE/BRF/BRL）は Rust の writer でバイト列を生成する。
                 var bytes = MomoFfi.WriteDocument(_document, fmt);
                 if (bytes == null)
                 {
@@ -673,7 +684,7 @@ public partial class MainForm : Form
     // ---- ドキュメントモデルとエディタの同期 ----
 
     // 拡張子に対応する点字形式コード（読み書き共通）。点字形式でなければ null。
-    // .brf は拡張子だけなら NABCC（大文字）。Unicode 点字は「名前を付けて保存」の種類で選ぶ。
+    // .brf / .brl は拡張子だけなら NABCC（大文字）。Unicode 点字は「名前を付けて保存」の種類で選ぶ。
     private static int? FormatForPath(string path) =>
         Path.GetExtension(path).ToLowerInvariant() switch
         {
@@ -682,8 +693,13 @@ public partial class MainForm : Form
             ".bet" => MomoFfi.FormatBet,
             ".bse" => MomoFfi.FormatBase,
             ".brf" => MomoFfi.FormatBrf,
+            ".brl" => MomoFfi.FormatBrl,
             _ => null,
         };
+
+    // 開ける（読み込める）点字形式か。.brf / .brl / .bse は書き出し専用。
+    private static bool IsReadableFormat(int format) =>
+        format is MomoFfi.FormatMbr or MomoFfi.FormatBes or MomoFfi.FormatBet;
 
     private void SyncEditorToDocument()
     {

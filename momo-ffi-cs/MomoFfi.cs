@@ -46,6 +46,10 @@ public static class MomoFfi
     public const int PolicySpace = 0;
     public const int PolicyPassThrough = 1;
 
+    // BERT モデルの既定のディレクトリ名。.mbm を置くディレクトリの下に置く
+    // （Rust 側 momors_bert::DEFAULT_DIR_NAME、CLI の --bert と一致させる）。
+    public const string BertDirName = "momo-bert";
+
     // ---- 予測器（漢字かな交じり文 → かな） ----
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -55,6 +59,13 @@ public static class MomoFfi
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void momo_predictor_free(nint handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_bert_available_w([MarshalAs(UnmanagedType.LPWStr)] string dir);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern int momo_predictor_set_bert_w(
+        nint handle, [MarshalAs(UnmanagedType.LPWStr)] string dir);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern int momo_custom_dict_validate_w(
@@ -373,6 +384,21 @@ public static class MomoFfi
     {
         internal nint Ptr;
         internal PredictorHandle(nint ptr) => Ptr = ptr;
+
+        /// <summary>
+        /// BERT 読みモードを差し込む。漢字・漢数字の読みを（境界も学習したモデルなら
+        /// マスあけも）<paramref name="bertDir"/> の BERT で推論するようになる。
+        /// </summary>
+        /// <returns>
+        /// 差し込めたら true。DLL が BERT なしでビルドされている・モデルを読めない・
+        /// 古い DLL で関数が無いときは false（予測器はそのまま BERT なしで使える）。
+        /// </returns>
+        public bool SetBert(string bertDir)
+        {
+            if (Ptr == nint.Zero) return false;
+            try { return momo_predictor_set_bert_w(Ptr, bertDir) == 0; }
+            catch (EntryPointNotFoundException) { return false; }
+        }
 
         public void Dispose()
         {
@@ -813,6 +839,25 @@ public static class MomoFfi
         }
         catch (DllNotFoundException) { _dllAvailable = false; return null; }
         catch (EntryPointNotFoundException) { _dllAvailable = false; return null; }
+    }
+
+    /// <summary>
+    /// BERT 読みモードが使えるか。DLL が BERT 付きでビルドされていて、
+    /// <paramref name="bertDir"/> に BERT モデルの一式が揃っていれば true。
+    /// ファイルがあるかを見るだけで読み込みはしないので、選択肢を出すかどうかの判断に使える。
+    /// </summary>
+    public static bool IsBertAvailable(string bertDir)
+    {
+        if (_dllAvailable == false) return false;
+        try
+        {
+            var available = momo_bert_available_w(bertDir) == 1;
+            _dllAvailable = true;
+            return available;
+        }
+        catch (DllNotFoundException) { _dllAvailable = false; return false; }
+        // 古い DLL（BERT の関数が無い）は DLL ごと使えないわけではないので、BERT だけ不可とする。
+        catch (EntryPointNotFoundException) { return false; }
     }
 
     /// <summary>

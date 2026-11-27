@@ -200,7 +200,10 @@ tasks:
     deps: [sdk:ffi]
     cmds:
       - rm -rf "{{.OUT}}"
-      - mkdir -p "{{.OUT}}/include" "{{.OUT}}/lib" "{{.OUT}}/bin" "{{.OUT}}/data" "{{.OUT}}/examples"
+      - mkdir -p "{{.OUT}}/include" "{{.OUT}}/lib" "{{.OUT}}/bin" "{{.OUT}}/data" "{{.OUT}}/examples" "{{.OUT}}/licenses"
+      # momors_ffi に静的に組み込んだ ONNX Runtime（feature bert）のライセンス文言
+      - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-LICENSE.txt"           "{{.OUT}}/licenses/"
+      - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-ThirdPartyNotices.txt" "{{.OUT}}/licenses/"
       - cp "{{.HDR}}/momo.h"                                "{{.OUT}}/include/"
       - cp "{{.HDR}}/momo_raii.hpp"                         "{{.OUT}}/include/"
       - cmd: cp "{{.RELEASE}}/momors_ffi.dll"               "{{.OUT}}/bin/"
@@ -242,7 +245,10 @@ tasks:
     deps: [sdk:ffi]
     cmds:
       - rm -rf "{{.OUT}}"
-      - mkdir -p "{{.OUT}}/bin" "{{.OUT}}/data"
+      - mkdir -p "{{.OUT}}/bin" "{{.OUT}}/data" "{{.OUT}}/licenses"
+      # momors_ffi に静的に組み込んだ ONNX Runtime（feature bert）のライセンス文言
+      - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-LICENSE.txt"           "{{.OUT}}/licenses/"
+      - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-ThirdPartyNotices.txt" "{{.OUT}}/licenses/"
       - dotnet pack "{{.ROOT_DIR}}/momo-ffi-cs" -c Release -p:Version={{.VERSION}} --nologo -o "{{.OUT}}"
       - cmd: cp "{{.RELEASE}}/momors_ffi.dll"               "{{.OUT}}/bin/"
         platforms: [windows]
@@ -467,7 +473,7 @@ tasks:
       # エディタの点字セル表示用フォント（システムインストール）
       - cp "{{.ROOT_DIR}}/momo-installer/fonts/sixbraille.ttc" "{{.STAGE}}/fonts/"
       - cp "{{.ROOT_DIR}}/momo-installer/fonts/LICENSE-SixBraille.txt" "{{.STAGE}}/licenses/SixBraille-LICENSE.txt"
-      # momo.exe に静的に組み込んだ ONNX Runtime（feature bert）のライセンス文言
+      # momo.exe と momors_ffi.dll に静的に組み込んだ ONNX Runtime（feature bert）のライセンス文言
       - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-LICENSE.txt" "{{.STAGE}}/licenses/"
       - cp "{{.ROOT_DIR}}/momors/crates/momors-bert/licenses/onnxruntime-ThirdPartyNotices.txt" "{{.STAGE}}/licenses/"
 

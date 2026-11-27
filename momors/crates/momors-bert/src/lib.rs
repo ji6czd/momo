@@ -174,6 +174,32 @@ fn read_json(path: &Path) -> Result<serde_json::Value, BertError> {
     })
 }
 
+/// [`BertReader::load`] が読む ONNX ファイルの名前。
+fn model_file_name(options: &BertOptions) -> &'static str {
+    if options.int8 {
+        "reading_bert.int8.onnx"
+    } else {
+        "reading_bert.onnx"
+    }
+}
+
+/// `dir` に、[`BertReader::load`] が `options` で読むファイルが揃っているか。
+///
+/// ファイルがあるかを見るだけで、中身は読まない（ONNX Runtime も起こさない）。
+/// BERT 読みモードを選択肢として出すかどうかを UI が決めるのに使う。揃っていても
+/// 壊れていれば [`BertReader::load`] は失敗する。
+pub fn has_model(dir: impl AsRef<Path>, options: &BertOptions) -> bool {
+    let dir = dir.as_ref();
+    [
+        "labels.json",
+        "cands.json",
+        "vocab.txt",
+        model_file_name(options),
+    ]
+    .iter()
+    .all(|name| dir.join(name).is_file())
+}
+
 impl BertReader {
     /// `export_onnx` の出力ディレクトリから読み込む。
     pub fn load(dir: impl AsRef<Path>, options: &BertOptions) -> Result<Self, BertError> {
@@ -228,11 +254,7 @@ impl BertReader {
 
         let vocab = CharVocab::parse(&read_text(&dir.join("vocab.txt"))?)?;
 
-        let model = dir.join(if options.int8 {
-            "reading_bert.int8.onnx"
-        } else {
-            "reading_bert.onnx"
-        });
+        let model = dir.join(model_file_name(options));
         let mut builder = Session::builder(environment()?)?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(ort::Error::from)?;
@@ -409,6 +431,34 @@ impl SlotReader for BertReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn has_model_checks_files_for_the_chosen_precision() {
+        let dir =
+            std::env::temp_dir().join(format!("momors_bert_has_model_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let int8 = BertOptions::default();
+        let f32 = BertOptions {
+            int8: false,
+            ..BertOptions::default()
+        };
+        assert!(!has_model(&dir, &int8), "空のディレクトリ");
+        for name in [
+            "labels.json",
+            "cands.json",
+            "vocab.txt",
+            "reading_bert.int8.onnx",
+        ] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        assert!(has_model(&dir, &int8), "int8 版の一式が揃っている");
+        assert!(!has_model(&dir, &f32), "float32 版の ONNX は無い");
+        std::fs::remove_file(dir.join("vocab.txt")).unwrap();
+        assert!(!has_model(&dir, &int8), "vocab.txt が欠けている");
+        assert!(!has_model(dir.join("no_such_dir"), &int8));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn softmax_over_candidates_sorted() {

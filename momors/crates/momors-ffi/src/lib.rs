@@ -15,6 +15,9 @@
 //!                                    const uint16_t* custom_dict_path_utf16); // NULL可
 //! void          momo_predictor_free(MomoPredictor);
 //! int32_t momo_custom_dict_validate_w(const uint16_t* path, uint16_t* err_buf, int32_t err_len);
+//! // BERT 読みモード（feature `bert`。既定の置き場所は .mbm のディレクトリの下の momo-bert）
+//! int32_t momo_bert_available_w(const uint16_t* dir);                    // 1=使える, 0=使えない
+//! int32_t momo_predictor_set_bert_w(MomoPredictor, const uint16_t* dir); // 0=成功, -1=NULL, -2=BERT なし, -3=読み込み失敗
 //! ```
 //!
 //! ## 変換テーブル（momors-braille::Table。日本語・英語 両スキーマを同型で保持）
@@ -365,6 +368,61 @@ pub extern "C" fn momo_custom_dict_validate_w(
 pub extern "C" fn momo_predictor_free(handle: *mut PredictorHandle) {
     if !handle.is_null() {
         unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+
+/// BERT 読みモードが使えるか。この DLL が feature `bert` 付きでビルドされていて、
+/// `dir` に BERT モデル（int8 版の一式）が揃っていれば 1、そうでなければ 0
+/// （`dir` が NULL のときも 0）。ファイルがあるかを見るだけで、読み込みはしない。
+///
+/// モデルの既定の置き場所は、.mbm を置くディレクトリの下の `momo-bert`（CLI の `--bert` と同じ）。
+#[unsafe(no_mangle)]
+pub extern "C" fn momo_bert_available_w(dir: *const u16) -> c_int {
+    let Some(dir) = (unsafe { lpwstr_to_string(dir) }) else {
+        return 0;
+    };
+    #[cfg(feature = "bert")]
+    {
+        momors_bert::has_model(&dir, &momors_bert::BertOptions::default()) as c_int
+    }
+    #[cfg(not(feature = "bert"))]
+    {
+        let _ = dir;
+        0
+    }
+}
+
+/// 予測器に BERT 読みモードを差し込む。漢字・漢数字の読みを（境界も学習したモデルなら
+/// マスあけも）`dir` の BERT で推論するようになる。int8 版・スレッド数は ONNX Runtime の既定。
+///
+/// 戻り値: 0=成功、-1=`handle` か `dir` が NULL、-2=この DLL は BERT なしでビルドされている、
+/// -3=モデルの読み込みに失敗（失敗しても予測器はそのまま BERT なしで使える）。
+#[unsafe(no_mangle)]
+pub extern "C" fn momo_predictor_set_bert_w(
+    handle: *mut PredictorHandle,
+    dir: *const u16,
+) -> c_int {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return -1;
+    };
+    let Some(dir) = (unsafe { lpwstr_to_string(dir) }) else {
+        return -1;
+    };
+    #[cfg(feature = "bert")]
+    {
+        match momors_bert::BertReader::load(&dir, &momors_bert::BertOptions::default()) {
+            Ok(reader) => {
+                // 読みモデルに無いラベルは使われないだけなので、成否には含めない。
+                handle.inner.set_slot_reader(Box::new(reader));
+                0
+            }
+            Err(_) => -3,
+        }
+    }
+    #[cfg(not(feature = "bert"))]
+    {
+        let _ = (handle, dir);
+        -2
     }
 }
 
@@ -2157,6 +2215,58 @@ mod tests {
         assert!(!handle.is_null(), "妥当な辞書なら予測器が作れること");
         momo_predictor_free(handle);
         let _ = std::fs::remove_file(&dict);
+    }
+
+    #[test]
+    fn bert_unavailable_without_model_files() {
+        assert_eq!(
+            momo_bert_available_w(std::ptr::null()),
+            0,
+            "NULL は使えない"
+        );
+        let missing = std::env::temp_dir().join("momo_ffi_test_no_such_bert");
+        let missing = wide(&missing.display().to_string());
+        assert_eq!(momo_bert_available_w(missing.as_ptr()), 0);
+
+        assert_eq!(
+            momo_predictor_set_bert_w(std::ptr::null_mut(), missing.as_ptr()),
+            -1
+        );
+        let model = wide(&fixture_model_path().display().to_string());
+        let handle = momo_predictor_new_w(model.as_ptr(), std::ptr::null());
+        assert!(!handle.is_null());
+        assert_eq!(momo_predictor_set_bert_w(handle, std::ptr::null()), -1);
+        // BERT 付きなら読み込みに失敗（-3）、BERT なしのビルドなら -2。
+        let expected = if cfg!(feature = "bert") { -3 } else { -2 };
+        assert_eq!(
+            momo_predictor_set_bert_w(handle, missing.as_ptr()),
+            expected
+        );
+        momo_predictor_free(handle);
+    }
+
+    /// `MOMO_DATASET_DIR` の下に BERT モデル（momo-bert/）があれば、実際に差し込んで予測する。
+    #[test]
+    fn bert_set_and_predict_with_dataset_model() {
+        let Some(dir) = std::env::var_os("MOMO_DATASET_DIR")
+            .map(|d| std::path::PathBuf::from(d).join("momo-bert"))
+            .filter(|d| d.is_dir())
+        else {
+            eprintln!("MOMO_DATASET_DIR/momo-bert が無いので飛ばす");
+            return;
+        };
+        let dir_w = wide(&dir.display().to_string());
+        let expected = if cfg!(feature = "bert") { 1 } else { 0 };
+        assert_eq!(momo_bert_available_w(dir_w.as_ptr()), expected);
+        if !cfg!(feature = "bert") {
+            return;
+        }
+        let model = wide(&fixture_model_path().display().to_string());
+        let handle = momo_predictor_new_w(model.as_ptr(), std::ptr::null());
+        assert_eq!(momo_predictor_set_bert_w(handle, dir_w.as_ptr()), 0);
+        let predictor = unsafe { &(*handle).inner };
+        assert!(predictor.predict("今日は良い天気です。").is_ok());
+        momo_predictor_free(handle);
     }
 
     #[test]

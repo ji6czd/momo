@@ -26,6 +26,7 @@ partial class MainForm
         rdoSmall = new RadioButton();
         rdoMedium = new RadioButton();
         rdoLarge = new RadioButton();
+        rdoBert = new RadioButton();
         grpFormat = new GroupBox();
         lblLineWidth = new Label();
         numLineWidth = new NumericUpDown();
@@ -94,11 +95,12 @@ partial class MainForm
 
         // grpModel
         grpModel.Location = new Point(12, 136);
-        grpModel.Size = new Size(200, 54);
+        grpModel.Size = new Size(200, 88);
         grpModel.Text = "モデル";
         grpModel.Controls.Add(rdoSmall);
         grpModel.Controls.Add(rdoMedium);
         grpModel.Controls.Add(rdoLarge);
+        grpModel.Controls.Add(rdoBert);
 
         // rdoSmall
         rdoSmall.AutoSize = true;
@@ -115,6 +117,12 @@ partial class MainForm
         rdoLarge.Checked = true;
         rdoLarge.Location = new Point(148, 22);
         rdoLarge.Text = "Large";
+
+        // rdoBert
+        // Large に BERT 読みモードを足したもの。BERT が使えないときは MainForm で無効にする。
+        rdoBert.AutoSize = true;
+        rdoBert.Location = new Point(10, 54);
+        rdoBert.Text = "BERT";
 
         // grpFormat
         grpFormat.Location = new Point(220, 136);
@@ -220,6 +228,7 @@ partial class MainForm
     private RadioButton rdoSmall;
     private RadioButton rdoMedium;
     private RadioButton rdoLarge;
+    private RadioButton rdoBert;
     private GroupBox grpFormat;
     private Label lblLineWidth;
     private NumericUpDown numLineWidth;

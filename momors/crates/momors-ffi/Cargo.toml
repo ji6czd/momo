@@ -6,9 +6,18 @@ edition.workspace = true
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = ["bert"]
+# BERT 読みモード（momo_predictor_set_bert_w）。ONNX Runtime を DLL に静的に組み込むので、
+# 配布物には momors-bert/licenses/ のライセンス文言を添える。
+# 外した DLL は `cargo build -p momors-ffi --no-default-features` で作る
+# （そのときも関数はあり、BERT が使えないことを返す）。
+bert = ["dep:momors-bert"]
+
 [dependencies]
 momors-core    = { workspace = true }
 momors-braille = { workspace = true }
+momors-bert    = { workspace = true, optional = true }
 
 [build-dependencies]
 cbindgen = "0.29"

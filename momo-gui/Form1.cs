@@ -38,6 +38,8 @@ public partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
+        // BERT は DLL が BERT 付きで、モデル（momo-bert/）が置いてあるときだけ選べる。
+        rdoBert.Enabled = FindBertDir() is not null;
     }
 
     private void btnBrowseInput_Click(object sender, EventArgs e)
@@ -86,6 +88,7 @@ public partial class MainForm : Form
             return;
         }
 
+        // BERT は Large の読みモデルに BERT 読みモードを足して使う（CLI の --bert と同じ）。
         var modelFile = rdoSmall.Checked ? "basic_data_4.mbm"
             : rdoMedium.Checked ? "basic_data_5.mbm"
             : "basic_data_7.mbm";
@@ -96,6 +99,19 @@ public partial class MainForm : Form
                 $"{modelFile} が見つかりません。\nmomors_ffi.dll と同じフォルダか MOMO_DATASET_DIR に置いてください。",
                 "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
+        }
+        string? bertDir = null;
+        if (rdoBert.Checked)
+        {
+            bertDir = FindBertDir();
+            if (bertDir is null)
+            {
+                MessageBox.Show(
+                    $"BERT モデル（{MomoFfi.BertDirName} フォルダ）が見つかりません。\n" +
+                    ".mbm と同じフォルダの下に置いてください。",
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
         }
 
         btnOk.Enabled = false;
@@ -114,7 +130,7 @@ public partial class MainForm : Form
             bool englishGrade2 = chkEnglishGrade2.Checked;
 
             var error = await Task.Run(
-                () => RunConversion(modelPath, englishGrade2, input, output, format, config, title));
+                () => RunConversion(modelPath, bertDir, englishGrade2, input, output, format, config, title));
 
             if (error is null)
                 MessageBox.Show("変換が完了しました。", "完了",
@@ -130,35 +146,38 @@ public partial class MainForm : Form
         }
     }
 
-    private static string? FindDataFile(string name)
+    /// <summary>モデルを探す場所。MOMO_DATASET_DIR 環境変数、次に実行ファイルと同じフォルダ。</summary>
+    private static IEnumerable<string> DataDirs()
     {
-        var dirs = new[]
-        {
-            Environment.GetEnvironmentVariable("MOMO_DATASET_DIR")
-                ?? Environment.GetEnvironmentVariable("MOMO_DATASET_DIR", EnvironmentVariableTarget.Machine)
-                ?? Environment.GetEnvironmentVariable("MOMO_DATASET_DIR", EnvironmentVariableTarget.User),
-            AppContext.BaseDirectory,
-        };
-        foreach (var dir in dirs)
-        {
-            if (dir is null) continue;
-            var path = Path.Combine(dir, name);
-            if (File.Exists(path)) return path;
-        }
-        return null;
+        var env = Environment.GetEnvironmentVariable("MOMO_DATASET_DIR")
+            ?? Environment.GetEnvironmentVariable("MOMO_DATASET_DIR", EnvironmentVariableTarget.Machine)
+            ?? Environment.GetEnvironmentVariable("MOMO_DATASET_DIR", EnvironmentVariableTarget.User);
+        if (env is not null) yield return env;
+        yield return AppContext.BaseDirectory;
     }
+
+    private static string? FindDataFile(string name) =>
+        DataDirs().Select(dir => Path.Combine(dir, name)).FirstOrDefault(File.Exists);
+
+    /// <summary>BERT が使えるなら、そのモデルのフォルダ（.mbm を探す場所の下の momo-bert）。</summary>
+    private static string? FindBertDir() =>
+        DataDirs().Select(dir => Path.Combine(dir, MomoFfi.BertDirName))
+            .FirstOrDefault(MomoFfi.IsBertAvailable);
 
     /// <summary>
     /// テキストファイルを 1 行ずつ点訳し、指定形式で書き出す。成功なら null、失敗ならメッセージ。
     /// 日本語は１級固定、英語は <paramref name="englishGrade2"/> で UEB の級を切り替える。
+    /// <paramref name="bertDir"/> を渡すと、読みに BERT 読みモードを使う。
     /// </summary>
     private static string? RunConversion(
-        string modelPath, bool englishGrade2, string inputFile, string outputFile,
+        string modelPath, string? bertDir, bool englishGrade2, string inputFile, string outputFile,
         int format, FormatterConfig config, string title)
     {
         using var predictor = MomoFfi.CreatePredictor(modelPath);
         if (predictor is null)
             return $"モデルの読み込みに失敗しました: {Path.GetFileName(modelPath)}";
+        if (bertDir is not null && !predictor.SetBert(bertDir))
+            return $"BERT モデルの読み込みに失敗しました: {bertDir}";
 
         using var translator = MomoFfi.CreateTranslator(
             MomoFfi.TableJapaneseGrade1,

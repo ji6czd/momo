@@ -539,6 +539,7 @@ name = "momors-ffi"
 version = "0.13.0"
 dependencies = [
  "cbindgen",
+ "momors-bert",
  "momors-braille",
  "momors-core",
 ]
